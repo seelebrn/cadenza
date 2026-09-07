@@ -114,6 +114,7 @@ function CodebookPanel(): JSX.Element {
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
   const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
   const fileSpanUnderCategory = useProjectStore((s) => s.fileSpanUnderCategory)
+  const withBatch = useProjectStore((s) => s.withBatch)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const clearUi = useWorkspaceUiStore((s) => s.clear)
   const suggestedCodeName = useWorkspaceUiStore((s) => s.suggestedCodeName)
@@ -165,18 +166,22 @@ function CodebookPanel(): JSX.Element {
     const name = newName.trim()
     if (!name) return
     if (newKind === 'cluster') {
-      const clusterId = createCategory(name, 'theme', nextColor(codes.length + clusters.length))
+      withBatch(() => {
+        const clusterId = createCategory(name, 'theme', nextColor(codes.length + clusters.length))
+        if (clusterId && activeSpan) {
+          fileSpanUnderCategory(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, clusterId)
+        }
+      })
       setNewName('')
-      if (clusterId && activeSpan) {
-        fileSpanUnderCategory(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, clusterId)
-      }
       return
     }
-    const codeId = addCode({ name, kind: newKind, color: nextColor(codes.length) })
+    withBatch(() => {
+      const codeId = addCode({ name, kind: newKind, color: nextColor(codes.length) })
+      if (codeId && activeSpan) {
+        applyCodeToSelection(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, codeId)
+      }
+    })
     setNewName('')
-    if (codeId && activeSpan) {
-      applyCodeToSelection(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, codeId)
-    }
   }
 
   function handleRootDrop(e: DragEvent): void {
@@ -306,6 +311,7 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
   const mergeCodes = useProjectStore((s) => s.mergeCodes)
   const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
+  const withBatch = useProjectStore((s) => s.withBatch)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)
 
@@ -333,12 +339,14 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
     if (e.dataTransfer.getData(DRAG_KIND_MIME) === 'cluster') return
     const draggedId = e.dataTransfer.getData('text/plain')
     if (!draggedId || draggedId === node.id) return
-    reparentCode(draggedId, node.id)
-    // Nesting a code under another code is a different tree slot than
-    // "inside a cluster" — leave the cluster it came from, if any, so it
-    // now shows only in the position just dropped onto.
-    const draggedSourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
-    if (draggedSourceClusterId) removeCodeFromCategory(draggedSourceClusterId, draggedId)
+    withBatch(() => {
+      reparentCode(draggedId, node.id)
+      // Nesting a code under another code is a different tree slot than
+      // "inside a cluster" — leave the cluster it came from, if any, so it
+      // now shows only in the position just dropped onto.
+      const draggedSourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
+      if (draggedSourceClusterId) removeCodeFromCategory(draggedSourceClusterId, draggedId)
+    })
   }
 
   const otherCodes = allCodes.filter((c) => c.id !== node.id)
@@ -514,6 +522,7 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds, searchQu
   const addCodeToCategory = useProjectStore((s) => s.addCodeToCategory)
   const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
+  const withBatch = useProjectStore((s) => s.withBatch)
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(node.name)
@@ -562,11 +571,13 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds, searchQu
       if (draggedId !== node.id) reparentCategory(draggedId, node.id)
       return
     }
-    addCodeToCategory(node.id, draggedId)
-    const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
-    if (sourceClusterId && sourceClusterId !== node.id) {
-      removeCodeFromCategory(sourceClusterId, draggedId)
-    }
+    withBatch(() => {
+      addCodeToCategory(node.id, draggedId)
+      const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
+      if (sourceClusterId && sourceClusterId !== node.id) {
+        removeCodeFromCategory(sourceClusterId, draggedId)
+      }
+    })
   }
 
   return (

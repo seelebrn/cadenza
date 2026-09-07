@@ -75,6 +75,12 @@ interface ProjectState {
   isImporting: boolean
   recent: RecentProjectEntry[]
   error: string | null
+  /** Undo/redo history — snapshots of `data` (not assets: see importDocument).
+   * Structural sharing between snapshots (every op spreads `{ ...data,
+   * changedField }` rather than deep-cloning) keeps this cheap even with
+   * many entries. */
+  past: ProjectData[]
+  future: ProjectData[]
 
   loadRecent: () => Promise<void>
   newProject: (name: string) => Promise<void>
@@ -83,8 +89,18 @@ interface ProjectState {
   save: () => Promise<void>
   saveAs: () => Promise<void>
   closeProject: () => void
-  /** Apply a change to the current project and (if already saved once) autosave it. */
+  /** Apply a change to the current project and (if already saved once) autosave it.
+   * Records one undo step per call, UNLESS called from inside withBatch. */
   updateProject: (updater: (data: ProjectData) => ProjectData) => void
+  /** Runs `fn` (which should call other store actions, each of which calls
+   * updateProject internally) as a single undo step instead of one per
+   * call — e.g. a board drag that moves several linked items and re-
+   * evaluates cluster membership in one gesture should undo as that one
+   * gesture, not item-by-item. Nests safely (only the outermost call
+   * records history). */
+  withBatch: (fn: () => void) => void
+  undo: () => void
+  redo: () => void
   importDocument: () => Promise<void>
 
   // Codebook / coding
@@ -205,6 +221,14 @@ function scheduleAutosave(get: () => ProjectState): void {
   }, AUTOSAVE_DELAY_MS)
 }
 
+const MAX_HISTORY = 50
+
+// Module-level (not store state) since withBatch needs to track "am I
+// already inside a batch" across nested calls without that bookkeeping
+// itself going through set()/triggering renders.
+let batchDepth = 0
+let batchBaselineData: ProjectData | null = null
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   data: null,
   assets: {},
@@ -214,6 +238,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isImporting: false,
   recent: [],
   error: null,
+  past: [],
+  future: [],
 
   loadRecent: async () => {
     const recent = await window.api.project.getRecent()
@@ -222,7 +248,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   newProject: async (name) => {
     const data = await window.api.project.create(name)
-    set({ data, assets: {}, filePath: null, isDirty: true, error: null })
+    set({ data, assets: {}, filePath: null, isDirty: true, error: null, past: [], future: [] })
     useWorkspaceUiStore.getState().resetForProjectSwitch()
   },
 
@@ -235,7 +261,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         assets: result.assets,
         filePath: result.filePath,
         isDirty: false,
-        error: null
+        error: null,
+        past: [],
+        future: []
       })
       useWorkspaceUiStore.getState().resetForProjectSwitch()
       await get().loadRecent()
@@ -252,7 +280,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         assets: result.assets,
         filePath: result.filePath,
         isDirty: false,
-        error: null
+        error: null,
+        past: [],
+        future: []
       })
       useWorkspaceUiStore.getState().resetForProjectSwitch()
       await get().loadRecent()
@@ -295,14 +325,59 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   closeProject: () => {
     if (autosaveTimer) clearTimeout(autosaveTimer)
-    set({ data: null, assets: {}, filePath: null, isDirty: false, error: null })
+    set({ data: null, assets: {}, filePath: null, isDirty: false, error: null, past: [], future: [] })
     useWorkspaceUiStore.getState().resetForProjectSwitch()
   },
 
   updateProject: (updater) => {
-    const { data } = get()
+    const { data, past } = get()
     if (!data) return
-    set({ data: updater(data), isDirty: true })
+    const nextData = updater(data)
+    if (nextData === data) return // no-op update (e.g. addItemToBoard on an already-placed ref) — not an undo step
+
+    if (batchDepth === 0) {
+      set({ data: nextData, past: [...past, data].slice(-MAX_HISTORY), future: [], isDirty: true })
+    } else {
+      // Inside a batch: apply the change immediately (so later calls in the
+      // same batch see it), but only remember the state from BEFORE the
+      // very first change in this batch — that's the one undo step the
+      // whole batch collapses into once it ends.
+      if (batchBaselineData === null) batchBaselineData = data
+      set({ data: nextData, isDirty: true })
+    }
+    scheduleAutosave(get)
+  },
+
+  withBatch: (fn) => {
+    const isOutermost = batchDepth === 0
+    batchDepth++
+    try {
+      fn()
+    } finally {
+      batchDepth--
+      if (isOutermost) {
+        if (batchBaselineData !== null) {
+          const { past } = get()
+          set({ past: [...past, batchBaselineData].slice(-MAX_HISTORY), future: [] })
+        }
+        batchBaselineData = null
+      }
+    }
+  },
+
+  undo: () => {
+    const { data, past, future } = get()
+    if (!data || past.length === 0) return
+    const previous = past[past.length - 1]
+    set({ data: previous, past: past.slice(0, -1), future: [data, ...future].slice(0, MAX_HISTORY), isDirty: true })
+    scheduleAutosave(get)
+  },
+
+  redo: () => {
+    const { data, past, future } = get()
+    if (!data || future.length === 0) return
+    const next = future[0]
+    set({ data: next, past: [...past, data].slice(-MAX_HISTORY), future: future.slice(1), isDirty: true })
     scheduleAutosave(get)
   },
 
@@ -312,14 +387,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const result = await window.api.document.importDialog()
       if (!result) return
       const { document, assetBytes } = result
-      set((state) => ({
-        data: state.data ? { ...state.data, documents: [...state.data.documents, document] } : state.data,
-        assets: document.assetRelPath
-          ? { ...state.assets, [document.assetRelPath]: assetBytes }
-          : state.assets,
-        isDirty: true
-      }))
-      scheduleAutosave(get)
+      // Asset bytes are kept outside the undo history (a document import's
+      // documents-array change is undoable via updateProject below; its
+      // original file bytes staying in `assets` after an undo is a small,
+      // accepted trade-off — cheaper and simpler than also tracking/
+      // reverting a second, much larger piece of state per edit).
+      if (document.assetRelPath) {
+        const relPath = document.assetRelPath
+        set((state) => ({ assets: { ...state.assets, [relPath]: assetBytes } }))
+      }
+      get().updateProject((data) => ({ ...data, documents: [...data.documents, document] }))
     } catch (e) {
       set({ error: `Could not import document: ${(e as Error).message}` })
     } finally {

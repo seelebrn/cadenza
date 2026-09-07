@@ -203,3 +203,39 @@ for here.
   deliberately not the same as a match reached only via a member code, which still filters
   its own sub-clusters normally, tested explicitly to keep the two cases from blurring
   together.
+
+### Undo/redo (2026-09-07)
+
+The last, biggest item from the QoL list: Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z (or Ctrl+Y)
+to redo, plus header buttons showing enabled/disabled state — up to 50 steps back, skipped
+while focus is inside a text field so native in-field undo still wins there. Almost every
+store action already funneled through one function, `updateProject`, so history-tracking
+lives entirely there rather than needing to touch each of the ~40 individual actions:
+`past`/`future` are stacks of whole `ProjectData` snapshots, cheap to keep many of despite
+sounding wasteful, since every op already builds its result via `{ ...data, changedField }`
+— structural sharing means an undo entry is mostly pointers to the same unchanged sub-trees,
+not a deep clone. Assets (imported files' raw bytes) deliberately sit outside the history —
+undoing a document import removes the document record but leaves its bytes in memory, a
+small accepted trade-off against tracking a second, much larger piece of state per edit.
+
+The harder problem was that a single user gesture — dragging a whole linked group of board
+items, moving a cluster together with its nested subtree and re-evaluating membership,
+nesting one cluster into another *and* resizing the destination to fit — routes through
+several separate store-action calls, which without help would each become their own undo
+step (hit undo once after a five-item drag and only one item would move back). Added
+`withBatch(fn)`: calls inside `fn` still apply immediately (so a later call in the same
+gesture sees an earlier one's result), but only the state from *before* the batch's first
+change gets pushed to history, once, when the outermost batch ends — nested batches collapse
+into that same one entry. Wrapped it around the board's drag-drop commit and every other
+handler that fires more than one store action per user gesture (a code or note crossing
+from one cluster into another, creating a cluster while filing the active quote under it).
+
+Verified: typecheck and build clean. Unit-tested the exact history/batching algorithm
+(copied verbatim from projectStore.ts into a minimal set/get harness standing in for
+Zustand, since the logic itself has nothing Zustand- or React-specific about it) covering:
+sequential calls each getting their own step, a batch of three calls collapsing to one,
+nested batches still collapsing to one, a no-op update not polluting history, redo
+restoring what undo took back, a fresh edit after an undo correctly invalidating the redo
+stack, and the history cap trimming old entries without erroring once exhausted. Boot-
+tested a separate packaged instance (window title "Cadenza", no errors), then killed it and
+confirmed no electron process was left running.

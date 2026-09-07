@@ -433,6 +433,7 @@ function NoteClusterRow({ node, depth, visibleNotes }: NoteClusterRowProps): JSX
   const addNoteToCategory = useProjectStore((s) => s.addNoteToCategory)
   const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
+  const withBatch = useProjectStore((s) => s.withBatch)
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(node.name)
@@ -462,11 +463,13 @@ function NoteClusterRow({ node, depth, visibleNotes }: NoteClusterRowProps): JSX
       return
     }
     if (kind !== 'note') return
-    addNoteToCategory(node.id, draggedId)
-    const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
-    if (sourceClusterId && sourceClusterId !== node.id) {
-      removeNoteFromCategory(sourceClusterId, draggedId)
-    }
+    withBatch(() => {
+      addNoteToCategory(node.id, draggedId)
+      const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
+      if (sourceClusterId && sourceClusterId !== node.id) {
+        removeNoteFromCategory(sourceClusterId, draggedId)
+      }
+    })
   }
 
   return (

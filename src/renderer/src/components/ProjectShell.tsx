@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import AnalysisView from './AnalysisView'
@@ -16,8 +17,40 @@ function ProjectShell(): JSX.Element | null {
   const save = useProjectStore((s) => s.save)
   const saveAs = useProjectStore((s) => s.saveAs)
   const closeProject = useProjectStore((s) => s.closeProject)
+  const canUndo = useProjectStore((s) => s.past.length > 0)
+  const canRedo = useProjectStore((s) => s.future.length > 0)
+  const undo = useProjectStore((s) => s.undo)
+  const redo = useProjectStore((s) => s.redo)
   const mainView = useWorkspaceUiStore((s) => s.mainView)
   const setMainView = useWorkspaceUiStore((s) => s.setMainView)
+
+  // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z (and Ctrl+Y, the common Windows
+  // alternate binding) to redo — skipped while focus is inside a text
+  // input/textarea/contentEditable, so the browser's own native undo for
+  // whatever the user is actively typing takes priority over the
+  // project-wide history.
+  useEffect(() => {
+    function isEditableTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false
+      const tag = target.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable
+    }
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (!(e.ctrlKey || e.metaKey) || isEditableTarget(e.target)) return
+      if (e.key.toLowerCase() === 'z' && e.shiftKey) {
+        e.preventDefault()
+        redo()
+      } else if (e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        undo()
+      } else if (e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [undo, redo])
 
   if (!data) return null
 
@@ -54,6 +87,22 @@ function ProjectShell(): JSX.Element | null {
             </button>
           </div>
           <div className="flex gap-2">
+            <button
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl/Cmd+Z)"
+            >
+              ↶ Undo
+            </button>
+            <button
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl/Cmd+Shift+Z)"
+            >
+              ↷ Redo
+            </button>
             <button
               className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
               onClick={() => void save()}

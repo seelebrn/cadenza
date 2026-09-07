@@ -113,6 +113,7 @@ function BoardView(): JSX.Element {
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
   const linkItemsAction = useProjectStore((s) => s.linkItems)
   const unlinkItemsAction = useProjectStore((s) => s.unlinkItems)
+  const withBatch = useProjectStore((s) => s.withBatch)
 
   const selectedBoardId = useWorkspaceUiStore((s) => s.selectedBoardId)
   const setSelectedBoardId = useWorkspaceUiStore((s) => s.setSelectedBoardId)
@@ -302,107 +303,113 @@ function BoardView(): JSX.Element {
       const dx = (e.clientX - state.startMouseX) / zoom
       const dy = (e.clientY - state.startMouseY) / zoom
 
-      if (state.kind === 'item') {
-        const grabbedStart = state.startPositions[state.id]
-        const rawX = grabbedStart.x + dx
-        const rawY = grabbedStart.y + dy
-        const candidates = items.filter((i) => !state.groupItemIds.includes(i.id))
-        const snap = findSnapTarget(candidates, state.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
-        const adjustX = snap ? snap.snappedX - rawX : 0
-        const adjustY = snap ? snap.snappedY - rawY : 0
+      // One drag gesture can call several store actions in a row (moving a
+      // whole linked group, re-evaluating cluster membership, nesting +
+      // resizing a destination cluster…) — batched so it undoes as the one
+      // gesture the user actually performed, not action-by-action.
+      withBatch(() => {
+        if (state.kind === 'item') {
+          const grabbedStart = state.startPositions[state.id]
+          const rawX = grabbedStart.x + dx
+          const rawY = grabbedStart.y + dy
+          const candidates = items.filter((i) => !state.groupItemIds.includes(i.id))
+          const snap = findSnapTarget(candidates, state.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+          const adjustX = snap ? snap.snappedX - rawX : 0
+          const adjustY = snap ? snap.snappedY - rawY : 0
 
-        const finalPositions = new Map<string, Position>()
-        for (const memberId of state.groupItemIds) {
-          const start = state.startPositions[memberId]
-          if (!start) continue
-          const finalX = start.x + dx + adjustX
-          const finalY = start.y + dy + adjustY
-          finalPositions.set(memberId, { x: finalX, y: finalY })
-          moveItem(memberId, finalX, finalY)
+          const finalPositions = new Map<string, Position>()
+          for (const memberId of state.groupItemIds) {
+            const start = state.startPositions[memberId]
+            if (!start) continue
+            const finalX = start.x + dx + adjustX
+            const finalY = start.y + dy + adjustY
+            finalPositions.set(memberId, { x: finalX, y: finalY })
+            moveItem(memberId, finalX, finalY)
 
-          // Category (cluster) membership follows containment: left the old
-          // cluster -> unassign; entered a new one -> assign.
-          const member = items.find((i) => i.id === memberId)
-          if (!member) continue
-          const oldPos = { x: member.x, y: member.y }
-          const oldCluster = findClusterAtPoint(clusters, oldPos.x + CARD_WIDTH / 2, oldPos.y + CARD_HEIGHT / 2)
-          const newCluster = findClusterAtPoint(clusters, finalX + CARD_WIDTH / 2, finalY + CARD_HEIGHT / 2)
-          if (oldCluster?.id !== newCluster?.id) {
-            if (oldCluster) unassignItemFromCluster(materializeCluster(oldCluster), member.refType, member.refId)
-            if (newCluster) assignItemToCluster(materializeCluster(newCluster), member.refType, member.refId)
+            // Category (cluster) membership follows containment: left the old
+            // cluster -> unassign; entered a new one -> assign.
+            const member = items.find((i) => i.id === memberId)
+            if (!member) continue
+            const oldPos = { x: member.x, y: member.y }
+            const oldCluster = findClusterAtPoint(clusters, oldPos.x + CARD_WIDTH / 2, oldPos.y + CARD_HEIGHT / 2)
+            const newCluster = findClusterAtPoint(clusters, finalX + CARD_WIDTH / 2, finalY + CARD_HEIGHT / 2)
+            if (oldCluster?.id !== newCluster?.id) {
+              if (oldCluster) unassignItemFromCluster(materializeCluster(oldCluster), member.refType, member.refId)
+              if (newCluster) assignItemToCluster(materializeCluster(newCluster), member.refType, member.refId)
+            }
           }
-        }
 
-        if (snap && selectedBoardId) {
-          linkItemsAction(selectedBoardId, state.id, snap.targetId)
-        }
+          if (snap && selectedBoardId) {
+            linkItemsAction(selectedBoardId, state.id, snap.targetId)
+          }
 
-        for (const link of links) {
-          const aInGroup = state.groupItemIds.includes(link.itemAId)
-          const bInGroup = state.groupItemIds.includes(link.itemBId)
-          if (aInGroup === bInGroup) continue
-          const insideId = aInGroup ? link.itemAId : link.itemBId
-          const outsideId = aInGroup ? link.itemBId : link.itemAId
-          const insidePos = finalPositions.get(insideId)
-          const outsideItem = items.find((i) => i.id === outsideId)
-          if (!insidePos || !outsideItem) continue
-          const dist = Math.hypot(
-            insidePos.x + CARD_WIDTH / 2 - (outsideItem.x + CARD_WIDTH / 2),
-            insidePos.y + CARD_HEIGHT / 2 - (outsideItem.y + CARD_HEIGHT / 2)
-          )
-          if (dist > UNLINK_DISTANCE) unlinkItemsAction(link.id)
-        }
-      } else if (state.kind === 'cluster-move') {
-        const finalX = state.startX + dx
-        const finalY = state.startY + dy
-        moveCluster(state.id, finalX, finalY)
-        for (const clusterId of state.groupClusterIds) {
-          if (clusterId === state.id) continue
-          const start = state.clusterStartPositions[clusterId]
-          if (start) moveCluster(clusterId, start.x + dx, start.y + dy)
-        }
-        for (const itemId of state.memberItemIds) {
-          const start = state.memberStartPositions[itemId]
-          if (start) moveItem(itemId, start.x + dx, start.y + dy)
-        }
+          for (const link of links) {
+            const aInGroup = state.groupItemIds.includes(link.itemAId)
+            const bInGroup = state.groupItemIds.includes(link.itemBId)
+            if (aInGroup === bInGroup) continue
+            const insideId = aInGroup ? link.itemAId : link.itemBId
+            const outsideId = aInGroup ? link.itemBId : link.itemAId
+            const insidePos = finalPositions.get(insideId)
+            const outsideItem = items.find((i) => i.id === outsideId)
+            if (!insidePos || !outsideItem) continue
+            const dist = Math.hypot(
+              insidePos.x + CARD_WIDTH / 2 - (outsideItem.x + CARD_WIDTH / 2),
+              insidePos.y + CARD_HEIGHT / 2 - (outsideItem.y + CARD_HEIGHT / 2)
+            )
+            if (dist > UNLINK_DISTANCE) unlinkItemsAction(link.id)
+          }
+        } else if (state.kind === 'cluster-move') {
+          const finalX = state.startX + dx
+          const finalY = state.startY + dy
+          moveCluster(state.id, finalX, finalY)
+          for (const clusterId of state.groupClusterIds) {
+            if (clusterId === state.id) continue
+            const start = state.clusterStartPositions[clusterId]
+            if (start) moveCluster(clusterId, start.x + dx, start.y + dy)
+          }
+          for (const itemId of state.memberItemIds) {
+            const start = state.memberStartPositions[itemId]
+            if (start) moveItem(itemId, start.x + dx, start.y + dy)
+          }
 
-        // Re-evaluate (or explicitly break, if shift) this cluster's parent.
-        const category = currentData.categories.find((c) => c.id === state.categoryId)
-        const currentParentId = category?.parentCategoryId ?? null
-        if (state.shiftKey) {
-          if (currentParentId !== null) reparentCategory(state.categoryId, null)
-        } else {
-          const excluded = new Set([
-            state.categoryId,
-            ...getDescendantCategoryIds(currentData.categories, state.categoryId)
-          ])
-          const candidateClusters = clusters.filter((c) => !excluded.has(c.categoryId))
-          const centerX = finalX + state.startWidth / 2
-          const centerY = finalY + state.startHeight / 2
-          const target = findClusterAtPoint(candidateClusters, centerX, centerY)
-          const newParentId = target?.categoryId ?? null
-          if (newParentId !== currentParentId) {
-            reparentCategory(state.categoryId, newParentId)
-            // Newly nested (not just re-confirming an existing parent) —
-            // grow the destination to actually fit the cluster just
-            // dropped into it, matching the live ghost preview shown
-            // during the drag.
-            if (target) {
-              const childRect = { x: finalX, y: finalY, width: state.startWidth, height: state.startHeight }
-              const size = computeAccommodatingSize(target, childRect, CLUSTER_NEST_PADDING)
-              if (size.width !== target.width || size.height !== target.height) {
-                resizeCluster(materializeCluster(target), size.width, size.height)
+          // Re-evaluate (or explicitly break, if shift) this cluster's parent.
+          const category = currentData.categories.find((c) => c.id === state.categoryId)
+          const currentParentId = category?.parentCategoryId ?? null
+          if (state.shiftKey) {
+            if (currentParentId !== null) reparentCategory(state.categoryId, null)
+          } else {
+            const excluded = new Set([
+              state.categoryId,
+              ...getDescendantCategoryIds(currentData.categories, state.categoryId)
+            ])
+            const candidateClusters = clusters.filter((c) => !excluded.has(c.categoryId))
+            const centerX = finalX + state.startWidth / 2
+            const centerY = finalY + state.startHeight / 2
+            const target = findClusterAtPoint(candidateClusters, centerX, centerY)
+            const newParentId = target?.categoryId ?? null
+            if (newParentId !== currentParentId) {
+              reparentCategory(state.categoryId, newParentId)
+              // Newly nested (not just re-confirming an existing parent) —
+              // grow the destination to actually fit the cluster just
+              // dropped into it, matching the live ghost preview shown
+              // during the drag.
+              if (target) {
+                const childRect = { x: finalX, y: finalY, width: state.startWidth, height: state.startHeight }
+                const size = computeAccommodatingSize(target, childRect, CLUSTER_NEST_PADDING)
+                if (size.width !== target.width || size.height !== target.height) {
+                  resizeCluster(materializeCluster(target), size.width, size.height)
+                }
               }
             }
           }
+        } else {
+          resizeCluster(
+            state.id,
+            Math.max(MIN_CLUSTER_WIDTH, state.startWidth + dx),
+            Math.max(MIN_CLUSTER_HEIGHT, state.startHeight + dy)
+          )
         }
-      } else {
-        resizeCluster(
-          state.id,
-          Math.max(MIN_CLUSTER_WIDTH, state.startWidth + dx),
-          Math.max(MIN_CLUSTER_HEIGHT, state.startHeight + dy)
-        )
-      }
+      })
       setDragState(null)
       setLiveDelta({ dx: 0, dy: 0 })
     }

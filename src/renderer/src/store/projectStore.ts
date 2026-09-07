@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ProjectData, RecentProjectEntry, SerializedAssets, TagKind } from '@shared/types'
+import type { NoteAttachment, ProjectData, RecentProjectEntry, SerializedAssets, TagKind } from '@shared/types'
 import {
   addCode as addCodeOp,
   applyCodeToSelection as applyCodeToSelectionOp,
@@ -11,6 +11,12 @@ import {
   setCodeColor as setCodeColorOp,
   setCodeDefinition as setCodeDefinitionOp
 } from '@shared/projectOps'
+import {
+  addNote as addNoteOp,
+  addNoteToSelection as addNoteToSelectionOp,
+  deleteNote as deleteNoteOp,
+  updateNote as updateNoteOp
+} from '@shared/notesOps'
 
 interface ProjectState {
   data: ProjectData | null
@@ -43,6 +49,20 @@ interface ProjectState {
   mergeCodes: (sourceId: string, targetId: string) => void
   applyCodeToSelection: (documentId: string, start: number, end: number, text: string, codeId: string) => void
   removeCoding: (codingId: string) => void
+
+  // Notes / memos
+  addNote: (attachedTo: NoteAttachment, question: string | null, answer: string, tags: string[]) => void
+  addNoteToSelection: (
+    documentId: string,
+    start: number,
+    end: number,
+    text: string,
+    question: string | null,
+    answer: string,
+    tags: string[]
+  ) => void
+  updateNote: (noteId: string, patch: { question?: string | null; answer?: string; tags?: string[] }) => void
+  deleteNote: (noteId: string) => void
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -198,12 +218,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().updateProject((data) => mergeCodesOp(data, sourceId, targetId)),
 
   // Deliberately does not clear the pending selection afterwards — the same
-  // passage stays selected so the user can stack several codes/items on it
-  // in a row without re-selecting. codingUiStore's own "Clear selection" is
-  // the explicit way to finish.
+  // passage stays selected so the user can stack several codes/items (and
+  // notes) on it in a row without re-selecting. workspaceUiStore's own
+  // "Clear selection" is the explicit way to finish.
   applyCodeToSelection: (documentId, start, end, text, codeId) => {
     get().updateProject((data) => applyCodeToSelectionOp(data, { documentId, start, end, text, codeId }))
   },
 
-  removeCoding: (codingId) => get().updateProject((data) => removeCodingOp(data, codingId))
+  removeCoding: (codingId) => get().updateProject((data) => removeCodingOp(data, codingId)),
+
+  addNote: (attachedTo, question, answer, tags) =>
+    get().updateProject((data) => addNoteOp(data, { attachedTo, question, answer, tags }).data),
+
+  // Same deliberate non-clearing of the pending selection as applyCodeToSelection.
+  addNoteToSelection: (documentId, start, end, text, question, answer, tags) =>
+    get().updateProject(
+      (data) => addNoteToSelectionOp(data, { documentId, start, end, text, question, answer, tags }).data
+    ),
+
+  updateNote: (noteId, patch) => get().updateProject((data) => updateNoteOp(data, noteId, patch)),
+
+  deleteNote: (noteId) => get().updateProject((data) => deleteNoteOp(data, noteId))
 }))

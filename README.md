@@ -30,7 +30,7 @@ npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
 - [x] Phase 1 — Project persistence (`.qdaproj` create/open/save, autosave)
 - [x] Phase 2 — Document import (.docx/.odt/.txt) + reader pane
 - [x] Phase 3 — Coding engine (select text → code, codebook hierarchy, merge)
-- [ ] Phase 4 — Notes/AQA system (question+answer memos, attach-anywhere, promote-to-code)
+- [x] Phase 4 — Notes/AQA system (question+answer memos, attach-anywhere, promote-to-code)
 - [ ] Phase 5 — Visual grouping board (drag-and-drop clustering of codes/notes)
 - [ ] Phase 6 — Retrieval/matrix view (frequency, code×document co-occurrence)
 - [ ] Phase 7 — Excel import (row=case) + exporters (annotated .docx, .xlsx reports, backup)

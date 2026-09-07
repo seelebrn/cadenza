@@ -1,30 +1,27 @@
 import { useMemo } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import { useCodingUiStore } from '../store/codingUiStore'
+import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { computeParagraphRuns, type CodingWithSegment } from '@shared/highlightRuns'
 import { getParagraphStartOffsets, joinParagraphs } from '@shared/text'
 import { resolveSelectionOffsets } from '../lib/selection'
-
-interface Props {
-  documentId: string | null
-}
 
 // A synthetic id standing in for "the current pending selection" wherever a
 // real Coding/Segment id is expected, so it can ride through the same
 // run-splitting logic as real codings and get its own highlight treatment.
 const PENDING_MARKER = '__pending-selection__'
 
-function DocumentReader({ documentId }: Props): JSX.Element {
+function DocumentReader(): JSX.Element {
+  const documentId = useWorkspaceUiStore((s) => s.selectedDocumentId)
   const document = useProjectStore(
     (s) => s.data?.documents.find((d) => d.id === documentId) ?? null
   )
   const codings = useProjectStore((s) => s.data?.codings ?? [])
   const segments = useProjectStore((s) => s.data?.segments ?? [])
   const codes = useProjectStore((s) => s.data?.codes ?? [])
-  const pendingSelection = useCodingUiStore((s) => s.pendingSelection)
-  const setPendingSelection = useCodingUiStore((s) => s.setPendingSelection)
-  const setInspectedCodingIds = useCodingUiStore((s) => s.setInspectedCodingIds)
-  const clearPendingSelection = useCodingUiStore((s) => s.clear)
+  const pendingSelection = useWorkspaceUiStore((s) => s.pendingSelection)
+  const setPendingSelection = useWorkspaceUiStore((s) => s.setPendingSelection)
+  const setInspectedCodingIds = useWorkspaceUiStore((s) => s.setInspectedCodingIds)
+  const clearPendingSelection = useWorkspaceUiStore((s) => s.clear)
 
   const paragraphStartOffsets = useMemo(
     () => (document ? getParagraphStartOffsets(document.paragraphs) : []),

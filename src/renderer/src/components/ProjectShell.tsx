@@ -1,8 +1,7 @@
-import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import CodebookPanel from './CodebookPanel'
 import DocumentList from './DocumentList'
 import DocumentReader from './DocumentReader'
+import RightSidebar from './RightSidebar'
 
 function ProjectShell(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
@@ -13,8 +12,6 @@ function ProjectShell(): JSX.Element | null {
   const save = useProjectStore((s) => s.save)
   const saveAs = useProjectStore((s) => s.saveAs)
   const closeProject = useProjectStore((s) => s.closeProject)
-
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
 
   if (!data) return null
 
@@ -59,11 +56,11 @@ function ProjectShell(): JSX.Element | null {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        <DocumentList selectedId={selectedDocumentId} onSelect={setSelectedDocumentId} />
+        <DocumentList />
         <main className="flex-1 overflow-auto">
-          <DocumentReader documentId={selectedDocumentId} />
+          <DocumentReader />
         </main>
-        <CodebookPanel />
+        <RightSidebar />
       </div>
     </div>
   )

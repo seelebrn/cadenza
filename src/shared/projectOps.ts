@@ -145,44 +145,50 @@ export function mergeCodes(data: ProjectData, sourceId: string, targetId: string
   return { ...data, codes, codings, notes, categories, boardItems }
 }
 
-export interface ApplyCodeInput {
+export interface SegmentSpan {
   documentId: string
   start: number
   end: number
   text: string
+}
+
+/** Finds a Segment at the exact same [documentId, start, end] if one exists
+ * (so coding/memoing the same passage twice doesn't create a duplicate
+ * segment), otherwise creates one with the verbatim `text` snapshot. Shared
+ * by coding and notes so a passage can be coded *and* memoed on one
+ * underlying segment. */
+export function ensureSegment(
+  data: ProjectData,
+  span: SegmentSpan
+): { data: ProjectData; segmentId: string } {
+  const existing = data.segments.find(
+    (s) => s.documentId === span.documentId && s.start === span.start && s.end === span.end
+  )
+  if (existing) return { data, segmentId: existing.id }
+
+  const segment: Segment = {
+    id: nanoid(),
+    documentId: span.documentId,
+    start: span.start,
+    end: span.end,
+    text: span.text
+  }
+  return { data: { ...data, segments: [...data.segments, segment] }, segmentId: segment.id }
+}
+
+export interface ApplyCodeInput extends SegmentSpan {
   codeId: string
 }
 
-/** Applies a code to a text span: reuses an existing Segment at the exact
- * same [documentId, start, end] if one exists (so coding the same passage
- * with a second code doesn't create a duplicate segment), otherwise creates
- * one with the verbatim `text` snapshot. No-ops if already coded with this
- * code. */
+/** Applies a code to a text span. No-ops if already coded with this code on
+ * that exact segment. */
 export function applyCodeToSelection(data: ProjectData, input: ApplyCodeInput): ProjectData {
-  const existingSegment = data.segments.find(
-    (s) => s.documentId === input.documentId && s.start === input.start && s.end === input.end
-  )
+  const { data: withSegment, segmentId } = ensureSegment(data, input)
 
-  let segments = data.segments
-  let segmentId: string
-  if (existingSegment) {
-    segmentId = existingSegment.id
-  } else {
-    const segment: Segment = {
-      id: nanoid(),
-      documentId: input.documentId,
-      start: input.start,
-      end: input.end,
-      text: input.text
-    }
-    segments = [...segments, segment]
-    segmentId = segment.id
-  }
-
-  const alreadyCoded = data.codings.some(
+  const alreadyCoded = withSegment.codings.some(
     (c) => c.segmentId === segmentId && c.codeId === input.codeId
   )
-  if (alreadyCoded) return { ...data, segments }
+  if (alreadyCoded) return withSegment
 
   const coding: Coding = {
     id: nanoid(),
@@ -190,7 +196,7 @@ export function applyCodeToSelection(data: ProjectData, input: ApplyCodeInput): 
     codeId: input.codeId,
     createdAt: new Date().toISOString()
   }
-  return { ...data, segments, codings: [...data.codings, coding] }
+  return { ...withSegment, codings: [...withSegment.codings, coding] }
 }
 
 /** Removes a single coding (not the code itself), pruning the segment if

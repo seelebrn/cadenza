@@ -1,14 +1,12 @@
 import { useProjectStore } from '../store/projectStore'
+import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 
-interface Props {
-  selectedId: string | null
-  onSelect: (id: string) => void
-}
-
-function DocumentList({ selectedId, onSelect }: Props): JSX.Element {
+function DocumentList(): JSX.Element {
   const documents = useProjectStore((s) => s.data?.documents ?? [])
   const isImporting = useProjectStore((s) => s.isImporting)
   const importDocument = useProjectStore((s) => s.importDocument)
+  const selectedId = useWorkspaceUiStore((s) => s.selectedDocumentId)
+  const setSelectedId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
 
   return (
     <aside className="flex w-72 flex-shrink-0 flex-col border-r border-slate-200 bg-white">
@@ -33,7 +31,7 @@ function DocumentList({ selectedId, onSelect }: Props): JSX.Element {
               className={`block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 ${
                 doc.id === selectedId ? 'bg-slate-100 font-medium' : ''
               }`}
-              onClick={() => onSelect(doc.id)}
+              onClick={() => setSelectedId(doc.id)}
               title={doc.title}
             >
               {doc.title}

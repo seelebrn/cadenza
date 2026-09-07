@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { DragEvent } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import { useCodingUiStore } from '../store/codingUiStore'
+import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import type { CodeNode, TagKind } from '@shared/types'
 
 const PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899']
@@ -30,8 +30,10 @@ function CodebookPanel(): JSX.Element {
   const addCode = useProjectStore((s) => s.addCode)
   const reparentCode = useProjectStore((s) => s.reparentCode)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
-  const pendingSelection = useCodingUiStore((s) => s.pendingSelection)
-  const clearUi = useCodingUiStore((s) => s.clear)
+  const pendingSelection = useWorkspaceUiStore((s) => s.pendingSelection)
+  const clearUi = useWorkspaceUiStore((s) => s.clear)
+  const suggestedCodeName = useWorkspaceUiStore((s) => s.suggestedCodeName)
+  const setSuggestedCodeName = useWorkspaceUiStore((s) => s.setSuggestedCodeName)
 
   const [newName, setNewName] = useState('')
   const [newKind, setNewKind] = useState<TagKind>('code')
@@ -39,6 +41,13 @@ function CodebookPanel(): JSX.Element {
 
   const codes = useMemo(() => data?.codes ?? [], [data])
   const tree = useMemo(() => buildTree(codes), [codes])
+
+  // "Promote to code" (from the notes panel) drops a suggested name here.
+  useEffect(() => {
+    if (suggestedCodeName === null) return
+    setNewName(suggestedCodeName)
+    setSuggestedCodeName(null)
+  }, [suggestedCodeName, setSuggestedCodeName])
 
   function handleCreate(): void {
     const name = newName.trim()
@@ -64,11 +73,7 @@ function CodebookPanel(): JSX.Element {
   }
 
   return (
-    <aside className="flex w-80 flex-shrink-0 flex-col border-l border-slate-200 bg-white">
-      <div className="border-b border-slate-200 p-3">
-        <h2 className="text-sm font-semibold text-slate-700">Codes &amp; items</h2>
-      </div>
-
+    <div className="flex flex-1 flex-col overflow-hidden">
       {pendingSelection && (
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p className="mb-1 font-medium">
@@ -124,7 +129,7 @@ function CodebookPanel(): JSX.Element {
       </div>
 
       <InspectedCodings />
-    </aside>
+    </div>
   )
 }
 
@@ -142,7 +147,7 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
   const deleteCode = useProjectStore((s) => s.deleteCode)
   const mergeCodes = useProjectStore((s) => s.mergeCodes)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
-  const pendingSelection = useCodingUiStore((s) => s.pendingSelection)
+  const pendingSelection = useWorkspaceUiStore((s) => s.pendingSelection)
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(node.name)
@@ -305,8 +310,8 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
 function InspectedCodings(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
   const removeCoding = useProjectStore((s) => s.removeCoding)
-  const inspectedCodingIds = useCodingUiStore((s) => s.inspectedCodingIds)
-  const clearUi = useCodingUiStore((s) => s.clear)
+  const inspectedCodingIds = useWorkspaceUiStore((s) => s.inspectedCodingIds)
+  const clearUi = useWorkspaceUiStore((s) => s.clear)
 
   const items = useMemo(() => {
     if (!data) return []

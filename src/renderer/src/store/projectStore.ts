@@ -11,7 +11,6 @@ import {
   setCodeColor as setCodeColorOp,
   setCodeDefinition as setCodeDefinitionOp
 } from '@shared/projectOps'
-import { useCodingUiStore } from './codingUiStore'
 
 interface ProjectState {
   data: ProjectData | null
@@ -198,9 +197,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   mergeCodes: (sourceId, targetId) =>
     get().updateProject((data) => mergeCodesOp(data, sourceId, targetId)),
 
+  // Deliberately does not clear the pending selection afterwards — the same
+  // passage stays selected so the user can stack several codes/items on it
+  // in a row without re-selecting. codingUiStore's own "Clear selection" is
+  // the explicit way to finish.
   applyCodeToSelection: (documentId, start, end, text, codeId) => {
     get().updateProject((data) => applyCodeToSelectionOp(data, { documentId, start, end, text, codeId }))
-    useCodingUiStore.getState().clear()
   },
 
   removeCoding: (codingId) => get().updateProject((data) => removeCodingOp(data, codingId))

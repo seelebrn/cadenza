@@ -71,10 +71,12 @@ function CodebookPanel(): JSX.Element {
 
       {pendingSelection && (
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <p className="mb-1 font-medium">Pick a code/item to apply, or create one below:</p>
+          <p className="mb-1 font-medium">
+            Apply as many codes/items as you like to the highlighted text below, then clear it:
+          </p>
           <p className="italic">&ldquo;{pendingSelection.text}&rdquo;</p>
           <button className="mt-1 text-amber-700 underline" onClick={clearUi}>
-            Clear selection
+            Done — clear selection
           </button>
         </div>
       )}

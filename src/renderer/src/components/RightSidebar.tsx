@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
-import ClustersView from './ClustersView'
 import CodebookPanel from './CodebookPanel'
 import NotesPanel from './NotesPanel'
 
@@ -66,19 +65,10 @@ function RightSidebar(): JSX.Element {
         >
           Notes
         </button>
-        <button
-          className={`flex-1 px-2 py-2 text-sm font-medium ${
-            activeTab === 'clusters' ? 'border-b-2 border-slate-900 text-slate-900' : 'text-slate-400 hover:text-slate-600'
-          }`}
-          onClick={() => setActiveTab('clusters')}
-        >
-          Clusters
-        </button>
       </div>
 
       {activeTab === 'codes' && <CodebookPanel />}
       {activeTab === 'notes' && <NotesPanel />}
-      {activeTab === 'clusters' && <ClustersView />}
     </aside>
   )
 }

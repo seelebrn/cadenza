@@ -636,9 +636,23 @@ function BoardView(): JSX.Element {
                     for (const cat of groupCategories) {
                       for (const item of getClusterMemberItems(items, cat)) memberItemsMap.set(item.id, item)
                     }
+                    // A member that's only ever been shown as a "virtual"
+                    // fallback card (never individually dragged) has no real
+                    // BoardItem yet — moveItem has nothing to find and
+                    // silently no-ops for it. Materialize every member now,
+                    // right as the cluster-drag starts, same as a lone card
+                    // materializes on its own mousedown (see BoardItemCard),
+                    // so it actually moves with the cluster instead of
+                    // snapping back to its grid fallback position afterward.
+                    const memberItemIds: string[] = []
                     const memberStartPositions: Record<string, Position> = {}
                     for (const item of memberItemsMap.values()) {
-                      memberStartPositions[item.id] = { x: item.x, y: item.y }
+                      const realId = item.id.startsWith('virtual:')
+                        ? addItemToBoard(cluster.boardId, item.refType, item.refId, item.x, item.y)
+                        : item.id
+                      const id = realId ?? item.id
+                      memberItemIds.push(id)
+                      memberStartPositions[id] = { x: item.x, y: item.y }
                     }
 
                     setDragState({
@@ -650,7 +664,7 @@ function BoardView(): JSX.Element {
                       startHeight: cluster.height,
                       groupClusterIds: groupClusters.map((c) => c.id),
                       clusterStartPositions,
-                      memberItemIds: Array.from(memberItemsMap.keys()),
+                      memberItemIds,
                       memberStartPositions,
                       startMouseX: e.clientX,
                       startMouseY: e.clientY,

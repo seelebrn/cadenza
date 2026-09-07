@@ -62,15 +62,28 @@ surfaced on the board as dragging one cluster into another. Every code and note 
 on the one default board automatically; other boards stay opt-in/curated, with bulk
 "add all codes/notes/clusters" actions for quickly populating one.
 
-### Terminology + Workspace clusters tab (2026-09-07)
+### Terminology + clusters inside the codebook tab (2026-09-07)
 
 User-facing text now says "cluster" everywhere this concept appears (Board, Analysis,
 Workspace), rather than mixing "category"/"cluster"/"theme". The underlying type stays
 `CategoryRecord`/`categoryOps.ts` internally — renaming it would have collided with the
 already-distinct `BoardCluster` (a category's per-board position, not the category itself).
-The Workspace sidebar gained a third tab, Clusters, rendering the exact same `ClustersView`
-component Analysis uses — one component, one data source, so a cluster created from the
-board, the Workspace tab, or the Analysis tab is the same record everywhere, never a copy
-that needs to be kept in sync. (The separate `NoteCategoryDef` concept — Note Descriptive/
-Linguistique/Conceptuelle classification tags — intentionally keeps the word "category":
-it's a genuinely different thing, a flat per-note tag, not a grouping cluster.)
+
+Cluster creation/management lives in the Workspace's existing "Codes & items" tab, not a
+separate tab: the "New" form's second option creates a cluster instead of a code, and a
+Clusters section underneath the code tree lists them (drag a code row onto a cluster to
+group it, drag a cluster onto another to nest it, drop either back at the section root to
+un-nest). Analysis still has its own Clusters tab for full membership management (notes,
+quotes, AQA question/theme kind) — same `ClustersView` component, same `data.categories`,
+so a cluster made from the board, the codebook tab, or Analysis is the same record
+everywhere, never a copy to keep in sync. (The separate `NoteCategoryDef` concept — Note
+Descriptive/Linguistique/Conceptuelle classification tags — intentionally keeps the word
+"category": it's a genuinely different thing, a flat per-note tag, not a grouping cluster.)
+
+Fixed: dragging a cluster frame on the board stopped carrying its member items along.
+Cause — a member that had only ever appeared as a "virtual" (not-yet-persisted) fallback
+card, e.g. because it was added to the cluster from the codebook tab rather than physically
+dragged into the frame, has no real `BoardItem` for `moveItem` to update, so the move
+silently no-op'd and the item snapped back to its grid fallback position afterward. Fixed by
+materializing every member into a real `BoardItem` the moment a cluster-drag starts, the
+same way a lone card already materializes on its own mousedown.

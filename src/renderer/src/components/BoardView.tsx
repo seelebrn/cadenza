@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
-import { describeBoardItem, findClusterAtPoint } from '@shared/boardOps'
+import { describeBoardItem, findClusterAtPoint, findSnapTarget } from '@shared/boardOps'
 import type { BoardCluster, BoardItem, CategoryKind } from '@shared/types'
 
 const CARD_WIDTH = 180
@@ -13,6 +13,14 @@ const MIN_CLUSTER_HEIGHT = 100
 const CANVAS_WIDTH = 2400
 const CANVAS_HEIGHT = 1600
 const PALETTE = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444', '#14b8a6', '#eab308', '#ec4899']
+
+const MIN_ZOOM = 0.3
+const MAX_ZOOM = 2.5
+const ZOOM_WHEEL_SENSITIVITY = 0.0015
+// How close two cards must get while dragging to snap/link; how far an
+// already-linked pair must be dragged apart to sever automatically.
+const SNAP_DISTANCE = 70
+const UNLINK_DISTANCE = 200
 
 function nextColor(count: number): string {
   return PALETTE[count % PALETTE.length]
@@ -38,6 +46,8 @@ function BoardView(): JSX.Element {
   const moveItem = useProjectStore((s) => s.moveItem)
   const moveCluster = useProjectStore((s) => s.moveCluster)
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
+  const linkItemsAction = useProjectStore((s) => s.linkItems)
+  const unlinkItemsAction = useProjectStore((s) => s.unlinkItems)
 
   const selectedBoardId = useWorkspaceUiStore((s) => s.selectedBoardId)
   const setSelectedBoardId = useWorkspaceUiStore((s) => s.setSelectedBoardId)
@@ -47,6 +57,15 @@ function BoardView(): JSX.Element {
   const [noteToAdd, setNoteToAdd] = useState('')
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [liveDelta, setLiveDelta] = useState({ dx: 0, dy: 0 })
+  const [zoom, setZoom] = useState(1)
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const pendingZoomAnchorRef = useRef<{
+    contentX: number
+    contentY: number
+    offsetX: number
+    offsetY: number
+  } | null>(null)
 
   const boards = data?.boards ?? []
 
@@ -56,24 +75,91 @@ function BoardView(): JSX.Element {
 
   const items = data?.boardItems.filter((i) => i.boardId === selectedBoardId) ?? []
   const clusters = data?.boardClusters.filter((c) => c.boardId === selectedBoardId) ?? []
+  const links = data?.boardLinks.filter((l) => l.boardId === selectedBoardId) ?? []
+
+  // Wheel-to-zoom, centered on the cursor. Attached as a native listener
+  // (not React's onWheel) because React registers wheel listeners as
+  // passive by default, so e.preventDefault() inside a JSX handler silently
+  // does nothing and native scrolling would fight the zoom.
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    function handleWheel(e: WheelEvent): void {
+      e.preventDefault()
+      const rect = container!.getBoundingClientRect()
+      const offsetX = e.clientX - rect.left
+      const offsetY = e.clientY - rect.top
+
+      setZoom((prevZoom) => {
+        const contentX = (container!.scrollLeft + offsetX) / prevZoom
+        const contentY = (container!.scrollTop + offsetY) / prevZoom
+        const factor = Math.exp(-e.deltaY * ZOOM_WHEEL_SENSITIVITY)
+        const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prevZoom * factor))
+        pendingZoomAnchorRef.current = { contentX, contentY, offsetX, offsetY }
+        return nextZoom
+      })
+    }
+
+    container.addEventListener('wheel', handleWheel, { passive: false })
+    return () => container.removeEventListener('wheel', handleWheel)
+  }, [])
+
+  // After zoom changes and the new transform has painted, correct the
+  // scroll position so the point that was under the cursor stays there.
+  useLayoutEffect(() => {
+    const anchor = pendingZoomAnchorRef.current
+    const container = scrollContainerRef.current
+    if (!anchor || !container) return
+    container.scrollLeft = anchor.contentX * zoom - anchor.offsetX
+    container.scrollTop = anchor.contentY * zoom - anchor.offsetY
+    pendingZoomAnchorRef.current = null
+  }, [zoom])
 
   useEffect(() => {
     if (!dragState) return
 
     function handleMouseMove(e: MouseEvent): void {
-      setLiveDelta({ dx: e.clientX - dragState!.startMouseX, dy: e.clientY - dragState!.startMouseY })
+      // Divide by zoom: a screen-pixel mouse delta corresponds to more (when
+      // zoomed out) or fewer (zoomed in) canvas-content-space units.
+      setLiveDelta({
+        dx: (e.clientX - dragState!.startMouseX) / zoom,
+        dy: (e.clientY - dragState!.startMouseY) / zoom
+      })
     }
 
     function handleMouseUp(e: MouseEvent): void {
-      const dx = e.clientX - dragState!.startMouseX
-      const dy = e.clientY - dragState!.startMouseY
+      const dx = (e.clientX - dragState!.startMouseX) / zoom
+      const dy = (e.clientY - dragState!.startMouseY) / zoom
+
       if (dragState!.kind === 'item') {
-        const newX = dragState!.startX + dx
-        const newY = dragState!.startY + dy
-        const centerX = newX + CARD_WIDTH / 2
-        const centerY = newY + CARD_HEIGHT / 2
+        const rawX = dragState!.startX + dx
+        const rawY = dragState!.startY + dy
+        const snap = findSnapTarget(items, dragState!.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+        const finalX = snap ? snap.snappedX : rawX
+        const finalY = snap ? snap.snappedY : rawY
+        const centerX = finalX + CARD_WIDTH / 2
+        const centerY = finalY + CARD_HEIGHT / 2
         const cluster = findClusterAtPoint(clusters, centerX, centerY)
-        moveItem(dragState!.id, newX, newY, cluster?.id ?? null)
+        moveItem(dragState!.id, finalX, finalY, cluster?.id ?? null)
+
+        if (snap && selectedBoardId) {
+          linkItemsAction(selectedBoardId, dragState!.id, snap.targetId)
+        } else {
+          // Not snapping to anything new — check whether this drag pulled
+          // the item far enough from an existing link partner to sever it.
+          for (const link of links) {
+            if (link.itemAId !== dragState!.id && link.itemBId !== dragState!.id) continue
+            const partnerId = link.itemAId === dragState!.id ? link.itemBId : link.itemAId
+            const partner = items.find((i) => i.id === partnerId)
+            if (!partner) continue
+            const dist = Math.hypot(
+              finalX + CARD_WIDTH / 2 - (partner.x + CARD_WIDTH / 2),
+              finalY + CARD_HEIGHT / 2 - (partner.y + CARD_HEIGHT / 2)
+            )
+            if (dist > UNLINK_DISTANCE) unlinkItemsAction(link.id)
+          }
+        }
       } else if (dragState!.kind === 'cluster-move') {
         moveCluster(dragState!.id, dragState!.startX + dx, dragState!.startY + dy)
       } else {
@@ -94,7 +180,27 @@ function BoardView(): JSX.Element {
       window.removeEventListener('mouseup', handleMouseUp)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragState, clusters])
+  }, [dragState, clusters, items, links, zoom, selectedBoardId])
+
+  // Live position (and snap-preview) for every item, shared by the cards
+  // themselves and the link lines so both agree on where things are mid-drag.
+  const displayPositions = useMemo(() => {
+    const map = new Map<string, { x: number; y: number; isSnapping: boolean }>()
+    for (const item of items) {
+      if (dragState?.kind === 'item' && dragState.id === item.id) {
+        const rawX = item.x + liveDelta.dx
+        const rawY = item.y + liveDelta.dy
+        const snap = findSnapTarget(items, item.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+        map.set(
+          item.id,
+          snap ? { x: snap.snappedX, y: snap.snappedY, isSnapping: true } : { x: rawX, y: rawY, isSnapping: false }
+        )
+      } else {
+        map.set(item.id, { x: item.x, y: item.y, isSnapping: false })
+      }
+    }
+    return map
+  }, [items, dragState, liveDelta])
 
   if (!data) return <></>
 
@@ -209,15 +315,83 @@ function BoardView(): JSX.Element {
             </button>
           </>
         )}
+
+        <div className="ml-auto flex items-center gap-1 text-xs text-slate-500">
+          <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
+          <button
+            className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
+            onClick={() => setZoom(1)}
+          >
+            Reset zoom
+          </button>
+        </div>
       </div>
+
+      {selectedBoardId && (
+        <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
+          Scroll to zoom · drag two cards close together to link them (they snap) · drag a linked card away to
+          unlink · click the × on a connector to unlink directly
+        </p>
+      )}
 
       {!selectedBoardId ? (
         <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
           Create a board to start grouping codes, notes, and quotes spatially.
         </div>
       ) : (
-        <div className="flex-1 overflow-auto bg-slate-50">
-          <div className="relative" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}>
+        <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-50">
+          <div
+            className="relative"
+            style={{
+              width: CANVAS_WIDTH,
+              height: CANVAS_HEIGHT,
+              transform: `scale(${zoom})`,
+              transformOrigin: '0 0'
+            }}
+          >
+            <svg className="pointer-events-none absolute left-0 top-0" width={CANVAS_WIDTH} height={CANVAS_HEIGHT}>
+              {links.map((link) => {
+                const a = items.find((i) => i.id === link.itemAId)
+                const b = items.find((i) => i.id === link.itemBId)
+                if (!a || !b) return null
+                const posA = displayPositions.get(a.id) ?? { x: a.x, y: a.y }
+                const posB = displayPositions.get(b.id) ?? { x: b.x, y: b.y }
+                const ax = posA.x + CARD_WIDTH / 2
+                const ay = posA.y + CARD_HEIGHT / 2
+                const bx = posB.x + CARD_WIDTH / 2
+                const by = posB.y + CARD_HEIGHT / 2
+                const midX = (ax + bx) / 2
+                const midY = (ay + by) / 2
+                return (
+                  <g key={link.id}>
+                    <line x1={ax} y1={ay} x2={bx} y2={by} stroke="#94a3b8" strokeWidth={2} />
+                    <circle
+                      cx={midX}
+                      cy={midY}
+                      r={9}
+                      fill="white"
+                      stroke="#94a3b8"
+                      strokeWidth={1.5}
+                      className="pointer-events-auto cursor-pointer hover:stroke-red-400"
+                      onClick={() => unlinkItemsAction(link.id)}
+                    >
+                      <title>Unlink</title>
+                    </circle>
+                    <text
+                      x={midX}
+                      y={midY + 3}
+                      textAnchor="middle"
+                      fontSize={11}
+                      className="pointer-events-none select-none"
+                      fill="#64748b"
+                    >
+                      ×
+                    </text>
+                  </g>
+                )
+              })}
+            </svg>
+
             {clusters.map((cluster) => (
               <ClusterFrame
                 key={cluster.id}
@@ -246,24 +420,29 @@ function BoardView(): JSX.Element {
                 }
               />
             ))}
-            {items.map((item) => (
-              <BoardItemCard
-                key={item.id}
-                item={item}
-                dragState={dragState}
-                liveDelta={liveDelta}
-                onStartDrag={(e) =>
-                  setDragState({
-                    kind: 'item',
-                    id: item.id,
-                    startMouseX: e.clientX,
-                    startMouseY: e.clientY,
-                    startX: item.x,
-                    startY: item.y
-                  })
-                }
-              />
-            ))}
+            {items.map((item) => {
+              const pos = displayPositions.get(item.id) ?? { x: item.x, y: item.y, isSnapping: false }
+              return (
+                <BoardItemCard
+                  key={item.id}
+                  item={item}
+                  x={pos.x}
+                  y={pos.y}
+                  isDragging={dragState?.kind === 'item' && dragState.id === item.id}
+                  isSnapping={pos.isSnapping}
+                  onStartDrag={(e) =>
+                    setDragState({
+                      kind: 'item',
+                      id: item.id,
+                      startMouseX: e.clientX,
+                      startMouseY: e.clientY,
+                      startX: item.x,
+                      startY: item.y
+                    })
+                  }
+                />
+              )
+            })}
           </div>
         </div>
       )}
@@ -383,12 +562,14 @@ function ClusterFrame({ cluster, dragState, liveDelta, onStartMove, onStartResiz
 
 interface BoardItemCardProps {
   item: BoardItem
-  dragState: DragState | null
-  liveDelta: { dx: number; dy: number }
+  x: number
+  y: number
+  isDragging: boolean
+  isSnapping: boolean
   onStartDrag: (e: React.MouseEvent) => void
 }
 
-function BoardItemCard({ item, dragState, liveDelta, onStartDrag }: BoardItemCardProps): JSX.Element | null {
+function BoardItemCard({ item, x, y, isDragging, isSnapping, onStartDrag }: BoardItemCardProps): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
   const removeItemFromBoard = useProjectStore((s) => s.removeItemFromBoard)
 
@@ -396,13 +577,11 @@ function BoardItemCard({ item, dragState, liveDelta, onStartDrag }: BoardItemCar
   const description = describeBoardItem(data, item)
   if (!description) return null
 
-  const isDragging = dragState?.kind === 'item' && dragState.id === item.id
-  const x = isDragging ? item.x + liveDelta.dx : item.x
-  const y = isDragging ? item.y + liveDelta.dy : item.y
-
   return (
     <div
-      className="group absolute cursor-move select-none rounded border border-slate-300 bg-white p-2 text-xs shadow-sm"
+      className={`group absolute cursor-move select-none rounded border bg-white p-2 text-xs shadow-sm transition-shadow ${
+        isSnapping ? 'border-blue-400 ring-2 ring-blue-300' : 'border-slate-300'
+      } ${isDragging ? 'shadow-md' : ''}`}
       style={{ left: x, top: y, width: CARD_WIDTH, minHeight: CARD_HEIGHT }}
       onMouseDown={onStartDrag}
     >

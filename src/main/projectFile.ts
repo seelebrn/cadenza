@@ -43,7 +43,8 @@ export function createEmptyProject(name: string): ProjectData {
     categories: [],
     boards: [],
     boardItems: [],
-    boardClusters: []
+    boardClusters: [],
+    boardLinks: []
   }
 }
 

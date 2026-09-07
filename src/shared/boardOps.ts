@@ -13,7 +13,7 @@ import {
   addSegmentToCategory,
   createCategory
 } from './categoryOps'
-import type { BoardCluster, BoardItem, BoardRecord, CategoryKind, ProjectData } from './types'
+import type { BoardCluster, BoardItem, BoardLink, BoardRecord, CategoryKind, ProjectData } from './types'
 
 export interface BoardItemDescription {
   label: string
@@ -72,13 +72,14 @@ export function renameBoard(data: ProjectData, boardId: string, name: string): P
   return { ...data, boards: data.boards.map((b) => (b.id === boardId ? { ...b, name } : b)) }
 }
 
-/** Deletes a board and everything on it (items + clusters) — other boards untouched. */
+/** Deletes a board and everything on it (items + clusters + links) — other boards untouched. */
 export function deleteBoard(data: ProjectData, boardId: string): ProjectData {
   return {
     ...data,
     boards: data.boards.filter((b) => b.id !== boardId),
     boardItems: data.boardItems.filter((i) => i.boardId !== boardId),
-    boardClusters: data.boardClusters.filter((c) => c.boardId !== boardId)
+    boardClusters: data.boardClusters.filter((c) => c.boardId !== boardId),
+    boardLinks: data.boardLinks.filter((l) => l.boardId !== boardId)
   }
 }
 
@@ -115,7 +116,86 @@ export function moveItem(
 }
 
 export function removeItemFromBoard(data: ProjectData, itemId: string): ProjectData {
-  return { ...data, boardItems: data.boardItems.filter((i) => i.id !== itemId) }
+  return {
+    ...data,
+    boardItems: data.boardItems.filter((i) => i.id !== itemId),
+    boardLinks: data.boardLinks.filter((l) => l.itemAId !== itemId && l.itemBId !== itemId)
+  }
+}
+
+/** Links two board items (order-independent — a link A-B is the same as
+ * B-A), no-op if already linked or if given the same item twice. */
+export function linkItems(
+  data: ProjectData,
+  boardId: string,
+  itemAId: string,
+  itemBId: string
+): ProjectData {
+  if (itemAId === itemBId) return data
+  const alreadyLinked = data.boardLinks.some(
+    (l) =>
+      l.boardId === boardId &&
+      ((l.itemAId === itemAId && l.itemBId === itemBId) || (l.itemAId === itemBId && l.itemBId === itemAId))
+  )
+  if (alreadyLinked) return data
+  const link: BoardLink = { id: nanoid(), boardId, itemAId, itemBId, createdAt: new Date().toISOString() }
+  return { ...data, boardLinks: [...data.boardLinks, link] }
+}
+
+export function unlinkItems(data: ProjectData, linkId: string): ProjectData {
+  return { ...data, boardLinks: data.boardLinks.filter((l) => l.id !== linkId) }
+}
+
+export interface PositionedItem {
+  id: string
+  x: number
+  y: number
+}
+
+export interface SnapResult {
+  targetId: string
+  snappedX: number
+  snappedY: number
+}
+
+/**
+ * Finds the nearest other item within snapDistance of a tentative (x, y)
+ * position, and where the dragged card should snap to sit edge-to-edge
+ * beside it — used both for a live "magnetic" preview while dragging and
+ * to decide the final drop position + auto-link. Snaps along whichever
+ * axis (horizontal/vertical) the two cards are more aligned on.
+ */
+export function findSnapTarget(
+  items: PositionedItem[],
+  draggedItemId: string,
+  x: number,
+  y: number,
+  cardWidth: number,
+  cardHeight: number,
+  snapDistance: number
+): SnapResult | null {
+  const centerX = x + cardWidth / 2
+  const centerY = y + cardHeight / 2
+
+  let best: (PositionedItem & { dist: number }) | null = null
+  for (const item of items) {
+    if (item.id === draggedItemId) continue
+    const otherCenterX = item.x + cardWidth / 2
+    const otherCenterY = item.y + cardHeight / 2
+    const dist = Math.hypot(centerX - otherCenterX, centerY - otherCenterY)
+    if (dist <= snapDistance && (!best || dist < best.dist)) {
+      best = { ...item, dist }
+    }
+  }
+  if (!best) return null
+
+  const gap = 12
+  const dx = centerX - (best.x + cardWidth / 2)
+  const dy = centerY - (best.y + cardHeight / 2)
+  const snappedX = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? best.x + cardWidth + gap : best.x - cardWidth - gap) : best.x
+  const snappedY = Math.abs(dx) >= Math.abs(dy) ? best.y : dy >= 0 ? best.y + cardHeight + gap : best.y - cardHeight - gap
+
+  return { targetId: best.id, snappedX, snappedY }
 }
 
 export function createCluster(

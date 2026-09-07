@@ -49,6 +49,7 @@ import {
   createCluster as createClusterOp,
   deleteBoard as deleteBoardOp,
   deleteCluster as deleteClusterOp,
+  linkItems as linkItemsOp,
   moveCluster as moveClusterOp,
   moveItem as moveItemOp,
   promoteClusterToCategory as promoteClusterToCategoryOp,
@@ -56,6 +57,7 @@ import {
   renameBoard as renameBoardOp,
   renameCluster as renameClusterOp,
   resizeCluster as resizeClusterOp,
+  unlinkItems as unlinkItemsOp,
   setClusterColor as setClusterColorOp
 } from '@shared/boardOps'
 import { useWorkspaceUiStore } from './workspaceUiStore'
@@ -174,6 +176,8 @@ interface ProjectState {
   resizeCluster: (clusterId: string, width: number, height: number) => void
   deleteCluster: (clusterId: string) => void
   promoteClusterToCategory: (clusterId: string, kind: CategoryKind, color: string) => string | null
+  linkItems: (boardId: string, itemAId: string, itemBId: string) => void
+  unlinkItems: (linkId: string) => void
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -476,5 +480,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!result) return null
     get().updateProject(() => result.data)
     return result.categoryId
-  }
+  },
+
+  linkItems: (boardId, itemAId, itemBId) =>
+    get().updateProject((data) => linkItemsOp(data, boardId, itemAId, itemBId)),
+
+  unlinkItems: (linkId) => get().updateProject((data) => unlinkItemsOp(data, linkId))
 }))

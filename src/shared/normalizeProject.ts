@@ -19,6 +19,7 @@ export function normalizeProjectData(raw: ProjectData): ProjectData {
     ),
     boards: raw.boards ?? [],
     boardItems: raw.boardItems ?? [],
-    boardClusters: raw.boardClusters ?? []
+    boardClusters: raw.boardClusters ?? [],
+    boardLinks: raw.boardLinks ?? []
   }
 }

@@ -144,6 +144,18 @@ export interface BoardCluster {
   createdAt: ISODateString
 }
 
+/** A direct connection between two board items, made by dragging one close
+ * to the other (a "snap"); severable explicitly or by dragging them apart
+ * again. Distinct from cluster membership — a link is a pairwise relation,
+ * not a spatial grouping. */
+export interface BoardLink {
+  id: string
+  boardId: string
+  itemAId: string
+  itemBId: string
+  createdAt: ISODateString
+}
+
 export interface BoardRecord {
   id: string
   name: string
@@ -167,6 +179,7 @@ export interface ProjectData {
   boards: BoardRecord[]
   boardItems: BoardItem[]
   boardClusters: BoardCluster[]
+  boardLinks: BoardLink[]
 }
 
 export interface RecentProjectEntry {

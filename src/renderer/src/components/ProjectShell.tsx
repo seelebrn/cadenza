@@ -1,4 +1,6 @@
 import { useProjectStore } from '../store/projectStore'
+import { useWorkspaceUiStore } from '../store/workspaceUiStore'
+import AnalysisView from './AnalysisView'
 import DocumentList from './DocumentList'
 import DocumentReader from './DocumentReader'
 import RightSidebar from './RightSidebar'
@@ -12,6 +14,8 @@ function ProjectShell(): JSX.Element | null {
   const save = useProjectStore((s) => s.save)
   const saveAs = useProjectStore((s) => s.saveAs)
   const closeProject = useProjectStore((s) => s.closeProject)
+  const mainView = useWorkspaceUiStore((s) => s.mainView)
+  const setMainView = useWorkspaceUiStore((s) => s.setMainView)
 
   if (!data) return null
 
@@ -26,26 +30,42 @@ function ProjectShell(): JSX.Element | null {
             {isSaving && ' • saving…'}
           </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
-            onClick={() => void save()}
-            disabled={!isDirty || isSaving}
-          >
-            Save
-          </button>
-          <button
-            className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-            onClick={() => void saveAs()}
-          >
-            Save As…
-          </button>
-          <button
-            className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-            onClick={closeProject}
-          >
-            Close
-          </button>
+        <div className="flex items-center gap-4">
+          <div className="flex rounded border border-slate-300 text-sm">
+            <button
+              className={`px-3 py-1 ${mainView === 'workspace' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'}`}
+              onClick={() => setMainView('workspace')}
+            >
+              Workspace
+            </button>
+            <button
+              className={`px-3 py-1 ${mainView === 'analysis' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'}`}
+              onClick={() => setMainView('analysis')}
+            >
+              Analysis
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              onClick={() => void save()}
+              disabled={!isDirty || isSaving}
+            >
+              Save
+            </button>
+            <button
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              onClick={() => void saveAs()}
+            >
+              Save As…
+            </button>
+            <button
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              onClick={closeProject}
+            >
+              Close
+            </button>
+          </div>
         </div>
       </header>
 
@@ -55,13 +75,19 @@ function ProjectShell(): JSX.Element | null {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        <DocumentList />
-        <main className="flex-1 overflow-auto">
-          <DocumentReader />
-        </main>
-        <RightSidebar />
-      </div>
+      {mainView === 'workspace' ? (
+        <div className="flex flex-1 overflow-hidden">
+          <DocumentList />
+          <main className="flex-1 overflow-auto">
+            <DocumentReader />
+          </main>
+          <RightSidebar />
+        </div>
+      ) : (
+        <div className="flex-1 overflow-hidden">
+          <AnalysisView />
+        </div>
+      )}
     </div>
   )
 }

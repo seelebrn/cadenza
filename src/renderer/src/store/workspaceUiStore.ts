@@ -8,6 +8,8 @@ export interface ActiveSpan {
 }
 
 export type SidebarTab = 'codes' | 'notes'
+export type MainView = 'workspace' | 'analysis'
+export type AnalysisTab = 'retrieval' | 'categories'
 
 /** Ephemeral (non-persisted) workspace UI state shared across the reader,
  * codebook, and notes panels — which document is open, which sidebar tab is
@@ -20,6 +22,12 @@ export type SidebarTab = 'codes' | 'notes'
 interface WorkspaceUiState {
   selectedDocumentId: string | null
   setSelectedDocumentId: (id: string | null) => void
+
+  mainView: MainView
+  setMainView: (view: MainView) => void
+
+  analysisTab: AnalysisTab
+  setAnalysisTab: (tab: AnalysisTab) => void
 
   activeSidebarTab: SidebarTab
   setActiveSidebarTab: (tab: SidebarTab) => void
@@ -38,6 +46,12 @@ interface WorkspaceUiState {
 export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   selectedDocumentId: null,
   setSelectedDocumentId: (id) => set({ selectedDocumentId: id }),
+
+  mainView: 'workspace',
+  setMainView: (view) => set({ mainView: view }),
+
+  analysisTab: 'retrieval',
+  setAnalysisTab: (tab) => set({ analysisTab: tab }),
 
   activeSidebarTab: 'codes',
   setActiveSidebarTab: (tab) => set({ activeSidebarTab: tab }),

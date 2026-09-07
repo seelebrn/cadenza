@@ -1,9 +1,17 @@
 import { create } from 'zustand'
-import type { NoteAttachment, ProjectData, RecentProjectEntry, SerializedAssets, TagKind } from '@shared/types'
+import type {
+  CategoryKind,
+  NoteAttachment,
+  ProjectData,
+  RecentProjectEntry,
+  SerializedAssets,
+  TagKind
+} from '@shared/types'
 import {
   addCode as addCodeOp,
   applyCodeToSelection as applyCodeToSelectionOp,
   deleteCode as deleteCodeOp,
+  ensureSegment as ensureSegmentOp,
   mergeCodes as mergeCodesOp,
   removeCoding as removeCodingOp,
   renameCode as renameCodeOp,
@@ -21,6 +29,18 @@ import {
   setNoteCategoryColor as setNoteCategoryColorOp,
   updateNote as updateNoteOp
 } from '@shared/notesOps'
+import {
+  addCodeToCategory as addCodeToCategoryOp,
+  addNoteToCategory as addNoteToCategoryOp,
+  addSegmentToCategory as addSegmentToCategoryOp,
+  createCategory as createCategoryOp,
+  deleteCategory as deleteCategoryOp,
+  removeCodeFromCategory as removeCodeFromCategoryOp,
+  removeNoteFromCategory as removeNoteFromCategoryOp,
+  removeSegmentFromCategory as removeSegmentFromCategoryOp,
+  renameCategory as renameCategoryOp,
+  setCategoryColor as setCategoryColorOp
+} from '@shared/categoryOps'
 
 interface ProjectState {
   data: ProjectData | null
@@ -83,6 +103,26 @@ interface ProjectState {
   renameNoteCategory: (categoryId: string, name: string) => void
   setNoteCategoryColor: (categoryId: string, color: string) => void
   deleteNoteCategory: (categoryId: string) => void
+
+  // Categories (emergent theme or AQA-style question cluster)
+  createCategory: (name: string, kind: CategoryKind, color: string) => string | null
+  renameCategory: (categoryId: string, name: string) => void
+  setCategoryColor: (categoryId: string, color: string) => void
+  deleteCategory: (categoryId: string) => void
+  addCodeToCategory: (categoryId: string, codeId: string) => void
+  removeCodeFromCategory: (categoryId: string, codeId: string) => void
+  addNoteToCategory: (categoryId: string, noteId: string) => void
+  removeNoteFromCategory: (categoryId: string, noteId: string) => void
+  removeSegmentFromCategory: (categoryId: string, segmentId: string) => void
+  /** Files a text span under a category as a raw quote, creating/reusing
+   * its Segment the same way coding/memoing does. */
+  fileSpanUnderCategory: (
+    documentId: string,
+    start: number,
+    end: number,
+    text: string,
+    categoryId: string
+  ) => void
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -287,5 +327,42 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().updateProject((data) => setNoteCategoryColorOp(data, categoryId, color)),
 
   deleteNoteCategory: (categoryId) =>
-    get().updateProject((data) => deleteNoteCategoryOp(data, categoryId))
+    get().updateProject((data) => deleteNoteCategoryOp(data, categoryId)),
+
+  createCategory: (name, kind, color) => {
+    const { data } = get()
+    if (!data) return null
+    const result = createCategoryOp(data, { name, kind, color })
+    get().updateProject(() => result.data)
+    return result.categoryId
+  },
+
+  renameCategory: (categoryId, name) =>
+    get().updateProject((data) => renameCategoryOp(data, categoryId, name)),
+
+  setCategoryColor: (categoryId, color) =>
+    get().updateProject((data) => setCategoryColorOp(data, categoryId, color)),
+
+  deleteCategory: (categoryId) => get().updateProject((data) => deleteCategoryOp(data, categoryId)),
+
+  addCodeToCategory: (categoryId, codeId) =>
+    get().updateProject((data) => addCodeToCategoryOp(data, categoryId, codeId)),
+
+  removeCodeFromCategory: (categoryId, codeId) =>
+    get().updateProject((data) => removeCodeFromCategoryOp(data, categoryId, codeId)),
+
+  addNoteToCategory: (categoryId, noteId) =>
+    get().updateProject((data) => addNoteToCategoryOp(data, categoryId, noteId)),
+
+  removeNoteFromCategory: (categoryId, noteId) =>
+    get().updateProject((data) => removeNoteFromCategoryOp(data, categoryId, noteId)),
+
+  removeSegmentFromCategory: (categoryId, segmentId) =>
+    get().updateProject((data) => removeSegmentFromCategoryOp(data, categoryId, segmentId)),
+
+  fileSpanUnderCategory: (documentId, start, end, text, categoryId) =>
+    get().updateProject((data) => {
+      const { data: withSegment, segmentId } = ensureSegmentOp(data, { documentId, start, end, text })
+      return addSegmentToCategoryOp(withSegment, categoryId, segmentId)
+    })
 }))

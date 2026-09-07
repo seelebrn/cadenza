@@ -110,6 +110,7 @@ export interface CategoryRecord {
   id: string
   kind: CategoryKind
   name: string
+  color: string
   codeIds: string[]
   noteIds: string[]
   /** Raw quotes filed directly under this category without a Note wrapper. */

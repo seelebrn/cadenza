@@ -7,10 +7,15 @@ import type { ProjectData } from './types'
  * top-level list). Runtime data from JSON.parse can be missing fields the
  * ProjectData type claims always exist — that's exactly the gap this closes.
  */
+const FALLBACK_CATEGORY_COLOR = '#64748b'
+
 export function normalizeProjectData(raw: ProjectData): ProjectData {
   return {
     ...raw,
     noteCategories: raw.noteCategories ?? [],
-    notes: raw.notes.map((n) => (n.noteCategoryId === undefined ? { ...n, noteCategoryId: null } : n))
+    notes: raw.notes.map((n) => (n.noteCategoryId === undefined ? { ...n, noteCategoryId: null } : n)),
+    categories: (raw.categories ?? []).map((c) =>
+      c.color === undefined ? { ...c, color: FALLBACK_CATEGORY_COLOR } : c
+    )
   }
 }

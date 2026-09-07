@@ -31,7 +31,16 @@ npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
 - [x] Phase 2 — Document import (.docx/.odt/.txt) + reader pane
 - [x] Phase 3 — Coding engine (select text → code, codebook hierarchy, merge)
 - [x] Phase 4 — Notes/AQA system (question+answer memos, attach-anywhere, promote-to-code)
-- [ ] Phase 5 — Visual grouping board (drag-and-drop clustering of codes/notes)
-- [ ] Phase 6 — Retrieval/matrix view (frequency, code×document co-occurrence)
-- [ ] Phase 7 — Excel import (row=case) + exporters (annotated .docx, .xlsx reports, backup)
-- [ ] Phase 8 — Packaging polish (icons, verified Windows + macOS builds)
+- [x] Phase 5 — Retrieval (by code/note) + Category management (AQA question log)
+- [ ] Phase 6 — Visual grouping board (drag-and-drop clustering of codes/notes/quotes)
+- [ ] Phase 7 — Cross-case comparison (Kaufmann contrastive view, IPA-style GECT table)
+- [ ] Phase 8 — Excel import (row=case) + exporters (annotated .docx, .xlsx reports, backup)
+- [ ] Phase 9 — Packaging polish (icons, verified Windows + macOS builds)
+
+### Methodology reality-check (2026-09-07)
+
+The app's actual analytic targets are Kaufmann's comprehensive interview analysis, IPA,
+Reflexive Thematic Analysis, and AQA. None of the four run end-to-end yet — Phase 5 closes
+the two most foundational shared gaps (retrieval, real Category CRUD), but cross-case
+comparison (Phase 7) and the clustering board (Phase 6) still matter a lot for IPA/RTA
+specifically, and export/write-up (Phase 8) matters for all four eventually.

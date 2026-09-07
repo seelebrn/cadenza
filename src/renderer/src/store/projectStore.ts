@@ -101,6 +101,7 @@ interface ProjectState {
   withBatch: (fn: () => void) => void
   undo: () => void
   redo: () => void
+  renameProject: (name: string) => void
   importDocument: () => Promise<void>
 
   // Codebook / coding
@@ -380,6 +381,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ data: next, past: [...past, data].slice(-MAX_HISTORY), future: future.slice(1), isDirty: true })
     scheduleAutosave(get)
   },
+
+  renameProject: (name) => get().updateProject((data) => ({ ...data, name })),
 
   importDocument: async () => {
     set({ isImporting: true, error: null })

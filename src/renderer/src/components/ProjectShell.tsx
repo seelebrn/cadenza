@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import AnalysisView from './AnalysisView'
@@ -21,8 +21,12 @@ function ProjectShell(): JSX.Element | null {
   const canRedo = useProjectStore((s) => s.future.length > 0)
   const undo = useProjectStore((s) => s.undo)
   const redo = useProjectStore((s) => s.redo)
+  const renameProject = useProjectStore((s) => s.renameProject)
   const mainView = useWorkspaceUiStore((s) => s.mainView)
   const setMainView = useWorkspaceUiStore((s) => s.setMainView)
+
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z (and Ctrl+Y, the common Windows
   // alternate binding) to redo — skipped while focus is inside a text
@@ -53,12 +57,39 @@ function ProjectShell(): JSX.Element | null {
   }, [undo, redo])
 
   if (!data) return null
+  const project = data // a stable local const narrows reliably; the nested handler below can't rely on the outer null-check
+
+  function commitNameRename(): void {
+    const trimmed = nameDraft.trim()
+    if (trimmed && trimmed !== project.name) renameProject(trimmed)
+    setIsEditingName(false)
+  }
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
         <div>
-          <h1 className="text-lg font-semibold">{data.name}</h1>
+          {isEditingName ? (
+            <input
+              autoFocus
+              className="rounded border border-slate-300 px-1 text-lg font-semibold"
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitNameRename}
+              onKeyDown={(e) => e.key === 'Enter' && commitNameRename()}
+            />
+          ) : (
+            <h1
+              className="text-lg font-semibold"
+              onDoubleClick={() => {
+                setNameDraft(data.name)
+                setIsEditingName(true)
+              }}
+              title="Double-click to rename"
+            >
+              {data.name}
+            </h1>
+          )}
           <p className="text-xs text-slate-400">
             {filePath ?? 'Not saved yet'}
             {isDirty && ' • unsaved changes'}

@@ -239,3 +239,15 @@ restoring what undo took back, a fresh edit after an undo correctly invalidating
 stack, and the history cap trimming old entries without erroring once exhausted. Boot-
 tested a separate packaged instance (window title "Cadenza", no errors), then killed it and
 confirmed no electron process was left running.
+
+### Rename a project (2026-09-07)
+
+There was genuinely no way to do this — `ProjectData.name` was set once at creation
+(`newProject(name)`) and never touched again anywhere in the app. Added `renameProject`
+(a one-line `updateProject` call, same as `importDocument`'s inline pattern, since there's
+no real logic to a plain field assignment worth a dedicated shared/*.ts op function) and
+double-click-to-rename on the project title in the header, matching the exact rename UI
+already used for documents/codes/clusters elsewhere. Renaming only changes the in-app
+name shown in the header and used as the default filename the next time a Save-As dialog
+opens — it does not rename the `.qdaproj` file already on disk, the same way renaming a
+document doesn't touch its imported source file.

@@ -528,7 +528,7 @@ function BoardView(): JSX.Element {
                   else setCategoryToPlace(e.target.value)
                 }}
               >
-                <option value="">+ Place category…</option>
+                <option value="">+ Place cluster…</option>
                 {placeableCategories.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -817,7 +817,7 @@ function ClusterFrame({ cluster, category, dragState, liveDelta, onStartMove, on
         )}
         <button
           className="flex-shrink-0 text-white/80 hover:text-white"
-          title="Remove from this board (category is kept)"
+          title="Remove from this board (the cluster itself is kept)"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => deleteCluster(cluster.id)}
         >

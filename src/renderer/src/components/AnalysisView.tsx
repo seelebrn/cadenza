@@ -1,6 +1,6 @@
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import RetrievalView from './RetrievalView'
-import CategoriesView from './CategoriesView'
+import ClustersView from './ClustersView'
 
 function AnalysisView(): JSX.Element {
   const analysisTab = useWorkspaceUiStore((s) => s.analysisTab)
@@ -27,11 +27,11 @@ function AnalysisView(): JSX.Element {
           }`}
           onClick={() => setAnalysisTab('categories')}
         >
-          Categories
+          Clusters
         </button>
       </div>
       <div className="flex-1 overflow-hidden">
-        {analysisTab === 'retrieval' ? <RetrievalView /> : <CategoriesView />}
+        {analysisTab === 'retrieval' ? <RetrievalView /> : <ClustersView />}
       </div>
     </div>
   )

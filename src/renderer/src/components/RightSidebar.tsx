@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
+import ClustersView from './ClustersView'
 import CodebookPanel from './CodebookPanel'
 import NotesPanel from './NotesPanel'
 
@@ -46,11 +47,11 @@ function RightSidebar(): JSX.Element {
         onMouseDown={(e) => setDragStartX(e.clientX)}
       />
 
-      <FileUnderCategoryBar />
+      <FileUnderClusterBar />
 
       <div className="flex border-b border-slate-200">
         <button
-          className={`flex-1 px-3 py-2 text-sm font-medium ${
+          className={`flex-1 px-2 py-2 text-sm font-medium ${
             activeTab === 'codes' ? 'border-b-2 border-slate-900 text-slate-900' : 'text-slate-400 hover:text-slate-600'
           }`}
           onClick={() => setActiveTab('codes')}
@@ -58,31 +59,41 @@ function RightSidebar(): JSX.Element {
           Codes &amp; items
         </button>
         <button
-          className={`flex-1 px-3 py-2 text-sm font-medium ${
+          className={`flex-1 px-2 py-2 text-sm font-medium ${
             activeTab === 'notes' ? 'border-b-2 border-slate-900 text-slate-900' : 'text-slate-400 hover:text-slate-600'
           }`}
           onClick={() => setActiveTab('notes')}
         >
           Notes
         </button>
+        <button
+          className={`flex-1 px-2 py-2 text-sm font-medium ${
+            activeTab === 'clusters' ? 'border-b-2 border-slate-900 text-slate-900' : 'text-slate-400 hover:text-slate-600'
+          }`}
+          onClick={() => setActiveTab('clusters')}
+        >
+          Clusters
+        </button>
       </div>
 
-      {activeTab === 'codes' ? <CodebookPanel /> : <NotesPanel />}
+      {activeTab === 'codes' && <CodebookPanel />}
+      {activeTab === 'notes' && <NotesPanel />}
+      {activeTab === 'clusters' && <ClustersView />}
     </aside>
   )
 }
 
-/** Files the active span as a raw quote under a category — usable
- * regardless of whether it's been coded/memoed, and regardless of which
- * sidebar tab is open, since it's about the span, not the tab. */
-function FileUnderCategoryBar(): JSX.Element | null {
+/** Files the active span as a raw quote under a cluster — usable regardless
+ * of whether it's been coded/memoed, and regardless of which sidebar tab is
+ * open, since it's about the span, not the tab. */
+function FileUnderClusterBar(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
   const fileSpanUnderCategory = useProjectStore((s) => s.fileSpanUnderCategory)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const [categoryId, setCategoryId] = useState('')
 
-  const categories = data?.categories ?? []
-  if (!activeSpan || categories.length === 0) return null
+  const clusters = data?.categories ?? []
+  if (!activeSpan || clusters.length === 0) return null
 
   return (
     <div className="flex items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs">
@@ -93,9 +104,9 @@ function FileUnderCategoryBar(): JSX.Element | null {
         onChange={(e) => setCategoryId(e.target.value)}
       >
         <option value="" disabled>
-          Choose category…
+          Choose cluster…
         </option>
-        {categories.map((c) => (
+        {clusters.map((c) => (
           <option key={c.id} value={c.id}>
             {c.kind === 'question' ? '❓ ' : '🏷 '}
             {c.name}

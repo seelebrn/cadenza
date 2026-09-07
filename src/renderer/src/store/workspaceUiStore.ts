@@ -7,7 +7,7 @@ export interface ActiveSpan {
   text: string
 }
 
-export type SidebarTab = 'codes' | 'notes'
+export type SidebarTab = 'codes' | 'notes' | 'clusters'
 export type MainView = 'workspace' | 'analysis' | 'board'
 export type AnalysisTab = 'retrieval' | 'categories'
 

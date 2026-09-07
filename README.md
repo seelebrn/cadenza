@@ -5,16 +5,16 @@ A local, single-user qualitative data analysis desktop app (Electron + React + T
 Coding is one lens among several, not the privileged one: codes, lightweight inventory
 "items", and freeform notes/memos (optionally structured as an AQA-style question+answer,
 per Paillé & Mucchielli) are all first-class ways to work with a segment of text, and a
-Category can itself *be* an analytic question rather than just a theme label. Whenever text
+Cluster can itself *be* an analytic question rather than just a theme label. Whenever text
 is coded, memoed, or itemized, the verbatim quote is captured on the spot, so it survives
 even if the source document is later edited — and it can be: a per-paragraph inline editor
 lets you fix transcription errors or redact names after import, re-anchoring every existing
-coding/note automatically. The visual grouping board and the Workspace/Analysis screens
-share the same category data — a board cluster *is* a category's spatial shape, not a copy,
-so grouping something on the board or from a list view is instantly visible in both; every
-code and note appears on the default board automatically, and clusters can nest into
-superordinate groups (drag one into another; shift+drag to pull one back out). Import/export
-with Word (.docx), OpenOffice (.odt), and Excel (.xlsx/.xls) rounds it out.
+coding/note automatically. Clusters (a code/note/quote grouping — or itself an analytic
+question) are the same data everywhere they appear: the board, the Workspace sidebar's
+Clusters tab, and Analysis's Clusters tab are three views onto one list, not three copies to
+keep in sync. Every code and note appears on the default board automatically, and clusters
+can nest into superordinate groups (drag one into another; shift+drag to pull one back out).
+Import/export with Word (.docx), OpenOffice (.odt), and Excel (.xlsx/.xls) rounds it out.
 
 Runs on Windows and macOS. See `\plans\humble-herding-pike.md` for the
 full design/phase plan.
@@ -37,7 +37,7 @@ npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
 - [x] Phase 2 — Document import (.docx/.odt/.txt) + reader pane
 - [x] Phase 3 — Coding engine (select text → code, codebook hierarchy, merge)
 - [x] Phase 4 — Notes/AQA system (question+answer memos, attach-anywhere, promote-to-code)
-- [x] Phase 5 — Retrieval (by code/note) + Category management (AQA question log)
+- [x] Phase 5 — Retrieval (by code/note) + Cluster management (AQA question log)
 - [x] Phase 6 — Visual grouping board (drag-and-drop clustering of codes/notes/quotes)
 - [ ] Phase 7 — Cross-case comparison (Kaufmann contrastive view, IPA-style GECT table)
 - [ ] Phase 8 — Excel import (row=case) + exporters (annotated .docx, .xlsx reports, backup)
@@ -61,3 +61,16 @@ on a given board, with no separate membership or promotion step — see `boardOp
 surfaced on the board as dragging one cluster into another. Every code and note is visible
 on the one default board automatically; other boards stay opt-in/curated, with bulk
 "add all codes/notes/clusters" actions for quickly populating one.
+
+### Terminology + Workspace clusters tab (2026-09-07)
+
+User-facing text now says "cluster" everywhere this concept appears (Board, Analysis,
+Workspace), rather than mixing "category"/"cluster"/"theme". The underlying type stays
+`CategoryRecord`/`categoryOps.ts` internally — renaming it would have collided with the
+already-distinct `BoardCluster` (a category's per-board position, not the category itself).
+The Workspace sidebar gained a third tab, Clusters, rendering the exact same `ClustersView`
+component Analysis uses — one component, one data source, so a cluster created from the
+board, the Workspace tab, or the Analysis tab is the same record everywhere, never a copy
+that needs to be kept in sync. (The separate `NoteCategoryDef` concept — Note Descriptive/
+Linguistique/Conceptuelle classification tags — intentionally keeps the word "category":
+it's a genuinely different thing, a flat per-note tag, not a grouping cluster.)

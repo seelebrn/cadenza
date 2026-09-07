@@ -8,24 +8,33 @@ function nextColor(count: number): string {
   return PALETTE[count % PALETTE.length]
 }
 
-function CategoriesView(): JSX.Element {
+/** The user-facing name for a CategoryRecord is "cluster" everywhere — this
+ * is also literally what the board draws as a cluster frame (a
+ * BoardCluster is just this record's spatial shape on a given board). Kept
+ * as CategoryRecord/categoryOps.ts internally since renaming the type would
+ * collide with BoardCluster, a genuinely different thing. This same
+ * component is used both here (Analysis > Clusters) and as a Workspace
+ * sidebar tab — one component, one data source, so a cluster created from
+ * the board, this list, or the other copy of this list is the same record
+ * everywhere, not three things that need to be kept in sync. */
+function ClustersView(): JSX.Element {
   const data = useProjectStore((s) => s.data)
   const createCategory = useProjectStore((s) => s.createCategory)
 
   const [newName, setNewName] = useState('')
   const [newKind, setNewKind] = useState<CategoryKind>('theme')
 
-  const categories = data?.categories ?? []
+  const clusters = data?.categories ?? []
 
   function handleCreate(): void {
     const name = newName.trim()
     if (!name) return
-    createCategory(name, newKind, nextColor(categories.length))
+    createCategory(name, newKind, nextColor(clusters.length))
     setNewName('')
   }
 
-  const questions = categories.filter((c) => c.kind === 'question')
-  const themes = categories.filter((c) => c.kind === 'theme')
+  const questions = clusters.filter((c) => c.kind === 'question')
+  const themes = clusters.filter((c) => c.kind === 'theme')
 
   return (
     <div className="h-full overflow-auto p-4">
@@ -53,11 +62,11 @@ function CategoriesView(): JSX.Element {
         </button>
       </div>
 
-      {categories.length === 0 && (
+      {clusters.length === 0 && (
         <p className="text-sm text-slate-400">
-          No categories yet. A "question" category is Paillé &amp; Mucchielli-style AQA: the category
-          itself is the analytic question, and whatever you file under it (codes, notes, quotes) reads
-          as an answer.
+          No clusters yet. A "question" cluster is Paillé &amp; Mucchielli-style AQA: the cluster itself
+          is the analytic question, and whatever you file under it (codes, notes, quotes) reads as an
+          answer. Clusters created here also show up on the board, and vice versa — same data either way.
         </p>
       )}
 
@@ -66,7 +75,7 @@ function CategoriesView(): JSX.Element {
           <h2 className="mb-2 text-sm font-semibold text-slate-600">Analytic questions (AQA)</h2>
           <div className="space-y-3">
             {questions.map((cat) => (
-              <CategoryCard key={cat.id} category={cat} />
+              <ClusterCard key={cat.id} category={cat} />
             ))}
           </div>
         </div>
@@ -77,7 +86,7 @@ function CategoriesView(): JSX.Element {
           <h2 className="mb-2 text-sm font-semibold text-slate-600">Themes</h2>
           <div className="space-y-3">
             {themes.map((cat) => (
-              <CategoryCard key={cat.id} category={cat} />
+              <ClusterCard key={cat.id} category={cat} />
             ))}
           </div>
         </div>
@@ -86,7 +95,7 @@ function CategoriesView(): JSX.Element {
   )
 }
 
-function CategoryCard({ category }: { category: CategoryRecord }): JSX.Element | null {
+function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
@@ -279,4 +288,4 @@ function CategoryCard({ category }: { category: CategoryRecord }): JSX.Element |
   )
 }
 
-export default CategoriesView
+export default ClustersView

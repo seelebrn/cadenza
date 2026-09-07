@@ -213,6 +213,50 @@ function computeClusterGridPosition(index: number): { x: number; y: number } {
   }
 }
 
+/**
+ * The clusters a board should actually show — the cluster counterpart of
+ * getVisibleBoardItems above. On the default board, every category is
+ * visible as a cluster frame whether or not it has an explicit BoardCluster
+ * shape yet there (falling back to a deterministic grid position/size for
+ * any category that doesn't); other boards only show what's been
+ * explicitly placed via "+ New cluster" / "+ Place cluster…" / "+ Add all
+ * clusters". Without this, creating a category anywhere that isn't the
+ * board itself (the Workspace codebook tab, Analysis > Clusters) leaves it
+ * with no shape on any board — including the default one — so it silently
+ * never appears until someone happens to place it.
+ */
+export function getVisibleBoardClusters(
+  board: Pick<BoardRecord, 'id' | 'isDefault'>,
+  explicitClusters: BoardCluster[],
+  categories: Array<{ id: string }>
+): BoardCluster[] {
+  if (!board.isDefault) return explicitClusters
+
+  const explicitByCategory = new Map(explicitClusters.map((c) => [c.categoryId, c]))
+  const result: BoardCluster[] = []
+  let autoIndex = 0
+
+  for (const category of categories) {
+    const existing = explicitByCategory.get(category.id)
+    if (existing) {
+      result.push(existing)
+    } else {
+      const pos = computeClusterGridPosition(autoIndex++)
+      result.push({
+        id: `virtual:cluster:${category.id}`,
+        boardId: board.id,
+        categoryId: category.id,
+        x: pos.x,
+        y: pos.y,
+        width: DEFAULT_CLUSTER_WIDTH,
+        height: DEFAULT_CLUSTER_HEIGHT,
+        createdAt: ''
+      })
+    }
+  }
+  return result
+}
+
 /** Adds every code not already on this board, laid out in a grid. */
 export function addAllCodesToBoard(data: ProjectData, boardId: string): ProjectData {
   const existing = new Set(

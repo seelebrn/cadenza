@@ -88,6 +88,17 @@ quotes, AQA question/theme kind) — same `ClustersView` component, same data. (
 — intentionally keeps the word "category": a genuinely different thing, a flat per-note tag,
 not a grouping cluster.)
 
+Fixed: a cluster created anywhere other than the board itself (the Workspace codebook
+tree, Analysis > Clusters) never showed up on any board, including the default one.
+Cause — a `BoardCluster` is a category's spatial *shape* on a given board, and nothing
+ever created one automatically; codes and notes get this for free via
+`getVisibleBoardItems`'s virtual fallback, but clusters had no equivalent. Added
+`getVisibleBoardClusters`, the cluster counterpart: on the default board, every category
+now shows as a cluster frame whether or not it has a stored shape yet, materializing into
+a real `BoardCluster` only once actually touched (moved, resized, or dropped into) — same
+pattern as items, including the same "virtual id has nothing to update" failure mode it
+had to avoid for moving/resizing/assigning members to a still-virtual cluster.
+
 Fixed: dragging a cluster frame on the board stopped carrying its member items along.
 Cause — a member that had only ever appeared as a "virtual" (not-yet-persisted) fallback
 card, e.g. because it was added to the cluster from the codebook tab rather than physically

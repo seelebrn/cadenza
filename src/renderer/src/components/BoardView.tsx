@@ -9,6 +9,7 @@ import {
   getClusterMemberItems,
   getDefaultBoardId,
   getLinkedGroup,
+  getVisibleBoardClusters,
   getVisibleBoardItems
 } from '@shared/boardOps'
 import { getDescendantCategoryIds } from '@shared/categoryOps'
@@ -141,7 +142,7 @@ function BoardView(): JSX.Element {
   }, [selectedBoardId, boards, setSelectedBoardId])
 
   const currentBoard = boards.find((b) => b.id === selectedBoardId) ?? null
-  const clusters = data?.boardClusters.filter((c) => c.boardId === selectedBoardId) ?? []
+  const explicitClusters = data?.boardClusters.filter((c) => c.boardId === selectedBoardId) ?? []
   const links = data?.boardLinks.filter((l) => l.boardId === selectedBoardId) ?? []
   const explicitItems = data?.boardItems.filter((i) => i.boardId === selectedBoardId) ?? []
 
@@ -149,6 +150,37 @@ function BoardView(): JSX.Element {
     if (!data || !currentBoard) return []
     return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes)
   }, [data, currentBoard, explicitItems])
+
+  // A category created anywhere (the Workspace codebook tab, Analysis >
+  // Clusters, or this board) has no board shape until something places one
+  // — same reasoning as items above: on the default board, every category
+  // shows as a cluster frame automatically (a deterministic grid fallback),
+  // materializing into a real BoardCluster only once actually touched
+  // (moved/resized/dropped into), so creating a cluster in the Workspace is
+  // visible here immediately without an extra "place it" step.
+  const clusters = useMemo<BoardCluster[]>(() => {
+    if (!data || !currentBoard) return []
+    return getVisibleBoardClusters(currentBoard, explicitClusters, data.categories)
+  }, [data, currentBoard, explicitClusters])
+
+  /** Turns a possibly-virtual cluster into a real, persisted BoardCluster
+   * (a no-op returning the same id if it already is one) — needed before
+   * any operation that looks a cluster up by id in data.boardClusters
+   * (moveCluster, resizeCluster, assign/unassignItemToCluster), since a
+   * virtual id like "virtual:cluster:<categoryId>" only exists in this
+   * computed `clusters` array, never in the stored data. */
+  function materializeCluster(cluster: BoardCluster): string {
+    if (!cluster.id.startsWith('virtual:')) return cluster.id
+    const realId = createClusterForCategory(
+      cluster.boardId,
+      cluster.categoryId,
+      cluster.x,
+      cluster.y,
+      cluster.width,
+      cluster.height
+    )
+    return realId ?? cluster.id
+  }
 
   // Wheel-to-zoom (Ctrl/Cmd+wheel only — plain wheel keeps scrolling/panning
   // natively). Attached as a native listener (not React's onWheel) because
@@ -232,8 +264,8 @@ function BoardView(): JSX.Element {
           const oldCluster = findClusterAtPoint(clusters, oldPos.x + CARD_WIDTH / 2, oldPos.y + CARD_HEIGHT / 2)
           const newCluster = findClusterAtPoint(clusters, finalX + CARD_WIDTH / 2, finalY + CARD_HEIGHT / 2)
           if (oldCluster?.id !== newCluster?.id) {
-            if (oldCluster) unassignItemFromCluster(oldCluster.id, member.refType, member.refId)
-            if (newCluster) assignItemToCluster(newCluster.id, member.refType, member.refId)
+            if (oldCluster) unassignItemFromCluster(materializeCluster(oldCluster), member.refType, member.refId)
+            if (newCluster) assignItemToCluster(materializeCluster(newCluster), member.refType, member.refId)
           }
         }
 
@@ -581,7 +613,8 @@ function BoardView(): JSX.Element {
 
       {currentBoard && (
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
-          {currentBoard.isDefault && 'Every code and note is shown automatically on this default board. '}
+          {currentBoard.isDefault &&
+            'Every code, note, and cluster is shown automatically on this default board. '}
           Ctrl/Cmd+scroll to zoom · drag two cards close together to link them (they snap), and linked/clustered
           cards move together (shift+drag to move just one) · drag a cluster into another to nest it as a
           superordinate group (shift+drag to pull it out) · click the × on a connector to unlink
@@ -629,8 +662,19 @@ function BoardView(): JSX.Element {
                     const groupCategoryIds = [category.id, ...descendantCategoryIds]
                     const groupCategories = data.categories.filter((c) => groupCategoryIds.includes(c.id))
                     const groupClusters = clusters.filter((c) => groupCategoryIds.includes(c.categoryId))
+                    // A cluster shown only as a "virtual" grid-fallback frame
+                    // (a category with no BoardCluster shape on this board
+                    // yet) has nothing for moveCluster to find by id.
+                    // Materialize every cluster in the moving group now, up
+                    // front, the same reasoning as member items just below.
+                    const clusterIdByCategoryId = new Map<string, string>()
                     const clusterStartPositions: Record<string, Position> = {}
-                    for (const c of groupClusters) clusterStartPositions[c.id] = { x: c.x, y: c.y }
+                    for (const c of groupClusters) {
+                      const realId = materializeCluster(c)
+                      clusterIdByCategoryId.set(c.categoryId, realId)
+                      clusterStartPositions[realId] = { x: c.x, y: c.y }
+                    }
+                    const primaryClusterId = clusterIdByCategoryId.get(category.id) ?? cluster.id
 
                     const memberItemsMap = new Map<string, BoardItem>()
                     for (const cat of groupCategories) {
@@ -657,12 +701,12 @@ function BoardView(): JSX.Element {
 
                     setDragState({
                       kind: 'cluster-move',
-                      id: cluster.id,
+                      id: primaryClusterId,
                       categoryId: category.id,
                       shiftKey: e.shiftKey,
                       startWidth: cluster.width,
                       startHeight: cluster.height,
-                      groupClusterIds: groupClusters.map((c) => c.id),
+                      groupClusterIds: Array.from(clusterIdByCategoryId.values()),
                       clusterStartPositions,
                       memberItemIds,
                       memberStartPositions,
@@ -675,7 +719,7 @@ function BoardView(): JSX.Element {
                   onStartResize={(e) =>
                     setDragState({
                       kind: 'cluster-resize',
-                      id: cluster.id,
+                      id: materializeCluster(cluster),
                       startMouseX: e.clientX,
                       startMouseY: e.clientY,
                       startWidth: cluster.width,

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import CodebookPanel from './CodebookPanel'
 import DocumentList from './DocumentList'
 import DocumentReader from './DocumentReader'
 
@@ -62,6 +63,7 @@ function ProjectShell(): JSX.Element | null {
         <main className="flex-1 overflow-auto">
           <DocumentReader documentId={selectedDocumentId} />
         </main>
+        <CodebookPanel />
       </div>
     </div>
   )

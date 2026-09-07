@@ -5,4 +5,5 @@ dist/
 dist-electron/
 *.log
 *.tsbuildinfo
+*.qdaproj
 .DS_Store

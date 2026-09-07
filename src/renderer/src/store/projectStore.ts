@@ -1,5 +1,17 @@
 import { create } from 'zustand'
-import type { ProjectData, RecentProjectEntry, SerializedAssets } from '@shared/types'
+import type { ProjectData, RecentProjectEntry, SerializedAssets, TagKind } from '@shared/types'
+import {
+  addCode as addCodeOp,
+  applyCodeToSelection as applyCodeToSelectionOp,
+  deleteCode as deleteCodeOp,
+  mergeCodes as mergeCodesOp,
+  removeCoding as removeCodingOp,
+  renameCode as renameCodeOp,
+  reparentCode as reparentCodeOp,
+  setCodeColor as setCodeColorOp,
+  setCodeDefinition as setCodeDefinitionOp
+} from '@shared/projectOps'
+import { useCodingUiStore } from './codingUiStore'
 
 interface ProjectState {
   data: ProjectData | null
@@ -21,6 +33,17 @@ interface ProjectState {
   /** Apply a change to the current project and (if already saved once) autosave it. */
   updateProject: (updater: (data: ProjectData) => ProjectData) => void
   importDocument: () => Promise<void>
+
+  // Codebook / coding
+  addCode: (input: { name: string; kind: TagKind; color: string; definition?: string; parentId?: string | null }) => string | null
+  renameCode: (codeId: string, name: string) => void
+  setCodeColor: (codeId: string, color: string) => void
+  setCodeDefinition: (codeId: string, definition: string) => void
+  reparentCode: (codeId: string, parentId: string | null) => void
+  deleteCode: (codeId: string) => void
+  mergeCodes: (sourceId: string, targetId: string) => void
+  applyCodeToSelection: (documentId: string, start: number, end: number, text: string, codeId: string) => void
+  removeCoding: (codingId: string) => void
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -150,5 +173,35 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } finally {
       set({ isImporting: false })
     }
-  }
+  },
+
+  addCode: (input) => {
+    const { data } = get()
+    if (!data) return null
+    const result = addCodeOp(data, input)
+    get().updateProject(() => result.data)
+    return result.codeId
+  },
+
+  renameCode: (codeId, name) => get().updateProject((data) => renameCodeOp(data, codeId, name)),
+
+  setCodeColor: (codeId, color) => get().updateProject((data) => setCodeColorOp(data, codeId, color)),
+
+  setCodeDefinition: (codeId, definition) =>
+    get().updateProject((data) => setCodeDefinitionOp(data, codeId, definition)),
+
+  reparentCode: (codeId, parentId) =>
+    get().updateProject((data) => reparentCodeOp(data, codeId, parentId)),
+
+  deleteCode: (codeId) => get().updateProject((data) => deleteCodeOp(data, codeId)),
+
+  mergeCodes: (sourceId, targetId) =>
+    get().updateProject((data) => mergeCodesOp(data, sourceId, targetId)),
+
+  applyCodeToSelection: (documentId, start, end, text, codeId) => {
+    get().updateProject((data) => applyCodeToSelectionOp(data, { documentId, start, end, text, codeId }))
+    useCodingUiStore.getState().clear()
+  },
+
+  removeCoding: (codingId) => get().updateProject((data) => removeCodingOp(data, codingId))
 }))

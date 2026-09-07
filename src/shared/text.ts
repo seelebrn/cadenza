@@ -21,3 +21,17 @@ export function splitIntoParagraphs(rawText: string): string[] {
   const rawParagraphs = hasBlankLineBreaks ? normalized.split(/\n\s*\n/) : normalized.split('\n')
   return rawParagraphs.map((p) => p.trim()).filter((p) => p.length > 0)
 }
+
+/** The offset each paragraph starts at within joinParagraphs(paragraphs) —
+ * i.e. where Segment.start/end for that paragraph's text begin counting
+ * from. Used to map a DOM selection inside one rendered paragraph back to a
+ * global offset into the joined text. */
+export function getParagraphStartOffsets(paragraphs: string[]): number[] {
+  const offsets: number[] = []
+  let cursor = 0
+  for (const paragraph of paragraphs) {
+    offsets.push(cursor)
+    cursor += paragraph.length + PARAGRAPH_JOIN.length
+  }
+  return offsets
+}

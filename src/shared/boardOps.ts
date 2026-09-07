@@ -346,6 +346,33 @@ export function getVisibleBoardClusters(
 }
 
 /**
+ * Drops every explicit cluster shape on one board, so getVisibleBoardClusters
+ * falls back to computing all of them fresh from the current category
+ * structure. Used when a nesting change happens somewhere that isn't a
+ * board drag (the Workspace codebook/notes trees) — those already recompute
+ * correctly for a category that was never explicitly placed, but once a
+ * cluster has an explicit shape (from being dragged/resized even once) its
+ * position/size stays frozen regardless of later nesting changes, since
+ * getVisibleBoardClusters always trusts an explicit shape over recomputing
+ * it. Resetting is deliberately "everything on the board", not just the
+ * categories the reparent directly touched: an incremental patch has to
+ * either also reset every affected category's *entire* descendant subtree
+ * (to avoid orphaning children whose parent's box just moved out from under
+ * their untouched absolute position) or risk exactly that orphaning — full
+ * reset sidesteps the problem by construction and reuses the already-tested
+ * recursive layout for 100% of the result, at the cost of losing any manual
+ * cluster arrangement on this board. Only ever called for the *default*
+ * board — other boards stay fully user-curated, untouched by this. Board
+ * *items* (individual code/note/quote cards) are untouched either way: an
+ * item that already has its own explicit position keeps it regardless of
+ * where its cluster's frame ends up, the same trade-off that already
+ * applies when a cluster is manually dragged on the board itself.
+ */
+export function resetDefaultBoardClusterLayout(data: ProjectData, boardId: string): ProjectData {
+  return { ...data, boardClusters: data.boardClusters.filter((c) => c.boardId !== boardId) }
+}
+
+/**
  * The items a board should actually show: on the default board, every code
  * and note is visible whether or not it has an explicit BoardItem yet;
  * other boards only show what's been explicitly placed. Kept as its own

@@ -291,3 +291,44 @@ safely producing zero clusters rather than hanging, and a legitimate 30-level-de
 placing every level without an artificial cap truncating it. Boot-tested a separate
 packaged instance (window title "Cadenza", no errors), then killed it and confirmed no
 electron process was left running.
+
+### The board reflows when nesting changes in the Workspace (2026-09-07)
+
+The previous fix made a category's *first* board appearance correctly nest inside its
+parent, but once a cluster has an explicit shape (dragged/resized even once), its position
+stays frozen — `getVisibleBoardClusters` always trusts an explicit shape over recomputing
+it. So integrating one cluster into another from the Workspace tree still didn't visually
+move/resize anything on the board once either cluster had already been touched there — the
+common case for a project anyone's actually worked in.
+
+Added `resetDefaultBoardClusterLayout` (boardOps.ts): drops every explicit cluster shape
+on one board, so the whole thing recomputes fresh from `getVisibleBoardClusters`'s
+already-tested recursive layout. Deliberately resets *everything* on the board rather than
+trying to patch just the directly-affected clusters — an incremental patch has to either
+also reset every affected cluster's entire descendant subtree (to avoid orphaning children
+whose parent's box just moved out from under their untouched absolute position) or risk
+exactly that orphaning; a full reset sidesteps the problem by construction. Board *items*
+(individual code/note/quote cards) are untouched — an item with its own explicit position
+keeps it regardless of where its cluster's frame ends up, the same trade-off that already
+applies when a cluster is manually dragged on the board itself.
+
+New store action `reparentCategoryAndReflowBoard` wraps `reparentCategory` + (when the
+parent actually changed) this reset, both inside one `withBatch` so it's still a single
+undo step. `CodebookPanel.tsx` and `NotesPanel.tsx`'s Workspace-tree nesting/un-nesting now
+call this instead of plain `reparentCategory`; `BoardView.tsx`'s board-drag nesting keeps
+calling the plain action unchanged, since a board drag already positions everything itself
+(via the resize-on-nest feature) and running a full reset on top would discard the position
+the user just dragged the cluster to.
+
+Only ever resets the *default* board — other boards stay fully user-curated, since the
+whole point of a non-default board is manual, deliberate arrangement that shouldn't get
+silently rewritten by an unrelated Workspace edit.
+
+Verified: typecheck and build clean. Unit-tested `resetDefaultBoardClusterLayout` in
+isolation (only touches the target board) and the full end-to-end scenario the user
+described (boardOps.ts + categoryOps.ts bundled with esbuild, run with node, then deleted):
+two explicit, far-apart sibling clusters; nest one into the other via the Workspace path
+(reparent + reset, no board drag) and confirm the child now sits inside the grown parent;
+pull it back out and confirm they're visually separated again. Boot-tested a separate
+packaged instance (window title "Cadenza", no errors), then killed it and confirmed no
+electron process was left running.

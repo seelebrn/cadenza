@@ -111,7 +111,12 @@ function CodebookPanel(): JSX.Element {
   const reparentCode = useProjectStore((s) => s.reparentCode)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
   const createCategory = useProjectStore((s) => s.createCategory)
-  const reparentCategory = useProjectStore((s) => s.reparentCategory)
+  // Nesting/un-nesting from this tree has no board-drag position to derive
+  // a placement from (unlike doing it on the board itself), so it also
+  // resets the default board's cluster layout to recompute fresh —
+  // otherwise a cluster that's already been touched once on the board
+  // stays frozen wherever it was, ignoring this change entirely.
+  const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
   const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
   const fileSpanUnderCategory = useProjectStore((s) => s.fileSpanUnderCategory)
   const withBatch = useProjectStore((s) => s.withBatch)
@@ -521,7 +526,7 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds, searchQu
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
   const addCodeToCategory = useProjectStore((s) => s.addCodeToCategory)
   const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
-  const reparentCategory = useProjectStore((s) => s.reparentCategory)
+  const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
   const withBatch = useProjectStore((s) => s.withBatch)
 
   const [isEditingName, setIsEditingName] = useState(false)

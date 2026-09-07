@@ -34,7 +34,10 @@ function NotesPanel(): JSX.Element {
   const addNote = useProjectStore((s) => s.addNote)
   const addNoteToSelection = useProjectStore((s) => s.addNoteToSelection)
   const createCategory = useProjectStore((s) => s.createCategory)
-  const reparentCategory = useProjectStore((s) => s.reparentCategory)
+  // Nesting/un-nesting from this tree has no board-drag position to derive
+  // a placement from (unlike doing it on the board itself), so it also
+  // resets the default board's cluster layout to recompute fresh.
+  const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
   const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
 
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
@@ -432,7 +435,7 @@ function NoteClusterRow({ node, depth, visibleNotes }: NoteClusterRowProps): JSX
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
   const addNoteToCategory = useProjectStore((s) => s.addNoteToCategory)
   const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
-  const reparentCategory = useProjectStore((s) => s.reparentCategory)
+  const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
   const withBatch = useProjectStore((s) => s.withBatch)
 
   const [isEditingName, setIsEditingName] = useState(false)

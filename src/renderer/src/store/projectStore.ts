@@ -55,11 +55,13 @@ import {
   createClusterWithNewCategory as createClusterWithNewCategoryOp,
   deleteBoard as deleteBoardOp,
   deleteCluster as deleteClusterOp,
+  getDefaultBoardId,
   linkItems as linkItemsOp,
   moveCluster as moveClusterOp,
   moveItem as moveItemOp,
   removeItemFromBoard as removeItemFromBoardOp,
   renameBoard as renameBoardOp,
+  resetDefaultBoardClusterLayout as resetDefaultBoardClusterLayoutOp,
   resizeCluster as resizeClusterOp,
   unassignItemFromCluster as unassignItemFromClusterOp,
   unlinkItems as unlinkItemsOp
@@ -151,6 +153,15 @@ interface ProjectState {
   renameCategory: (categoryId: string, name: string) => void
   setCategoryColor: (categoryId: string, color: string) => void
   reparentCategory: (categoryId: string, parentCategoryId: string | null) => void
+  /** Same as reparentCategory, but also resets the default board's cluster
+   * layout so nesting/un-nesting from the Workspace tree (which has no
+   * board-drag position to derive a placement from, unlike nesting via the
+   * board itself) is immediately visible there too — the destination
+   * grows/shrinks and the moved cluster visually separates when pulled
+   * back out, same as if it had been dragged. Use this from the Workspace
+   * codebook/notes trees; BoardView keeps calling plain reparentCategory,
+   * since a board drag already positions everything itself. */
+  reparentCategoryAndReflowBoard: (categoryId: string, parentCategoryId: string | null) => void
   deleteCategory: (categoryId: string) => void
   addCodeToCategory: (categoryId: string, codeId: string) => void
   removeCodeFromCategory: (categoryId: string, codeId: string) => void
@@ -498,6 +509,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   reparentCategory: (categoryId, parentCategoryId) =>
     get().updateProject((data) => reparentCategoryOp(data, categoryId, parentCategoryId)),
+
+  reparentCategoryAndReflowBoard: (categoryId, parentCategoryId) => {
+    const before = get().data
+    if (!before) return
+    const category = before.categories.find((c) => c.id === categoryId)
+    const changed = Boolean(category) && category!.parentCategoryId !== parentCategoryId
+    get().withBatch(() => {
+      get().reparentCategory(categoryId, parentCategoryId)
+      if (!changed) return
+      const defaultBoardId = getDefaultBoardId(before.boards)
+      if (defaultBoardId) {
+        get().updateProject((data) => resetDefaultBoardClusterLayoutOp(data, defaultBoardId))
+      }
+    })
+  },
 
   deleteCategory: (categoryId) => get().updateProject((data) => deleteCategoryOp(data, categoryId)),
 

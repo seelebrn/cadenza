@@ -143,7 +143,7 @@ function NotesPanel(): JSX.Element {
         />
         <div className="flex gap-2">
           <select
-            className="rounded border border-slate-300 px-1 py-1 text-xs"
+            className="min-w-0 flex-shrink rounded border border-slate-300 px-1 py-1 text-xs"
             value={noteCategoryId ?? ''}
             onChange={(e) => setNoteCategoryId(e.target.value || null)}
           >
@@ -155,18 +155,18 @@ function NotesPanel(): JSX.Element {
             ))}
           </select>
           <input
-            className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+            className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
             placeholder="tags, comma, separated"
             value={tags}
             onChange={(e) => setTags(e.target.value)}
           />
-          <button
-            className="rounded bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-700"
-            onClick={handleAdd}
-          >
-            Add note
-          </button>
         </div>
+        <button
+          className="w-full rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
+          onClick={handleAdd}
+        >
+          Add note
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-3 py-1.5 text-xs text-slate-500">

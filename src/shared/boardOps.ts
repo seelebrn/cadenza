@@ -146,6 +146,37 @@ export function unlinkItems(data: ProjectData, linkId: string): ProjectData {
   return { ...data, boardLinks: data.boardLinks.filter((l) => l.id !== linkId) }
 }
 
+/** Every item transitively connected to itemId via links (including itemId
+ * itself) — the rigid group that should move together when one of its
+ * members is dragged. An item with no links returns just itself. */
+export function getLinkedGroup(
+  links: Array<{ itemAId: string; itemBId: string }>,
+  itemId: string
+): Set<string> {
+  const adjacency = new Map<string, string[]>()
+  function addEdge(from: string, to: string): void {
+    if (!adjacency.has(from)) adjacency.set(from, [])
+    adjacency.get(from)!.push(to)
+  }
+  for (const link of links) {
+    addEdge(link.itemAId, link.itemBId)
+    addEdge(link.itemBId, link.itemAId)
+  }
+
+  const visited = new Set<string>([itemId])
+  const queue = [itemId]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    for (const neighbor of adjacency.get(current) ?? []) {
+      if (!visited.has(neighbor)) {
+        visited.add(neighbor)
+        queue.push(neighbor)
+      }
+    }
+  }
+  return visited
+}
+
 export interface PositionedItem {
   id: string
   x: number

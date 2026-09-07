@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
-import { describeBoardItem, findClusterAtPoint, findSnapTarget } from '@shared/boardOps'
+import { describeBoardItem, findClusterAtPoint, findSnapTarget, getLinkedGroup } from '@shared/boardOps'
 import type { BoardCluster, BoardItem, CategoryKind } from '@shared/types'
 
 const CARD_WIDTH = 180
@@ -26,9 +26,35 @@ function nextColor(count: number): string {
   return PALETTE[count % PALETTE.length]
 }
 
+interface Position {
+  x: number
+  y: number
+}
+
 type DragState =
-  | { kind: 'item'; id: string; startMouseX: number; startMouseY: number; startX: number; startY: number }
-  | { kind: 'cluster-move'; id: string; startMouseX: number; startMouseY: number; startX: number; startY: number }
+  | {
+      kind: 'item'
+      /** The card actually grabbed — used for snap-target lookup and as the
+       * "other side" of a new link. */
+      id: string
+      /** Every item that moves rigidly together with it (itself plus every
+       * item transitively linked to it) — see getLinkedGroup. */
+      groupItemIds: string[]
+      startMouseX: number
+      startMouseY: number
+      startPositions: Record<string, Position>
+    }
+  | {
+      kind: 'cluster-move'
+      id: string
+      /** The cluster's current members, moved rigidly along with the frame. */
+      memberItemIds: string[]
+      startMouseX: number
+      startMouseY: number
+      startX: number
+      startY: number
+      memberStartPositions: Record<string, Position>
+    }
   | {
       kind: 'cluster-resize'
       id: string
@@ -118,55 +144,79 @@ function BoardView(): JSX.Element {
 
   useEffect(() => {
     if (!dragState) return
+    const state = dragState // a stable local const narrows reliably; re-reading dragState! repeatedly does not
 
     function handleMouseMove(e: MouseEvent): void {
       // Divide by zoom: a screen-pixel mouse delta corresponds to more (when
       // zoomed out) or fewer (zoomed in) canvas-content-space units.
       setLiveDelta({
-        dx: (e.clientX - dragState!.startMouseX) / zoom,
-        dy: (e.clientY - dragState!.startMouseY) / zoom
+        dx: (e.clientX - state.startMouseX) / zoom,
+        dy: (e.clientY - state.startMouseY) / zoom
       })
     }
 
     function handleMouseUp(e: MouseEvent): void {
-      const dx = (e.clientX - dragState!.startMouseX) / zoom
-      const dy = (e.clientY - dragState!.startMouseY) / zoom
+      const dx = (e.clientX - state.startMouseX) / zoom
+      const dy = (e.clientY - state.startMouseY) / zoom
 
-      if (dragState!.kind === 'item') {
-        const rawX = dragState!.startX + dx
-        const rawY = dragState!.startY + dy
-        const snap = findSnapTarget(items, dragState!.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
-        const finalX = snap ? snap.snappedX : rawX
-        const finalY = snap ? snap.snappedY : rawY
-        const centerX = finalX + CARD_WIDTH / 2
-        const centerY = finalY + CARD_HEIGHT / 2
-        const cluster = findClusterAtPoint(clusters, centerX, centerY)
-        moveItem(dragState!.id, finalX, finalY, cluster?.id ?? null)
+      if (state.kind === 'item') {
+        const grabbedStart = state.startPositions[state.id]
+        const rawX = grabbedStart.x + dx
+        const rawY = grabbedStart.y + dy
+        // Snap candidates exclude the whole group — a card never snaps to
+        // something it's already rigidly moving with.
+        const candidates = items.filter((i) => !state.groupItemIds.includes(i.id))
+        const snap = findSnapTarget(candidates, state.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+        const adjustX = snap ? snap.snappedX - rawX : 0
+        const adjustY = snap ? snap.snappedY - rawY : 0
+
+        const finalPositions = new Map<string, Position>()
+        for (const memberId of state.groupItemIds) {
+          const start = state.startPositions[memberId]
+          if (!start) continue
+          const finalX = start.x + dx + adjustX
+          const finalY = start.y + dy + adjustY
+          finalPositions.set(memberId, { x: finalX, y: finalY })
+          const cluster = findClusterAtPoint(clusters, finalX + CARD_WIDTH / 2, finalY + CARD_HEIGHT / 2)
+          moveItem(memberId, finalX, finalY, cluster?.id ?? null)
+        }
 
         if (snap && selectedBoardId) {
-          linkItemsAction(selectedBoardId, dragState!.id, snap.targetId)
-        } else {
-          // Not snapping to anything new — check whether this drag pulled
-          // the item far enough from an existing link partner to sever it.
-          for (const link of links) {
-            if (link.itemAId !== dragState!.id && link.itemBId !== dragState!.id) continue
-            const partnerId = link.itemAId === dragState!.id ? link.itemBId : link.itemAId
-            const partner = items.find((i) => i.id === partnerId)
-            if (!partner) continue
-            const dist = Math.hypot(
-              finalX + CARD_WIDTH / 2 - (partner.x + CARD_WIDTH / 2),
-              finalY + CARD_HEIGHT / 2 - (partner.y + CARD_HEIGHT / 2)
-            )
-            if (dist > UNLINK_DISTANCE) unlinkItemsAction(link.id)
-          }
+          linkItemsAction(selectedBoardId, state.id, snap.targetId)
         }
-      } else if (dragState!.kind === 'cluster-move') {
-        moveCluster(dragState!.id, dragState!.startX + dx, dragState!.startY + dy)
+
+        // Whether or not a new snap happened, check every link that crosses
+        // the group's boundary (one endpoint inside, one outside) — if this
+        // drag pulled it further than UNLINK_DISTANCE, sever it. Links
+        // entirely inside the group can't drift apart since it moves rigidly.
+        for (const link of links) {
+          const aInGroup = state.groupItemIds.includes(link.itemAId)
+          const bInGroup = state.groupItemIds.includes(link.itemBId)
+          if (aInGroup === bInGroup) continue
+          const insideId = aInGroup ? link.itemAId : link.itemBId
+          const outsideId = aInGroup ? link.itemBId : link.itemAId
+          const insidePos = finalPositions.get(insideId)
+          const outsideItem = items.find((i) => i.id === outsideId)
+          if (!insidePos || !outsideItem) continue
+          const dist = Math.hypot(
+            insidePos.x + CARD_WIDTH / 2 - (outsideItem.x + CARD_WIDTH / 2),
+            insidePos.y + CARD_HEIGHT / 2 - (outsideItem.y + CARD_HEIGHT / 2)
+          )
+          if (dist > UNLINK_DISTANCE) unlinkItemsAction(link.id)
+        }
+      } else if (state.kind === 'cluster-move') {
+        moveCluster(state.id, state.startX + dx, state.startY + dy)
+        // Members stay assigned to the cluster being dragged regardless of
+        // exact overlap math — moving the frame shouldn't itself evict them.
+        for (const memberId of state.memberItemIds) {
+          const start = state.memberStartPositions[memberId]
+          if (start) moveItem(memberId, start.x + dx, start.y + dy, state.id)
+        }
       } else {
         resizeCluster(
-          dragState!.id,
-          Math.max(MIN_CLUSTER_WIDTH, dragState!.startWidth + dx),
-          Math.max(MIN_CLUSTER_HEIGHT, dragState!.startHeight + dy)
+          state.id,
+          Math.max(MIN_CLUSTER_WIDTH, state.startWidth + dx),
+          Math.max(MIN_CLUSTER_HEIGHT, state.startHeight + dy)
         )
       }
       setDragState(null)
@@ -186,19 +236,51 @@ function BoardView(): JSX.Element {
   // themselves and the link lines so both agree on where things are mid-drag.
   const displayPositions = useMemo(() => {
     const map = new Map<string, { x: number; y: number; isSnapping: boolean }>()
-    for (const item of items) {
-      if (dragState?.kind === 'item' && dragState.id === item.id) {
-        const rawX = item.x + liveDelta.dx
-        const rawY = item.y + liveDelta.dy
-        const snap = findSnapTarget(items, item.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+
+    if (dragState?.kind === 'item') {
+      const grabbedStart = dragState.startPositions[dragState.id]
+      let adjustX = 0
+      let adjustY = 0
+      let isGrabbedSnapping = false
+      if (grabbedStart) {
+        const rawX = grabbedStart.x + liveDelta.dx
+        const rawY = grabbedStart.y + liveDelta.dy
+        const candidates = items.filter((i) => !dragState.groupItemIds.includes(i.id))
+        const snap = findSnapTarget(candidates, dragState.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+        if (snap) {
+          adjustX = snap.snappedX - rawX
+          adjustY = snap.snappedY - rawY
+          isGrabbedSnapping = true
+        }
+      }
+      for (const item of items) {
+        if (dragState.groupItemIds.includes(item.id)) {
+          const start = dragState.startPositions[item.id] ?? { x: item.x, y: item.y }
+          map.set(item.id, {
+            x: start.x + liveDelta.dx + adjustX,
+            y: start.y + liveDelta.dy + adjustY,
+            isSnapping: item.id === dragState.id && isGrabbedSnapping
+          })
+        } else {
+          map.set(item.id, { x: item.x, y: item.y, isSnapping: false })
+        }
+      }
+    } else if (dragState?.kind === 'cluster-move') {
+      for (const item of items) {
+        const start = dragState.memberStartPositions[item.id]
         map.set(
           item.id,
-          snap ? { x: snap.snappedX, y: snap.snappedY, isSnapping: true } : { x: rawX, y: rawY, isSnapping: false }
+          start
+            ? { x: start.x + liveDelta.dx, y: start.y + liveDelta.dy, isSnapping: false }
+            : { x: item.x, y: item.y, isSnapping: false }
         )
-      } else {
+      }
+    } else {
+      for (const item of items) {
         map.set(item.id, { x: item.x, y: item.y, isSnapping: false })
       }
     }
+
     return map
   }, [items, dragState, liveDelta])
 
@@ -329,8 +411,8 @@ function BoardView(): JSX.Element {
 
       {selectedBoardId && (
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
-          Scroll to zoom · drag two cards close together to link them (they snap) · drag a linked card away to
-          unlink · click the × on a connector to unlink directly
+          Scroll to zoom · drag two cards close together to link them (they snap), and linked/clustered cards move
+          together · drag a linked card away to unlink · click the × on a connector to unlink directly
         </p>
       )}
 
@@ -398,16 +480,23 @@ function BoardView(): JSX.Element {
                 cluster={cluster}
                 dragState={dragState}
                 liveDelta={liveDelta}
-                onStartMove={(e) =>
+                onStartMove={(e) => {
+                  const memberItemIds = items.filter((i) => i.clusterId === cluster.id).map((i) => i.id)
+                  const memberStartPositions: Record<string, Position> = {}
+                  for (const i of items) {
+                    if (i.clusterId === cluster.id) memberStartPositions[i.id] = { x: i.x, y: i.y }
+                  }
                   setDragState({
                     kind: 'cluster-move',
                     id: cluster.id,
+                    memberItemIds,
                     startMouseX: e.clientX,
                     startMouseY: e.clientY,
                     startX: cluster.x,
-                    startY: cluster.y
+                    startY: cluster.y,
+                    memberStartPositions
                   })
-                }
+                }}
                 onStartResize={(e) =>
                   setDragState({
                     kind: 'cluster-resize',
@@ -428,18 +517,27 @@ function BoardView(): JSX.Element {
                   item={item}
                   x={pos.x}
                   y={pos.y}
-                  isDragging={dragState?.kind === 'item' && dragState.id === item.id}
+                  isDragging={
+                    (dragState?.kind === 'item' && dragState.groupItemIds.includes(item.id)) ||
+                    (dragState?.kind === 'cluster-move' && dragState.memberItemIds.includes(item.id))
+                  }
                   isSnapping={pos.isSnapping}
-                  onStartDrag={(e) =>
+                  onStartDrag={(e) => {
+                    const group = getLinkedGroup(links, item.id)
+                    const startPositions: Record<string, Position> = {}
+                    for (const gid of group) {
+                      const gItem = items.find((i) => i.id === gid)
+                      if (gItem) startPositions[gid] = { x: gItem.x, y: gItem.y }
+                    }
                     setDragState({
                       kind: 'item',
                       id: item.id,
+                      groupItemIds: Array.from(group),
                       startMouseX: e.clientX,
                       startMouseY: e.clientY,
-                      startX: item.x,
-                      startY: item.y
+                      startPositions
                     })
-                  }
+                  }}
                 />
               )
             })}

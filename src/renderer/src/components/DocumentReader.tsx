@@ -23,6 +23,7 @@ function DocumentReader(): JSX.Element {
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const clearActiveSpan = useWorkspaceUiStore((s) => s.clear)
+  const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)
 
   const [editingParagraphIndex, setEditingParagraphIndex] = useState<number | null>(null)
   const [draftText, setDraftText] = useState('')
@@ -217,6 +218,13 @@ function DocumentReader(): JSX.Element {
                         } else if (isActive) {
                           clearActiveSpan()
                         }
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation()
+                        // Multiple codes can share a run (see `title` above,
+                        // which lists them all) — opens the first one, same
+                        // convention as which code's color/title wins here.
+                        if (primaryEntry) setInspectedCodeId(primaryEntry.coding.codeId)
                       }}
                     >
                       {run.text}

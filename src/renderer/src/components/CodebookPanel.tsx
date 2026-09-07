@@ -236,6 +236,7 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
   const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
+  const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(node.name)
@@ -317,11 +318,8 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
           ) : (
             <button
               className="flex-1 truncate text-left"
-              onDoubleClick={() => {
-                setNameDraft(node.name)
-                setIsEditingName(true)
-              }}
-              title="Double-click to rename"
+              onDoubleClick={() => setInspectedCodeId(node.id)}
+              title="Double-click for usage info"
             >
               {node.name}
             </button>
@@ -339,6 +337,16 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
                 Apply
               </button>
             )}
+            <button
+              className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
+              title="Rename"
+              onClick={() => {
+                setNameDraft(node.name)
+                setIsEditingName(true)
+              }}
+            >
+              ✎
+            </button>
             <button
               className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
               title="Edit definition"

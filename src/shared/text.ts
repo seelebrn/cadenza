@@ -22,6 +22,25 @@ export function splitIntoParagraphs(rawText: string): string[] {
   return rawParagraphs.map((p) => p.trim()).filter((p) => p.length > 0)
 }
 
+/** Up to `wordCount` whole words immediately before `start` and immediately
+ * after `end` in `fullText` — used to show a verbatim quote "in context"
+ * (e.g. the code-usage info window's expand-context checkbox). Clamps
+ * naturally at the start/end of the document (fewer words, never an error)
+ * since there's nothing before the first word or after the last. */
+export function getSurroundingWords(
+  fullText: string,
+  start: number,
+  end: number,
+  wordCount: number
+): { before: string; after: string } {
+  const beforeWords = fullText.slice(0, start).trim().split(/\s+/).filter(Boolean)
+  const afterWords = fullText.slice(end).trim().split(/\s+/).filter(Boolean)
+  return {
+    before: beforeWords.slice(Math.max(0, beforeWords.length - wordCount)).join(' '),
+    after: afterWords.slice(0, wordCount).join(' ')
+  }
+}
+
 /** The offset each paragraph starts at within joinParagraphs(paragraphs) —
  * i.e. where Segment.start/end for that paragraph's text begin counting
  * from. Used to map a DOM selection inside one rendered paragraph back to a

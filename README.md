@@ -153,3 +153,19 @@ in the renderer, invisible to the shared layout logic. Also fixed `addAllCluster
 member spacing, which packed members every 20px regardless of the ~64px card height it
 was actually placing (a latent overlap bug in that separate, opt-in bulk action, caught
 while touching the same sizing logic).
+
+### Code-info window (2026-09-07)
+
+Double-click a code anywhere it appears — a coded passage in the source text, its row in
+the Workspace codebook tree, or its card on the board — to open a window showing its name,
+how many times it's been used, and the verbatim of every instance, with a checkbox to show
+15 words of context on each side pulled from the source document. One `inspectedCodeId`
+flag (`workspaceUiStore.ts`) drives it regardless of which of the three triggered it, and
+the window (`CodeInfoModal.tsx`) is mounted once at the project-shell level so it survives
+switching between Workspace/Analysis/Board while open. The underlying data — usage count,
+verbatim, and context — comes from a new pure `getCodeUsageDetail` (retrieval.ts) and
+`getSurroundingWords` (text.ts), deliberately excluding a code's descendants (unlike
+`retrieveByCode`'s default) since this is "how many times was *this* code applied," not a
+rollup of its sub-codes. Repurposing double-click on the Workspace tree's code name (it
+used to start an inline rename) meant giving rename its own dedicated "✎" button instead,
+so the feature already there didn't just disappear.

@@ -72,6 +72,13 @@ interface WorkspaceUiState {
   suggestedCodeName: string | null
   setSuggestedCodeName: (name: string | null) => void
 
+  /** The code whose info window is open (double-clicked in the source
+   * text, the Workspace codebook tree, or a board card) — null when
+   * closed. One flag serves all three triggers since the window itself
+   * doesn't care where the double-click came from. */
+  inspectedCodeId: string | null
+  setInspectedCodeId: (id: string | null) => void
+
   clear: () => void
 
   /** Resets everything that references *this project's* ids (selected
@@ -116,6 +123,9 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   suggestedCodeName: null,
   setSuggestedCodeName: (name) => set({ suggestedCodeName: name }),
 
+  inspectedCodeId: null,
+  setInspectedCodeId: (id) => set({ inspectedCodeId: id }),
+
   clear: () => set({ activeSpan: null }),
 
   resetForProjectSwitch: () =>
@@ -126,6 +136,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
       selectedBoardId: null,
       activeSidebarTab: 'codes',
       activeSpan: null,
-      suggestedCodeName: null
+      suggestedCodeName: null,
+      inspectedCodeId: null
     })
 }))

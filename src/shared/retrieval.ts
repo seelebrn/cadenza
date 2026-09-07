@@ -3,6 +3,12 @@
 // Reflexive TA, AQA) needs and none of them had a way to do before this.
 
 import type { CodeNode, NoteRecord, ProjectData, Segment } from './types'
+import { getSurroundingWords, joinParagraphs } from './text'
+
+/** Word count on each side shown by the code-info window's "more context"
+ * checkbox. A fixed constant (not a UI parameter) since it's cheap to
+ * compute regardless of whether it's displayed. */
+export const CODE_USAGE_CONTEXT_WORDS = 15
 
 /** All descendant code ids of a code (not including itself). */
 export function getDescendantCodeIds(codes: CodeNode[], rootId: string): string[] {
@@ -64,6 +70,57 @@ export function retrieveByCode(
     (a, b) => a.documentTitle.localeCompare(b.documentTitle) || a.segment.start - b.segment.start
   )
   return results
+}
+
+export interface CodeUsageInstance {
+  documentId: string
+  documentTitle: string
+  segment: Segment
+  codingId: string
+  /** Up to CODE_USAGE_CONTEXT_WORDS words immediately surrounding the
+   * verbatim quote, from the source document — empty string if the
+   * document no longer exists or there's nothing on that side. */
+  contextBefore: string
+  contextAfter: string
+}
+
+export interface CodeUsageDetail {
+  count: number
+  instances: CodeUsageInstance[]
+}
+
+/** Everything the code-info window (double-click a code anywhere — the
+ * source text, the Workspace tree, or the board) needs: how many times
+ * this exact code was used and the verbatim of every instance, each
+ * already paired with its surrounding context so the window's checkbox is
+ * just a display toggle, not a recompute. Deliberately excludes descendant
+ * codes (unlike retrieveByCode's default) — this is "how many times was
+ * *this* code applied," not a rollup of its sub-codes too. */
+export function getCodeUsageDetail(data: ProjectData, codeId: string): CodeUsageDetail {
+  const results = retrieveByCode(data, codeId, { includeDescendants: false })
+  const documentById = new Map(data.documents.map((d) => [d.id, d]))
+
+  const instances: CodeUsageInstance[] = results.map((r) => {
+    const document = documentById.get(r.documentId)
+    const context = document
+      ? getSurroundingWords(
+          joinParagraphs(document.paragraphs),
+          r.segment.start,
+          r.segment.end,
+          CODE_USAGE_CONTEXT_WORDS
+        )
+      : { before: '', after: '' }
+    return {
+      documentId: r.documentId,
+      documentTitle: r.documentTitle,
+      segment: r.segment,
+      codingId: r.codingId,
+      contextBefore: context.before,
+      contextAfter: context.after
+    }
+  })
+
+  return { count: instances.length, instances }
 }
 
 export interface NoteRetrievalFilters {

@@ -2,6 +2,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import AnalysisView from './AnalysisView'
 import BoardView from './BoardView'
+import CodeInfoModal from './CodeInfoModal'
 import DocumentList from './DocumentList'
 import DocumentReader from './DocumentReader'
 import RightSidebar from './RightSidebar'
@@ -101,6 +102,8 @@ function ProjectShell(): JSX.Element | null {
           <BoardView />
         </div>
       )}
+
+      <CodeInfoModal />
     </div>
   )
 }

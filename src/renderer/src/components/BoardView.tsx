@@ -925,6 +925,7 @@ function BoardItemCard({ item, boardId, x, y, isDragging, isSnapping, onStartDra
   const data = useProjectStore((s) => s.data)
   const removeItemFromBoard = useProjectStore((s) => s.removeItemFromBoard)
   const addItemToBoard = useProjectStore((s) => s.addItemToBoard)
+  const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)
 
   if (!data) return null
   const description = describeBoardItem(data, item)
@@ -948,6 +949,9 @@ function BoardItemCard({ item, boardId, x, y, isDragging, isSnapping, onStartDra
         } else {
           onStartDrag(e)
         }
+      }}
+      onDoubleClick={() => {
+        if (item.refType === 'code') setInspectedCodeId(item.refId)
       }}
     >
       <div className="mb-1 flex items-center justify-between gap-1">

@@ -197,7 +197,11 @@ const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
 const CLUSTER_GAP = 40
 const CLUSTER_HEADER_HEIGHT = 28
-const CLUSTER_PADDING = 10
+// Also the margin a nested cluster's box is indented by within its
+// parent — kept generous (not just enough for a member card) so a nested
+// cluster's dashed border reads as clearly separate from its parent's,
+// rather than a couple of pixels that blur together at normal zoom.
+const CLUSTER_PADDING = 20
 const CLUSTER_MEMBER_ROW_HEIGHT = MEMBER_CARD_HEIGHT + 8
 // A nested cluster's auto-layout width shrinks by one padding's worth at
 // each level so it visually fits inside its parent with a margin. Not
@@ -362,14 +366,30 @@ export function getVisibleBoardClusters(
  * reset sidesteps the problem by construction and reuses the already-tested
  * recursive layout for 100% of the result, at the cost of losing any manual
  * cluster arrangement on this board. Only ever called for the *default*
- * board — other boards stay fully user-curated, untouched by this. Board
- * *items* (individual code/note/quote cards) are untouched either way: an
- * item that already has its own explicit position keeps it regardless of
- * where its cluster's frame ends up, the same trade-off that already
- * applies when a cluster is manually dragged on the board itself.
+ * board — other boards stay fully user-curated, untouched by this.
+ *
+ * Also drops the explicit BoardItem position of any code/note/segment that's
+ * a member of *some* category, for the same reason: an item that was
+ * already individually placed keeps its old absolute position regardless of
+ * where its cluster's frame ends up, so after a reflow it would end up
+ * sitting outside the cluster it's actually a member of. Un-clustered items
+ * are untouched — they were never positioned relative to a cluster to begin
+ * with, so a cluster reflow has nothing to do with them.
  */
 export function resetDefaultBoardClusterLayout(data: ProjectData, boardId: string): ProjectData {
-  return { ...data, boardClusters: data.boardClusters.filter((c) => c.boardId !== boardId) }
+  const clusteredRefs = new Set<string>()
+  for (const category of data.categories) {
+    for (const codeId of category.codeIds) clusteredRefs.add(`code:${codeId}`)
+    for (const noteId of category.noteIds) clusteredRefs.add(`note:${noteId}`)
+    for (const segmentId of category.segmentIds) clusteredRefs.add(`segment:${segmentId}`)
+  }
+  return {
+    ...data,
+    boardClusters: data.boardClusters.filter((c) => c.boardId !== boardId),
+    boardItems: data.boardItems.filter(
+      (i) => i.boardId !== boardId || !clusteredRefs.has(`${i.refType}:${i.refId}`)
+    )
+  }
 }
 
 /**

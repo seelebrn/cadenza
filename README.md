@@ -332,3 +332,37 @@ two explicit, far-apart sibling clusters; nest one into the other via the Worksp
 pull it back out and confirm they're visually separated again. Boot-tested a separate
 packaged instance (window title "Cadenza", no errors), then killed it and confirmed no
 electron process was left running.
+
+### Two follow-up fixes to the reflow above (2026-09-07)
+
+The user tried it and reported two problems. Both real, both fixed:
+
+- **Member items were left outside their (reflowed) cluster.** `resetDefaultBoardClusterLayout`
+  deliberately left board *items* untouched, matching the pre-existing rule that an item
+  with its own explicit position keeps it regardless of where its cluster's frame moves to
+  — reasonable for a manual board drag, wrong here: after a Workspace-driven reflow, *every*
+  already-materialized member (which in an actively-used project is most of them) stayed
+  frozen at its old absolute spot while its cluster's frame moved out from under it. Fixed
+  by having the reset also drop the explicit `BoardItem` position of any code/note/segment
+  that's a member of *some* category — same reasoning as the cluster shapes themselves,
+  just extended to their contents. Unclustered items are untouched, same as before.
+- **The nesting was positionally correct but not visually readable.** Turned out not to be
+  a data bug at all — the user confirmed nested clusters *do* move together and stay
+  logically linked. The problem was that every cluster frame, root or nested, used the same
+  near-transparent (~6% opacity) fill and only a 10px margin, so a box drawn entirely inside
+  another one just blended into it — technically contained, not perceptibly so. Added
+  `fillOpacityForDepth` (BoardView.tsx): a root cluster keeps that original subtle fill, and
+  each nesting level below it gets a visibly more opaque fill of the same color, so a nested
+  cluster reads as a distinct layer sitting on top of its parent. Also doubled
+  `CLUSTER_PADDING` (10px -> 20px) for a clearer gap around a nested box's edges.
+
+Verified: typecheck and build clean. Unit-tested the item-position reset in isolation
+(a clustered item's explicit position on the target board is dropped, an unclustered
+item and an item on a *different* board are both left alone) and re-ran the nested-
+containment test suite against the larger padding to confirm nothing regressed (still
+contained at three levels, siblings still don't overlap, a 15-level chain still places
+everything without overflow). Boot-tested a separate packaged instance alongside the
+user's own running dev session (window title "Cadenza", no renderer errors — only the
+disk-cache warnings expected from two Electron instances sharing a user-data dir), then
+killed only that instance's PIDs and confirmed the process list returned to exactly what
+was running beforehand.

@@ -770,6 +770,7 @@ function BoardView(): JSX.Element {
                   key={cluster.id}
                   cluster={cluster}
                   category={category}
+                  depth={getCategoryDepth(data.categories, category.id)}
                   dragState={dragState}
                   liveDelta={liveDelta}
                   resizePreview={resizePreview?.targetClusterId === cluster.id ? resizePreview : null}
@@ -915,9 +916,25 @@ function BoardView(): JSX.Element {
   )
 }
 
+// A root cluster's fill stays subtle (this is also what a lone,
+// un-nested cluster has always looked like). Each nesting level below
+// that gets a visibly more opaque fill of the *same* color, so a nested
+// cluster reads as a distinct layer sitting on top of its parent instead
+// of blending into it — position/size alone (a thin padding gap) wasn't
+// enough to actually see the containment at a glance.
+const CLUSTER_FILL_OPACITY_BY_DEPTH = ['0f', '26', '3d', '54']
+
+function fillOpacityForDepth(depth: number): string {
+  return CLUSTER_FILL_OPACITY_BY_DEPTH[Math.min(depth, CLUSTER_FILL_OPACITY_BY_DEPTH.length - 1)]
+}
+
 interface ClusterFrameProps {
   cluster: BoardCluster
   category: CategoryRecord
+  /** How many parentCategoryId hops up to a root — drives the fill
+   * opacity below so nesting is visually obvious, not just positionally
+   * correct. */
+  depth: number
   dragState: DragState | null
   liveDelta: { dx: number; dy: number }
   /** Set while another cluster is being dragged over this one and would
@@ -931,6 +948,7 @@ interface ClusterFrameProps {
 function ClusterFrame({
   cluster,
   category,
+  depth,
   dragState,
   liveDelta,
   resizePreview,
@@ -974,7 +992,14 @@ function ClusterFrame({
       )}
       <div
         className="absolute rounded-lg border-2 border-dashed"
-        style={{ left: x, top: y, width, height, borderColor: category.color, backgroundColor: `${category.color}0f` }}
+        style={{
+          left: x,
+          top: y,
+          width,
+          height,
+          borderColor: category.color,
+          backgroundColor: `${category.color}${fillOpacityForDepth(depth)}`
+        }}
       >
       <div
         className="flex cursor-move items-center gap-1 rounded-t-md px-2 py-1 text-xs text-white"

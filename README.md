@@ -169,3 +169,19 @@ verbatim, and context — comes from a new pure `getCodeUsageDetail` (retrieval.
 rollup of its sub-codes. Repurposing double-click on the Workspace tree's code name (it
 used to start an inline rename) meant giving rename its own dedicated "✎" button instead,
 so the feature already there didn't just disappear.
+
+### Resize-on-nest (2026-09-07)
+
+Dragging a cluster into another to nest it now grows the destination to actually fit the
+one just dropped in, with a live dashed "ghost" preview shown on the destination while
+still dragging (matching what the drop will commit) rather than a silent resize with no
+warning. `computeAccommodatingSize` (boardOps.ts) only ever grows width/height — it never
+moves the destination's x/y — specifically so an already-nested sibling cluster (positioned
+in absolute canvas coordinates, not relative to its parent) can't be orphaned by the
+parent's origin shifting out from under it. The trade-off, made deliberately rather than
+by accident: a cluster dropped so it pokes out past the destination's *top* or *left* edge
+isn't fully accommodated — it'll visually overhang that edge instead of the destination
+growing to meet it. Growing toward the bottom/right (where a cluster's own resize handle
+already lives) covers the common case; solving the top/left case would mean reflowing the
+destination's other existing children too, which is a bigger feature than what was asked
+for here.

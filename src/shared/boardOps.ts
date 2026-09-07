@@ -68,6 +68,36 @@ export function findClusterAtPoint(clusters: BoardCluster[], px: number, py: num
   return best
 }
 
+interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * The size a destination cluster needs to fully contain a child rect
+ * (plus `padding` breathing room) dropped into it — used when nesting a
+ * cluster into another on the board, so the destination visibly grows to
+ * accommodate the one just dropped in rather than staying whatever fixed
+ * size it happened to already be.
+ *
+ * Deliberately only ever grows width/height — never moves the parent's x/y
+ * — so an already-nested sibling cluster (positioned in absolute canvas
+ * coordinates, not relative to the parent) can't be silently orphaned by
+ * the parent's origin shifting out from under it. The trade-off: a child
+ * dropped so it pokes out past the parent's *top* or *left* edge (rather
+ * than its bottom/right) isn't fully accommodated — it'll visually
+ * overhang that edge instead. Growing toward the bottom/right, where a
+ * cluster's own resize handle already lives, covers the common case.
+ */
+export function computeAccommodatingSize(parent: Rect, child: Rect, padding: number): { width: number; height: number } {
+  return {
+    width: Math.max(parent.width, child.x + child.width - parent.x + padding),
+    height: Math.max(parent.height, child.y + child.height - parent.y + padding)
+  }
+}
+
 // --- Boards ---
 
 export function getDefaultBoardId(boards: BoardRecord[]): string | null {

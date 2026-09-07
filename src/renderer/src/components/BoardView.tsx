@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import {
+  computeAccommodatingSize,
   computeGridPosition,
   describeBoardItem,
   findClusterAtPoint,
@@ -26,6 +27,9 @@ const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
 const MIN_CLUSTER_WIDTH = 140
 const MIN_CLUSTER_HEIGHT = 100
+// Breathing room left around a cluster dropped into another when the
+// destination grows to accommodate it.
+const CLUSTER_NEST_PADDING = 20
 const CANVAS_WIDTH = 2400
 const CANVAS_HEIGHT = 1600
 const PALETTE = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444', '#14b8a6', '#eab308', '#ec4899']
@@ -332,7 +336,20 @@ function BoardView(): JSX.Element {
           const centerY = finalY + state.startHeight / 2
           const target = findClusterAtPoint(candidateClusters, centerX, centerY)
           const newParentId = target?.categoryId ?? null
-          if (newParentId !== currentParentId) reparentCategory(state.categoryId, newParentId)
+          if (newParentId !== currentParentId) {
+            reparentCategory(state.categoryId, newParentId)
+            // Newly nested (not just re-confirming an existing parent) —
+            // grow the destination to actually fit the cluster just
+            // dropped into it, matching the live ghost preview shown
+            // during the drag.
+            if (target) {
+              const childRect = { x: finalX, y: finalY, width: state.startWidth, height: state.startHeight }
+              const size = computeAccommodatingSize(target, childRect, CLUSTER_NEST_PADDING)
+              if (size.width !== target.width || size.height !== target.height) {
+                resizeCluster(materializeCluster(target), size.width, size.height)
+              }
+            }
+          }
         }
       } else {
         resizeCluster(
@@ -405,6 +422,31 @@ function BoardView(): JSX.Element {
 
     return map
   }, [items, dragState, liveDelta])
+
+  // While dragging a cluster over another one it would nest into on drop,
+  // shows a live "ghost" preview of how big the destination would need to
+  // grow to fit it — computed with the same candidate/target logic
+  // handleMouseUp uses at drop time, just fed the in-progress liveDelta
+  // instead of the final dx/dy, so the two can never disagree about what
+  // counts as a valid target.
+  const resizePreview = useMemo(() => {
+    if (!data || dragState?.kind !== 'cluster-move' || dragState.shiftKey) return null
+    const finalX = dragState.startX + liveDelta.dx
+    const finalY = dragState.startY + liveDelta.dy
+    const excluded = new Set([
+      dragState.categoryId,
+      ...getDescendantCategoryIds(data.categories, dragState.categoryId)
+    ])
+    const candidateClusters = clusters.filter((c) => !excluded.has(c.categoryId))
+    const centerX = finalX + dragState.startWidth / 2
+    const centerY = finalY + dragState.startHeight / 2
+    const target = findClusterAtPoint(candidateClusters, centerX, centerY)
+    if (!target) return null
+    const childRect = { x: finalX, y: finalY, width: dragState.startWidth, height: dragState.startHeight }
+    const size = computeAccommodatingSize(target, childRect, CLUSTER_NEST_PADDING)
+    if (size.width === target.width && size.height === target.height) return null
+    return { targetClusterId: target.id, width: size.width, height: size.height }
+  }, [data, dragState, liveDelta, clusters])
 
   // Shared endpoint/midpoint geometry for each link — computed once and used
   // by both the (behind-cards) connector line and the (above-cards) unlink
@@ -672,6 +714,7 @@ function BoardView(): JSX.Element {
                   category={category}
                   dragState={dragState}
                   liveDelta={liveDelta}
+                  resizePreview={resizePreview?.targetClusterId === cluster.id ? resizePreview : null}
                   onStartMove={(e) => {
                     const descendantCategoryIds = getDescendantCategoryIds(data.categories, category.id)
                     const groupCategoryIds = [category.id, ...descendantCategoryIds]
@@ -819,11 +862,23 @@ interface ClusterFrameProps {
   category: CategoryRecord
   dragState: DragState | null
   liveDelta: { dx: number; dy: number }
+  /** Set while another cluster is being dragged over this one and would
+   * nest into it on drop — the size this frame would grow to, shown as a
+   * ghost outline so the resize isn't a surprise once committed. */
+  resizePreview: { width: number; height: number } | null
   onStartMove: (e: React.MouseEvent) => void
   onStartResize: (e: React.MouseEvent) => void
 }
 
-function ClusterFrame({ cluster, category, dragState, liveDelta, onStartMove, onStartResize }: ClusterFrameProps): JSX.Element {
+function ClusterFrame({
+  cluster,
+  category,
+  dragState,
+  liveDelta,
+  resizePreview,
+  onStartMove,
+  onStartResize
+}: ClusterFrameProps): JSX.Element {
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCluster = useProjectStore((s) => s.deleteCluster)
@@ -845,10 +900,24 @@ function ClusterFrame({ cluster, category, dragState, liveDelta, onStartMove, on
   }
 
   return (
-    <div
-      className="absolute rounded-lg border-2 border-dashed"
-      style={{ left: x, top: y, width, height, borderColor: category.color, backgroundColor: `${category.color}0f` }}
-    >
+    <>
+      {resizePreview && (
+        <div
+          className="pointer-events-none absolute rounded-lg border-2 border-dashed"
+          style={{
+            left: x,
+            top: y,
+            width: resizePreview.width,
+            height: resizePreview.height,
+            borderColor: category.color,
+            backgroundColor: `${category.color}20`
+          }}
+        />
+      )}
+      <div
+        className="absolute rounded-lg border-2 border-dashed"
+        style={{ left: x, top: y, width, height, borderColor: category.color, backgroundColor: `${category.color}0f` }}
+      >
       <div
         className="flex cursor-move items-center gap-1 rounded-t-md px-2 py-1 text-xs text-white"
         style={{ backgroundColor: category.color }}
@@ -905,7 +974,8 @@ function ClusterFrame({ cluster, category, dragState, liveDelta, onStartMove, on
           onStartResize(e)
         }}
       />
-    </div>
+      </div>
+    </>
   )
 }
 

@@ -73,12 +73,28 @@ export type NoteAttachment =
   | { kind: 'category'; categoryId: string }
   | { kind: 'project' }
 
+/**
+ * A user-editable catalog entry for classifying notes — e.g. the
+ * thematic/linguistic/conceptual remark types from comprehensive-interview
+ * analysis (Kaufmann). Distinct from CategoryRecord below: this is a small,
+ * flat, per-project list of note "kinds" with a color, not an emergent
+ * grouping cluster. Optional — a note need not have one.
+ */
+export interface NoteCategoryDef {
+  id: string
+  name: string
+  color: string
+  createdAt: ISODateString
+}
+
 export interface NoteRecord {
   id: string
   /** The analytic question posed to the text (AQA-style), if any. */
   question: string | null
   answer: string
   tags: string[]
+  /** Optional classification against ProjectData.noteCategories. */
+  noteCategoryId: string | null
   attachedTo: NoteAttachment
   createdAt: ISODateString
   updatedAt: ISODateString
@@ -129,6 +145,7 @@ export interface ProjectData {
   codes: CodeNode[]
   codings: Coding[]
   notes: NoteRecord[]
+  noteCategories: NoteCategoryDef[]
   categories: CategoryRecord[]
   boards: BoardRecord[]
   boardItems: BoardItem[]

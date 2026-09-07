@@ -13,8 +13,12 @@ import {
 } from '@shared/projectOps'
 import {
   addNote as addNoteOp,
+  addNoteCategory as addNoteCategoryOp,
   addNoteToSelection as addNoteToSelectionOp,
   deleteNote as deleteNoteOp,
+  deleteNoteCategory as deleteNoteCategoryOp,
+  renameNoteCategory as renameNoteCategoryOp,
+  setNoteCategoryColor as setNoteCategoryColorOp,
   updateNote as updateNoteOp
 } from '@shared/notesOps'
 
@@ -51,7 +55,13 @@ interface ProjectState {
   removeCoding: (codingId: string) => void
 
   // Notes / memos
-  addNote: (attachedTo: NoteAttachment, question: string | null, answer: string, tags: string[]) => void
+  addNote: (
+    attachedTo: NoteAttachment,
+    question: string | null,
+    answer: string,
+    tags: string[],
+    noteCategoryId: string | null
+  ) => void
   addNoteToSelection: (
     documentId: string,
     start: number,
@@ -59,10 +69,20 @@ interface ProjectState {
     text: string,
     question: string | null,
     answer: string,
-    tags: string[]
+    tags: string[],
+    noteCategoryId: string | null
   ) => void
-  updateNote: (noteId: string, patch: { question?: string | null; answer?: string; tags?: string[] }) => void
+  updateNote: (
+    noteId: string,
+    patch: { question?: string | null; answer?: string; tags?: string[]; noteCategoryId?: string | null }
+  ) => void
   deleteNote: (noteId: string) => void
+
+  // Note category catalog (thematic/linguistic/conceptual, etc.)
+  addNoteCategory: (name: string, color: string) => string | null
+  renameNoteCategory: (categoryId: string, name: string) => void
+  setNoteCategoryColor: (categoryId: string, color: string) => void
+  deleteNoteCategory: (categoryId: string) => void
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -227,16 +247,45 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   removeCoding: (codingId) => get().updateProject((data) => removeCodingOp(data, codingId)),
 
-  addNote: (attachedTo, question, answer, tags) =>
-    get().updateProject((data) => addNoteOp(data, { attachedTo, question, answer, tags }).data),
+  addNote: (attachedTo, question, answer, tags, noteCategoryId) =>
+    get().updateProject(
+      (data) => addNoteOp(data, { attachedTo, question, answer, tags, noteCategoryId }).data
+    ),
 
   // Same deliberate non-clearing of the pending selection as applyCodeToSelection.
-  addNoteToSelection: (documentId, start, end, text, question, answer, tags) =>
+  addNoteToSelection: (documentId, start, end, text, question, answer, tags, noteCategoryId) =>
     get().updateProject(
-      (data) => addNoteToSelectionOp(data, { documentId, start, end, text, question, answer, tags }).data
+      (data) =>
+        addNoteToSelectionOp(data, {
+          documentId,
+          start,
+          end,
+          text,
+          question,
+          answer,
+          tags,
+          noteCategoryId
+        }).data
     ),
 
   updateNote: (noteId, patch) => get().updateProject((data) => updateNoteOp(data, noteId, patch)),
 
-  deleteNote: (noteId) => get().updateProject((data) => deleteNoteOp(data, noteId))
+  deleteNote: (noteId) => get().updateProject((data) => deleteNoteOp(data, noteId)),
+
+  addNoteCategory: (name, color) => {
+    const { data } = get()
+    if (!data) return null
+    const result = addNoteCategoryOp(data, { name, color })
+    get().updateProject(() => result.data)
+    return result.categoryId
+  },
+
+  renameNoteCategory: (categoryId, name) =>
+    get().updateProject((data) => renameNoteCategoryOp(data, categoryId, name)),
+
+  setNoteCategoryColor: (categoryId, color) =>
+    get().updateProject((data) => setNoteCategoryColorOp(data, categoryId, color)),
+
+  deleteNoteCategory: (categoryId) =>
+    get().updateProject((data) => deleteNoteCategoryOp(data, categoryId))
 }))

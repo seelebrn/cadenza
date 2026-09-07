@@ -1,13 +1,30 @@
 import JSZip from 'jszip'
 import { readFile, writeFile } from 'fs/promises'
 import { nanoid } from 'nanoid'
-import { PROJECT_SCHEMA_VERSION, type ProjectData, type SerializedAssets } from '../shared/types'
+import { normalizeProjectData } from '../shared/normalizeProject'
+import {
+  PROJECT_SCHEMA_VERSION,
+  type NoteCategoryDef,
+  type ProjectData,
+  type SerializedAssets
+} from '../shared/types'
 
 /**
  * A .qdaproj file is a zip: project.json holds all structured data, plus an
  * assets/ folder holding original imported files (docx/odt/xlsx source
  * bytes), keyed by the relative path stored on each DocumentRecord.
  */
+
+// Sensible defaults for the comprehensive-interview (Kaufmann) analytic
+// remark types; fully user-editable/deletable from there.
+function seedNoteCategories(): NoteCategoryDef[] {
+  const now = new Date().toISOString()
+  return [
+    { id: nanoid(), name: 'Thematic', color: '#3b82f6', createdAt: now },
+    { id: nanoid(), name: 'Linguistic', color: '#f97316', createdAt: now },
+    { id: nanoid(), name: 'Conceptual', color: '#8b5cf6', createdAt: now }
+  ]
+}
 
 export function createEmptyProject(name: string): ProjectData {
   const now = new Date().toISOString()
@@ -22,6 +39,7 @@ export function createEmptyProject(name: string): ProjectData {
     codes: [],
     codings: [],
     notes: [],
+    noteCategories: seedNoteCategories(),
     categories: [],
     boards: [],
     boardItems: []
@@ -53,12 +71,13 @@ export async function readProjectFile(
   if (!projectJson) {
     throw new Error('Not a valid Cadenza project file (missing project.json)')
   }
-  const data = JSON.parse(await projectJson.async('string')) as ProjectData
-  if (data.schemaVersion !== PROJECT_SCHEMA_VERSION) {
+  const rawData = JSON.parse(await projectJson.async('string')) as ProjectData
+  if (rawData.schemaVersion !== PROJECT_SCHEMA_VERSION) {
     throw new Error(
-      `Unsupported project schema version ${data.schemaVersion} (expected ${PROJECT_SCHEMA_VERSION})`
+      `Unsupported project schema version ${rawData.schemaVersion} (expected ${PROJECT_SCHEMA_VERSION})`
     )
   }
+  const data = normalizeProjectData(rawData)
   const assets: SerializedAssets = {}
   for (const file of zip.file(/^assets\//)) {
     const relPath = file.name.replace(/^assets\//, '')

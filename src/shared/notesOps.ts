@@ -2,11 +2,15 @@
 // segment, document, code, category, or the whole project. Optional
 // question+answer fields make a Note usable as an AQA-style analytic log
 // entry, but nothing here treats that as a special case — a memo is a memo
-// whether or not it carries a question.
+// whether or not it carries a question. Notes can also be optionally
+// classified against the project's user-editable NoteCategoryDef catalog
+// (e.g. thematic/linguistic/conceptual, for comprehensive-interview-style
+// analysis) — see NoteCategoryDef in types.ts for why that's a distinct
+// concept from CategoryRecord.
 
 import { nanoid } from 'nanoid'
 import { ensureSegment, pruneOrphanSegment, type SegmentSpan } from './projectOps'
-import type { NoteAttachment, NoteRecord, ProjectData } from './types'
+import type { NoteAttachment, NoteCategoryDef, NoteRecord, ProjectData } from './types'
 
 function normalizeQuestion(question: string | null | undefined): string | null {
   return question?.trim() ? question.trim() : null
@@ -17,6 +21,7 @@ export interface AddNoteInput {
   question?: string | null
   answer: string
   tags?: string[]
+  noteCategoryId?: string | null
 }
 
 export function addNote(data: ProjectData, input: AddNoteInput): { data: ProjectData; noteId: string } {
@@ -26,6 +31,7 @@ export function addNote(data: ProjectData, input: AddNoteInput): { data: Project
     question: normalizeQuestion(input.question),
     answer: input.answer,
     tags: input.tags ?? [],
+    noteCategoryId: input.noteCategoryId ?? null,
     attachedTo: input.attachedTo,
     createdAt: now,
     updatedAt: now
@@ -37,6 +43,7 @@ export interface AddNoteToSelectionInput extends SegmentSpan {
   question?: string | null
   answer: string
   tags?: string[]
+  noteCategoryId?: string | null
 }
 
 /** Attaches a note to a text span, reusing (or creating) the underlying
@@ -51,14 +58,15 @@ export function addNoteToSelection(
     attachedTo: { kind: 'segment', segmentId },
     question: input.question,
     answer: input.answer,
-    tags: input.tags
+    tags: input.tags,
+    noteCategoryId: input.noteCategoryId
   })
 }
 
 export function updateNote(
   data: ProjectData,
   noteId: string,
-  patch: { question?: string | null; answer?: string; tags?: string[] }
+  patch: { question?: string | null; answer?: string; tags?: string[]; noteCategoryId?: string | null }
 ): ProjectData {
   return {
     ...data,
@@ -69,6 +77,7 @@ export function updateNote(
         question: patch.question !== undefined ? normalizeQuestion(patch.question) : n.question,
         answer: patch.answer !== undefined ? patch.answer : n.answer,
         tags: patch.tags !== undefined ? patch.tags : n.tags,
+        noteCategoryId: patch.noteCategoryId !== undefined ? patch.noteCategoryId : n.noteCategoryId,
         updatedAt: new Date().toISOString()
       }
     })
@@ -127,5 +136,43 @@ export function describeNoteAttachment(data: ProjectData, note: NoteRecord): Not
     }
     case 'project':
       return { label: 'Project' }
+  }
+}
+
+// --- Note category catalog (thematic/linguistic/conceptual, etc.) ---
+
+export function addNoteCategory(
+  data: ProjectData,
+  input: { name: string; color: string }
+): { data: ProjectData; categoryId: string } {
+  const category: NoteCategoryDef = {
+    id: nanoid(),
+    name: input.name,
+    color: input.color,
+    createdAt: new Date().toISOString()
+  }
+  return { data: { ...data, noteCategories: [...data.noteCategories, category] }, categoryId: category.id }
+}
+
+export function renameNoteCategory(data: ProjectData, categoryId: string, name: string): ProjectData {
+  return {
+    ...data,
+    noteCategories: data.noteCategories.map((c) => (c.id === categoryId ? { ...c, name } : c))
+  }
+}
+
+export function setNoteCategoryColor(data: ProjectData, categoryId: string, color: string): ProjectData {
+  return {
+    ...data,
+    noteCategories: data.noteCategories.map((c) => (c.id === categoryId ? { ...c, color } : c))
+  }
+}
+
+/** Deletes a note category, declassifying (not deleting) any notes that used it. */
+export function deleteNoteCategory(data: ProjectData, categoryId: string): ProjectData {
+  return {
+    ...data,
+    noteCategories: data.noteCategories.filter((c) => c.id !== categoryId),
+    notes: data.notes.map((n) => (n.noteCategoryId === categoryId ? { ...n, noteCategoryId: null } : n))
   }
 }

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'path'
-import type { ProjectData } from '../shared/types'
+import type { ProjectData, SerializedAssets } from '../shared/types'
+import { importDocumentDialog } from './import'
 import { createEmptyProject, readProjectFile, writeProjectFile } from './projectFile'
 import { addRecentProject, getRecentProjects } from './recentProjects'
 
@@ -47,24 +48,27 @@ function registerProjectHandlers(): void {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const filePath = result.filePaths[0]
-    const { data } = await readProjectFile(filePath)
+    const { data, assets } = await readProjectFile(filePath)
     await addRecentProject({ filePath, name: data.name, lastOpenedAt: new Date().toISOString() })
-    return { data, filePath }
+    return { data, assets, filePath }
   })
 
   ipcMain.handle('project:open-path', async (_event, filePath: string) => {
-    const { data } = await readProjectFile(filePath)
+    const { data, assets } = await readProjectFile(filePath)
     await addRecentProject({ filePath, name: data.name, lastOpenedAt: new Date().toISOString() })
-    return { data, filePath }
+    return { data, assets, filePath }
   })
 
-  async function saveAs(data: ProjectData): Promise<{ filePath: string } | null> {
+  async function saveAs(
+    data: ProjectData,
+    assets: SerializedAssets
+  ): Promise<{ filePath: string } | null> {
     const result = await dialog.showSaveDialog({
       defaultPath: `${data.name}.qdaproj`,
       filters: PROJECT_FILE_FILTERS
     })
     if (result.canceled || !result.filePath) return null
-    await writeProjectFile(result.filePath, data)
+    await writeProjectFile(result.filePath, data, assets)
     await addRecentProject({
       filePath: result.filePath,
       name: data.name,
@@ -75,21 +79,28 @@ function registerProjectHandlers(): void {
 
   ipcMain.handle(
     'project:save',
-    async (_event, data: ProjectData, filePath: string | null) => {
-      if (!filePath) return saveAs(data)
-      await writeProjectFile(filePath, data)
+    async (_event, data: ProjectData, assets: SerializedAssets, filePath: string | null) => {
+      if (!filePath) return saveAs(data, assets)
+      await writeProjectFile(filePath, data, assets)
       await addRecentProject({ filePath, name: data.name, lastOpenedAt: new Date().toISOString() })
       return { filePath }
     }
   )
 
-  ipcMain.handle('project:save-as', (_event, data: ProjectData) => saveAs(data))
+  ipcMain.handle('project:save-as', (_event, data: ProjectData, assets: SerializedAssets) =>
+    saveAs(data, assets)
+  )
 
   ipcMain.handle('project:get-recent', () => getRecentProjects())
 }
 
+function registerDocumentHandlers(): void {
+  ipcMain.handle('document:import-dialog', () => importDocumentDialog())
+}
+
 app.whenReady().then(() => {
   registerProjectHandlers()
+  registerDocumentHandlers()
   createWindow()
 
   app.on('activate', () => {

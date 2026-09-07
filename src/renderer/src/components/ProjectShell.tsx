@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import DocumentList from './DocumentList'
+import DocumentReader from './DocumentReader'
 
 function ProjectShell(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
@@ -9,6 +12,8 @@ function ProjectShell(): JSX.Element | null {
   const save = useProjectStore((s) => s.save)
   const saveAs = useProjectStore((s) => s.saveAs)
   const closeProject = useProjectStore((s) => s.closeProject)
+
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
 
   if (!data) return null
 
@@ -52,18 +57,12 @@ function ProjectShell(): JSX.Element | null {
         </div>
       )}
 
-      <main className="flex-1 overflow-auto p-6">
-        <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-          <p>
-            {data.documents.length} documents · {data.codes.length} codes · {data.notes.length}{' '}
-            notes
-          </p>
-          <p className="mt-2">
-            Document import, coding, notes, the grouping board, and retrieval views arrive in the
-            next phases.
-          </p>
-        </div>
-      </main>
+      <div className="flex flex-1 overflow-hidden">
+        <DocumentList selectedId={selectedDocumentId} onSelect={setSelectedDocumentId} />
+        <main className="flex-1 overflow-auto">
+          <DocumentReader documentId={selectedDocumentId} />
+        </main>
+      </div>
     </div>
   )
 }

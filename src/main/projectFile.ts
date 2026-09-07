@@ -1,13 +1,12 @@
 import JSZip from 'jszip'
 import { readFile, writeFile } from 'fs/promises'
 import { nanoid } from 'nanoid'
-import { PROJECT_SCHEMA_VERSION, type ProjectData } from '../shared/types'
+import { PROJECT_SCHEMA_VERSION, type ProjectData, type SerializedAssets } from '../shared/types'
 
 /**
  * A .qdaproj file is a zip: project.json holds all structured data, plus an
- * assets/ folder reserved for original imported files (docx/odt/xlsx source
- * bytes) — unused until Phase 2, but the read/write shape supports it now so
- * the format doesn't need to change later.
+ * assets/ folder holding original imported files (docx/odt/xlsx source
+ * bytes), keyed by the relative path stored on each DocumentRecord.
  */
 
 export function createEmptyProject(name: string): ProjectData {
@@ -32,14 +31,14 @@ export function createEmptyProject(name: string): ProjectData {
 export async function writeProjectFile(
   filePath: string,
   data: ProjectData,
-  assets: Record<string, Buffer> = {}
+  assets: SerializedAssets = {}
 ): Promise<void> {
   const zip = new JSZip()
   const toSave: ProjectData = { ...data, updatedAt: new Date().toISOString() }
   zip.file('project.json', JSON.stringify(toSave, null, 2))
   const assetsFolder = zip.folder('assets')
-  for (const [relPath, buf] of Object.entries(assets)) {
-    assetsFolder?.file(relPath, buf)
+  for (const [relPath, bytes] of Object.entries(assets)) {
+    assetsFolder?.file(relPath, bytes)
   }
   const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
   await writeFile(filePath, buffer)
@@ -47,7 +46,7 @@ export async function writeProjectFile(
 
 export async function readProjectFile(
   filePath: string
-): Promise<{ data: ProjectData; assets: Record<string, Buffer> }> {
+): Promise<{ data: ProjectData; assets: SerializedAssets }> {
   const buffer = await readFile(filePath)
   const zip = await JSZip.loadAsync(buffer)
   const projectJson = zip.file('project.json')
@@ -60,10 +59,10 @@ export async function readProjectFile(
       `Unsupported project schema version ${data.schemaVersion} (expected ${PROJECT_SCHEMA_VERSION})`
     )
   }
-  const assets: Record<string, Buffer> = {}
+  const assets: SerializedAssets = {}
   for (const file of zip.file(/^assets\//)) {
     const relPath = file.name.replace(/^assets\//, '')
-    assets[relPath] = await file.async('nodebuffer')
+    assets[relPath] = await file.async('uint8array')
   }
   return { data, assets }
 }

@@ -1,11 +1,30 @@
-// Core, method-agnostic data model. Analysis "modes" (coding, AQA-style
-// question/answer notes, the visual grouping board, retrieval/matrix views)
-// are all just views over these same records — see the plan for rationale.
+// Core, method-agnostic data model.
+//
+// Philosophy: coding is one lens among several, not the privileged one.
+// Notes/memos (optionally structured as an AQA-style question+answer),
+// codes AND lightweight inventory "items", and the visual grouping board
+// are all equally first-class ways to work with a segment of text — they
+// all attach to the same underlying unit. A Category can itself represent
+// an analytic question (Paillé & Mucchielli-style), not just a theme label.
+//
+// Whenever text is coded, memoed, or itemized, the verbatim quote is
+// captured on the Segment at that moment (not just start/end offsets) so
+// the exact quote survives even if the source document is later edited.
 
 export type ISODateString = string
 
+/** Raw bytes kept alongside project.json in the .qdaproj zip, keyed by their
+ * path under the zip's assets/ folder (e.g. "documents/<id>.docx"). */
+export type SerializedAssets = Record<string, Uint8Array>
+
+/** 'code' = classic thematic coding; 'item' = lighter-weight inventory/
+ * enumerative unit (e.g. "list the obstacles mentioned") — same mechanics
+ * (hierarchy, color, merge, regrouping), different analytic intent. */
+export type TagKind = 'code' | 'item'
+
 export interface CodeNode {
   id: string
+  kind: TagKind
   name: string
   color: string
   definition: string
@@ -18,10 +37,17 @@ export type SourceFormat = 'docx' | 'odt' | 'txt' | 'xlsx' | 'manual'
 export interface DocumentRecord {
   id: string
   title: string
-  /** Normalized paragraphs; segment offsets are relative to the joined text. */
+  /** Normalized paragraphs; segment offsets are relative to their join — see joinParagraphs(). */
   paragraphs: string[]
   sourceFormat: SourceFormat
+  /** Path of the original imported file's bytes within the project's assets, if kept. */
+  assetRelPath: string | null
   importedAt: ISODateString
+}
+
+export interface ImportedDocument {
+  document: DocumentRecord
+  assetBytes: Uint8Array
 }
 
 export interface Segment {
@@ -29,6 +55,8 @@ export interface Segment {
   documentId: string
   start: number
   end: number
+  /** Verbatim snapshot of the source text at start:end, captured when the segment was created. */
+  text: string
 }
 
 export interface Coding {
@@ -42,6 +70,7 @@ export type NoteAttachment =
   | { kind: 'segment'; segmentId: string }
   | { kind: 'document'; documentId: string }
   | { kind: 'code'; codeId: string }
+  | { kind: 'category'; categoryId: string }
   | { kind: 'project' }
 
 export interface NoteRecord {
@@ -55,17 +84,27 @@ export interface NoteRecord {
   updatedAt: ISODateString
 }
 
+/** 'theme' = an emergent thematic cluster; 'question' = the category itself
+ * *is* an analytic question (Paillé & Mucchielli AQA-style) — `name` holds
+ * the question text, and codes/notes/segments filed under it are read as
+ * answers or evidence rather than instances of a theme. */
+export type CategoryKind = 'theme' | 'question'
+
 export interface CategoryRecord {
   id: string
+  kind: CategoryKind
   name: string
   codeIds: string[]
   noteIds: string[]
+  /** Raw quotes filed directly under this category without a Note wrapper. */
+  segmentIds: string[]
+  createdAt: ISODateString
 }
 
 export interface BoardItem {
   id: string
   boardId: string
-  refType: 'code' | 'note'
+  refType: 'code' | 'note' | 'segment'
   refId: string
   x: number
   y: number
@@ -77,7 +116,7 @@ export interface BoardRecord {
   name: string
 }
 
-export const PROJECT_SCHEMA_VERSION = 1
+export const PROJECT_SCHEMA_VERSION = 2
 
 export interface ProjectData {
   schemaVersion: typeof PROJECT_SCHEMA_VERSION

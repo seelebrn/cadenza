@@ -7,6 +7,7 @@ import type { ClusterTreeNode } from '../lib/clusterTree'
 import { buildTree, filterClusterTree, filterTreeByQuery, findTreeNode, pruneClaimed } from '../lib/codebookTree'
 import type { TreeNode } from '../lib/codebookTree'
 import type { CodeNode, TagKind } from '@shared/types'
+import ClusterRowShell from './ClusterRowShell'
 
 const PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899']
 
@@ -435,23 +436,13 @@ interface ClusterRowProps {
  * dragging a code onto this row (addCodeToCategory) or nesting one cluster
  * onto another (reparentCategory) is exactly what dragging on the board
  * does, just from a list instead of a canvas. Same data either way, so the
- * two are never out of sync — there's nothing separate to keep in sync. */
+ * two are never out of sync — there's nothing separate to keep in sync.
+ * The row chrome itself (color swatch, name edit, drag/drop) is shared
+ * with the notes tab's equivalent row via ClusterRowShell — this wrapper's
+ * job is just computing which codes belong here. */
 function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds, searchQuery }: ClusterRowProps): JSX.Element {
-  const renameCategory = useProjectStore((s) => s.renameCategory)
-  const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
-  const deleteCategory = useProjectStore((s) => s.deleteCategory)
-  // Joining/leaving a cluster from this tree has no board-drag position to
-  // size/place it from — reflows the default board so the destination
-  // visibly grows/shrinks to fit, instead of leaving a frame frozen at
-  // whatever size it happened to already be.
   const addCodeToCategory = useProjectStore((s) => s.addCodeToCategoryAndReflowBoard)
   const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategoryAndReflowBoard)
-  const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
-  const withBatch = useProjectStore((s) => s.withBatch)
-
-  const [isEditingName, setIsEditingName] = useState(false)
-  const [nameDraft, setNameDraft] = useState(node.name)
-  const [isDragOver, setIsDragOver] = useState(false)
 
   // If this cluster's own name is what matched the search, show
   // everything under it unfiltered (same "found the neighborhood" logic
@@ -479,109 +470,18 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds, searchQu
   }, [node.codeIds, fullCodeTree, claimedCodeIds, effectiveChildQuery])
   const otherMemberCount = node.noteIds.length + node.segmentIds.length
 
-  function commitRename(): void {
-    const trimmed = nameDraft.trim()
-    if (trimmed && trimmed !== node.name) renameCategory(node.id, trimmed)
-    setIsEditingName(false)
-  }
-
-  function handleDrop(e: DragEvent): void {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOver(false)
-    const kind = e.dataTransfer.getData(DRAG_KIND_MIME)
-    const draggedId = e.dataTransfer.getData('text/plain')
-    if (!draggedId) return
-    if (kind === 'cluster') {
-      if (draggedId !== node.id) reparentCategory(draggedId, node.id)
-      return
-    }
-    withBatch(() => {
-      addCodeToCategory(node.id, draggedId)
-      const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
-      if (sourceClusterId && sourceClusterId !== node.id) {
-        removeCodeFromCategory(sourceClusterId, draggedId)
-      }
-    })
-  }
-
   return (
-    <div>
-      <div
-        className={`group rounded px-1.5 py-1 text-sm hover:bg-slate-50 ${
-          isDragOver ? 'bg-blue-50 ring-1 ring-blue-300' : ''
-        }`}
-        style={{ paddingLeft: `${depth * 14 + 6}px` }}
-      >
-        <div
-          className="flex items-center gap-1.5"
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData('text/plain', node.id)
-            e.dataTransfer.setData(DRAG_KIND_MIME, 'cluster')
-          }}
-          onDragOver={(e) => {
-            e.preventDefault()
-            setIsDragOver(true)
-          }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={handleDrop}
-        >
-          <input
-            type="color"
-            className="h-4 w-4 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
-            value={node.color}
-            onChange={(e) => setCategoryColor(node.id, e.target.value)}
-            title="Change color"
-          />
-          <span className="rounded bg-slate-100 px-1 text-[10px] uppercase text-slate-500">
-            {node.kind === 'question' ? '❓' : 'cluster'}
-          </span>
-
-          {isEditingName ? (
-            <input
-              autoFocus
-              className="flex-1 rounded border border-slate-300 px-1 text-xs"
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => e.key === 'Enter' && commitRename()}
-            />
-          ) : (
-            <button
-              className="flex-1 truncate text-left font-medium"
-              onDoubleClick={() => {
-                setNameDraft(node.name)
-                setIsEditingName(true)
-              }}
-              title="Double-click to rename"
-            >
-              {node.name}
-            </button>
-          )}
-
-          {otherMemberCount > 0 && (
-            <span className="flex-shrink-0 text-[10px] text-slate-400" title="Notes/quotes filed here — manage in Analysis > Clusters">
-              +{otherMemberCount}
-            </span>
-          )}
-
-          <div className="hidden flex-shrink-0 gap-1 group-hover:flex">
-            <button
-              className="rounded border border-red-200 px-1 text-[10px] text-red-600 hover:bg-red-50"
-              onClick={() => {
-                if (window.confirm(`Delete "${node.name}"?`)) deleteCategory(node.id)
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-
-        {memberCodeNodes.length === 0 && node.children.length === 0 && (
-          <p className="mt-0.5 pl-5 text-[11px] text-slate-400">Drag a code onto this row to file it here.</p>
-        )}
-      </div>
+    <ClusterRowShell
+      node={node}
+      depth={depth}
+      memberKind="code"
+      isEmpty={memberCodeNodes.length === 0 && node.children.length === 0}
+      emptyPlaceholder="Drag a code onto this row to file it here."
+      otherMemberCount={otherMemberCount}
+      otherMemberTooltip="Notes/quotes filed here — manage in Analysis > Clusters"
+      onAddMember={addCodeToCategory}
+      onRemoveMember={removeCodeFromCategory}
+    >
       {node.children.map((child) => (
         <ClusterRow
           key={child.id}
@@ -596,7 +496,7 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds, searchQu
       {memberCodeNodes.map((code) => (
         <CodeRow key={code.id} node={code} depth={depth + 1} allCodes={codes} sourceClusterId={node.id} />
       ))}
-    </div>
+    </ClusterRowShell>
   )
 }
 

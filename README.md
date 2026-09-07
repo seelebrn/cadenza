@@ -436,3 +436,45 @@ member's row lands inside it. Production build clean. Boot-tested a separate pac
 instance alongside the user's own running dev session (only the expected shared-user-data-
 dir disk-cache warnings, no real errors), then killed only that instance's PIDs and
 confirmed the process list returned to exactly what was running beforehand.
+
+### Low-risk cleanup: splitting BoardView.tsx and deduping the cluster rows (2026-09-07)
+
+Picked up from the earlier codebase review: `BoardView.tsx` had grown to 1136 lines, and
+`CodebookPanel.tsx`/`NotesPanel.tsx` each had their own ~95%-identical cluster-row
+component (`ClusterRow`/`NoteClusterRow`) — same header chrome, same drag/drop plumbing,
+differing only in which kind of member (code vs. note) they file. Pure extraction, no
+behavior change intended anywhere in this pass.
+
+`BoardView.tsx`'s `ClusterFrame` and `BoardItemCard` were already broken out into their
+own function components (from earlier session work) but still lived in the same file,
+sharing its module-level `DragState` type and `MIN_CLUSTER_WIDTH`/`MIN_CLUSTER_HEIGHT`
+constants by closure. Moved both into their own files (`ClusterFrame.tsx`,
+`BoardItemCard.tsx`), and factored what they needed out from under `BoardView.tsx` into
+two small shared modules rather than importing types back out of the file that imports
+them: `boardDragTypes.ts` (the `DragState`/`Position` types) and
+`boardLayoutConstants.ts` (the two resize-floor constants). `BoardView.tsx` dropped from
+1136 to 872 lines.
+
+For the row duplication: added `ClusterRowShell.tsx`, owning everything that was
+byte-for-byte identical between the two rows (color swatch, inline rename, the "cluster"
+kind badge, the other-member-count badge, delete button, and all the drag/drop/nest
+plumbing including the reflow-triggering `reparentCategoryAndReflowBoard` call). It takes
+a `memberKind: 'code' | 'note'` (which also now correctly gates handleDrop — a latent gap
+in the original `ClusterRow` let it accept a drop without checking the payload was
+actually a code, since nothing in practice ever dragged a note over it; `NoteClusterRow`
+already had the equivalent `note` check, so the shared shell just applies it uniformly
+now), `onAddMember`/`onRemoveMember`, an `otherMemberCount`/tooltip pair, and a
+`children` slot for whatever the two callers render below the header — which stayed with
+each of them, since a codebook row's members are a hierarchical, search-filtered code
+subtree and a notes row's are a flat, document/category-filtered note list: different
+enough in shape that folding that into the shared shell wasn't worth it.
+`CodebookPanel.tsx`'s `ClusterRow` and `NotesPanel.tsx`'s `NoteClusterRow` are now thin
+wrappers that compute their own member list and pass it to `ClusterRowShell` as children.
+649 -> 549 lines and 741 -> 638 lines respectively, with the ~100 lines of duplication
+between them now living once, in the 179-line shell.
+
+Verified: typecheck clean, full test suite still 233/233 (nothing here touches
+`src/shared/*.ts`, so no test changes were needed or expected), production build clean.
+Boot-tested a separate packaged instance alongside the user's own running dev session
+(only the expected disk-cache warnings), then killed only that instance's PIDs and
+confirmed the process list returned to exactly what was running beforehand.

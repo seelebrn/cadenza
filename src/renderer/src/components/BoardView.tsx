@@ -4,7 +4,6 @@ import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import {
   computeAccommodatingSize,
   computeGridPosition,
-  describeBoardItem,
   findClusterAtPoint,
   findSnapTarget,
   getClusterMemberItems,
@@ -16,7 +15,11 @@ import {
   MEMBER_CARD_WIDTH
 } from '@shared/boardOps'
 import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
-import type { BoardCluster, BoardItem, CategoryKind, CategoryRecord } from '@shared/types'
+import type { BoardCluster, BoardItem, CategoryKind } from '@shared/types'
+import BoardItemCard from './BoardItemCard'
+import type { DragState, Position } from './boardDragTypes'
+import { MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH } from './boardLayoutConstants'
+import ClusterFrame from './ClusterFrame'
 
 // Single source of truth for a card's rendered size lives in boardOps.ts —
 // the cluster auto-layout there needs to know it too, to stack member
@@ -25,8 +28,6 @@ const CARD_WIDTH = MEMBER_CARD_WIDTH
 const CARD_HEIGHT = MEMBER_CARD_HEIGHT
 const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
-const MIN_CLUSTER_WIDTH = 140
-const MIN_CLUSTER_HEIGHT = 100
 // Breathing room left around a cluster dropped into another when the
 // destination grows to accommodate it.
 const CLUSTER_NEST_PADDING = 20
@@ -47,54 +48,6 @@ const UNLINK_DISTANCE = 200
 function nextColor(count: number): string {
   return PALETTE[count % PALETTE.length]
 }
-
-interface Position {
-  x: number
-  y: number
-}
-
-type DragState =
-  | {
-      kind: 'item'
-      /** The card actually grabbed — used for snap-target lookup and as the
-       * "other side" of a new link. */
-      id: string
-      /** Every item that moves rigidly together with it (itself plus every
-       * item transitively linked to it, unless shift overrides that). */
-      groupItemIds: string[]
-      startMouseX: number
-      startMouseY: number
-      startPositions: Record<string, Position>
-    }
-  | {
-      kind: 'cluster-move'
-      id: string
-      categoryId: string
-      /** Shift+drag detaches from the parent cluster instead of evaluating
-       * a new one, and doesn't drag descendants' membership assumptions. */
-      shiftKey: boolean
-      startWidth: number
-      startHeight: number
-      /** This cluster plus every descendant cluster present on this board —
-       * the rigid group of frames that moves together. */
-      groupClusterIds: string[]
-      clusterStartPositions: Record<string, Position>
-      /** Every item belonging to this category or any descendant category. */
-      memberItemIds: string[]
-      memberStartPositions: Record<string, Position>
-      startMouseX: number
-      startMouseY: number
-      startX: number
-      startY: number
-    }
-  | {
-      kind: 'cluster-resize'
-      id: string
-      startMouseX: number
-      startMouseY: number
-      startWidth: number
-      startHeight: number
-    }
 
 function BoardView(): JSX.Element {
   const data = useProjectStore((s) => s.data)
@@ -912,223 +865,6 @@ function BoardView(): JSX.Element {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// A root cluster's fill stays subtle (this is also what a lone,
-// un-nested cluster has always looked like). Each nesting level below
-// that gets a visibly more opaque fill of the *same* color, so a nested
-// cluster reads as a distinct layer sitting on top of its parent instead
-// of blending into it — position/size alone (a thin padding gap) wasn't
-// enough to actually see the containment at a glance.
-const CLUSTER_FILL_OPACITY_BY_DEPTH = ['0f', '26', '3d', '54']
-
-function fillOpacityForDepth(depth: number): string {
-  return CLUSTER_FILL_OPACITY_BY_DEPTH[Math.min(depth, CLUSTER_FILL_OPACITY_BY_DEPTH.length - 1)]
-}
-
-interface ClusterFrameProps {
-  cluster: BoardCluster
-  category: CategoryRecord
-  /** How many parentCategoryId hops up to a root — drives the fill
-   * opacity below so nesting is visually obvious, not just positionally
-   * correct. */
-  depth: number
-  dragState: DragState | null
-  liveDelta: { dx: number; dy: number }
-  /** Set while another cluster is being dragged over this one and would
-   * nest into it on drop — the size this frame would grow to, shown as a
-   * ghost outline so the resize isn't a surprise once committed. */
-  resizePreview: { width: number; height: number } | null
-  onStartMove: (e: React.MouseEvent) => void
-  onStartResize: (e: React.MouseEvent) => void
-}
-
-function ClusterFrame({
-  cluster,
-  category,
-  depth,
-  dragState,
-  liveDelta,
-  resizePreview,
-  onStartMove,
-  onStartResize
-}: ClusterFrameProps): JSX.Element {
-  const renameCategory = useProjectStore((s) => s.renameCategory)
-  const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
-  const deleteCluster = useProjectStore((s) => s.deleteCluster)
-
-  const [isEditingName, setIsEditingName] = useState(false)
-  const [nameDraft, setNameDraft] = useState(category.name)
-
-  const isMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(cluster.id)
-  const isResizing = dragState?.kind === 'cluster-resize' && dragState.id === cluster.id
-  const x = isMoving ? cluster.x + liveDelta.dx : cluster.x
-  const y = isMoving ? cluster.y + liveDelta.dy : cluster.y
-  const width = isResizing ? Math.max(MIN_CLUSTER_WIDTH, cluster.width + liveDelta.dx) : cluster.width
-  const height = isResizing ? Math.max(MIN_CLUSTER_HEIGHT, cluster.height + liveDelta.dy) : cluster.height
-
-  function commitRename(): void {
-    const trimmed = nameDraft.trim()
-    if (trimmed && trimmed !== category.name) renameCategory(category.id, trimmed)
-    setIsEditingName(false)
-  }
-
-  return (
-    <>
-      {resizePreview && (
-        <div
-          className="pointer-events-none absolute rounded-lg border-2 border-dashed"
-          style={{
-            left: x,
-            top: y,
-            width: resizePreview.width,
-            height: resizePreview.height,
-            borderColor: category.color,
-            backgroundColor: `${category.color}20`
-          }}
-        />
-      )}
-      <div
-        className="absolute rounded-lg border-2 border-dashed"
-        style={{
-          left: x,
-          top: y,
-          width,
-          height,
-          borderColor: category.color,
-          backgroundColor: `${category.color}${fillOpacityForDepth(depth)}`
-        }}
-      >
-      <div
-        className="flex cursor-move items-center gap-1 rounded-t-md px-2 py-1 text-xs text-white"
-        style={{ backgroundColor: category.color }}
-        onMouseDown={onStartMove}
-      >
-        <input
-          type="color"
-          className="h-3 w-3 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
-          value={category.color}
-          onMouseDown={(e) => e.stopPropagation()}
-          onChange={(e) => setCategoryColor(category.id, e.target.value)}
-        />
-        <span className="flex-shrink-0 rounded bg-black/20 px-1 text-[9px] uppercase">
-          {category.kind === 'question' ? '❓' : '🏷'}
-        </span>
-        {isEditingName ? (
-          <input
-            autoFocus
-            className="min-w-0 flex-1 rounded border-0 px-1 text-xs text-slate-900"
-            value={nameDraft}
-            onMouseDown={(e) => e.stopPropagation()}
-            onChange={(e) => setNameDraft(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={(e) => e.key === 'Enter' && commitRename()}
-          />
-        ) : (
-          <button
-            className="min-w-0 flex-1 truncate text-left font-medium"
-            onDoubleClick={(e) => {
-              e.stopPropagation()
-              setNameDraft(category.name)
-              setIsEditingName(true)
-            }}
-            title={category.parentCategoryId ? 'Nested under a superordinate cluster' : undefined}
-          >
-            {category.name}
-            {category.parentCategoryId ? ' ↰' : ''}
-          </button>
-        )}
-        <button
-          className="flex-shrink-0 text-white/80 hover:text-white"
-          title="Remove from this board (the cluster itself is kept)"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => deleteCluster(cluster.id)}
-        >
-          ×
-        </button>
-      </div>
-      <div
-        className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
-        style={{ backgroundColor: category.color }}
-        onMouseDown={(e) => {
-          e.stopPropagation()
-          onStartResize(e)
-        }}
-      />
-      </div>
-    </>
-  )
-}
-
-interface BoardItemCardProps {
-  item: BoardItem
-  boardId: string
-  x: number
-  y: number
-  isDragging: boolean
-  isSnapping: boolean
-  /** realId is passed when a virtual item just materialized, since item.id
-   * (a "virtual:..." marker) won't exist in boardItems yet. */
-  onStartDrag: (e: React.MouseEvent, realId?: string) => void
-}
-
-function BoardItemCard({ item, boardId, x, y, isDragging, isSnapping, onStartDrag }: BoardItemCardProps): JSX.Element | null {
-  const data = useProjectStore((s) => s.data)
-  const removeItemFromBoard = useProjectStore((s) => s.removeItemFromBoard)
-  const addItemToBoard = useProjectStore((s) => s.addItemToBoard)
-  const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)
-
-  if (!data) return null
-  const description = describeBoardItem(data, item)
-  if (!description) return null
-
-  const isVirtual = item.id.startsWith('virtual:')
-
-  return (
-    <div
-      className={`group absolute cursor-move select-none rounded border bg-white p-2 text-xs shadow-sm transition-shadow ${
-        isSnapping ? 'border-blue-400 ring-2 ring-blue-300' : 'border-slate-300'
-      } ${isDragging ? 'shadow-md' : ''}`}
-      style={{ left: x, top: y, width: CARD_WIDTH, minHeight: CARD_HEIGHT }}
-      onMouseDown={(e) => {
-        // A virtual (not-yet-persisted) item materializes into a real
-        // BoardItem the moment it's touched, so the drag has something
-        // real to move.
-        if (isVirtual) {
-          const realId = addItemToBoard(boardId, item.refType, item.refId, item.x, item.y)
-          onStartDrag(e, realId ?? undefined)
-        } else {
-          onStartDrag(e)
-        }
-      }}
-      onDoubleClick={() => {
-        if (item.refType === 'code') setInspectedCodeId(item.refId)
-      }}
-    >
-      <div className="mb-1 flex items-center justify-between gap-1">
-        <span className="flex items-center gap-1 truncate text-[10px] uppercase text-slate-400">
-          {description.color && (
-            <span
-              className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
-              style={{ backgroundColor: description.color }}
-            />
-          )}
-          {description.sublabel}
-        </span>
-        <button
-          className="hidden flex-shrink-0 text-slate-300 hover:text-red-500 group-hover:block"
-          title="Remove from board"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => {
-            if (!isVirtual) removeItemFromBoard(item.id)
-          }}
-        >
-          ×
-        </button>
-      </div>
-      <p className="line-clamp-3 text-slate-700">{description.label}</p>
     </div>
   )
 }

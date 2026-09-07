@@ -1,14 +1,26 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { DragEvent } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
+import { buildClusterTree, DRAG_KIND_MIME, SOURCE_CLUSTER_MIME } from '../lib/clusterTree'
+import type { ClusterTreeNode } from '../lib/clusterTree'
 import { describeNoteAttachment } from '@shared/notesOps'
 import type { NoteCategoryDef, NoteRecord } from '@shared/types'
 
 const PALETTE = ['#3b82f6', '#f97316', '#8b5cf6', '#22c55e', '#ef4444', '#14b8a6', '#eab308', '#ec4899']
+const CLUSTER_PALETTE = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444', '#14b8a6', '#eab308', '#ec4899']
 
 function nextColor(count: number): string {
   return PALETTE[count % PALETTE.length]
 }
+
+function nextClusterColor(count: number): string {
+  return CLUSTER_PALETTE[count % CLUSTER_PALETTE.length]
+}
+
+type MergedRootNode =
+  | { kind: 'note'; id: string; createdAt: string; note: NoteRecord }
+  | { kind: 'cluster'; id: string; createdAt: string; node: ClusterTreeNode }
 
 function parseTags(raw: string): string[] {
   return raw
@@ -21,6 +33,9 @@ function NotesPanel(): JSX.Element {
   const data = useProjectStore((s) => s.data)
   const addNote = useProjectStore((s) => s.addNote)
   const addNoteToSelection = useProjectStore((s) => s.addNoteToSelection)
+  const createCategory = useProjectStore((s) => s.createCategory)
+  const reparentCategory = useProjectStore((s) => s.reparentCategory)
+  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
 
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const clearUi = useWorkspaceUiStore((s) => s.clear)
@@ -33,8 +48,13 @@ function NotesPanel(): JSX.Element {
   const [manualTarget, setManualTarget] = useState<'document' | 'project'>('document')
   const [filterMode, setFilterMode] = useState<'document' | 'all'>('document')
   const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
+  const [newClusterName, setNewClusterName] = useState('')
+  const [isRootDragOver, setIsRootDragOver] = useState(false)
 
   const categories = data?.noteCategories ?? []
+  const clusters = useMemo(() => data?.categories ?? [], [data])
+  const clusterTree = useMemo(() => buildClusterTree(clusters), [clusters])
+  const claimedNoteIds = useMemo(() => new Set(clusters.flatMap((c) => c.noteIds)), [clusters])
 
   useEffect(() => {
     if (!selectedDocumentId && manualTarget === 'document') setManualTarget('project')
@@ -91,6 +111,44 @@ function NotesPanel(): JSX.Element {
     }
     return [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   }, [data, filterMode, selectedDocumentId, categoryFilter])
+
+  // One combined tree, same idea as the codebook tab: clusters and
+  // unclustered notes (that also pass the current filters) as siblings, in
+  // creation order — a cluster is just another row here, not a separate
+  // section, and a note filed under one renders as that cluster's child
+  // instead of also appearing at the root.
+  const mergedRoots = useMemo<MergedRootNode[]>(() => {
+    const rootNotes = visibleNotes.filter((n) => !claimedNoteIds.has(n.id))
+    const entries: MergedRootNode[] = [
+      ...rootNotes.map((n) => ({ kind: 'note' as const, id: n.id, createdAt: n.createdAt, note: n })),
+      ...clusterTree.map((n) => ({ kind: 'cluster' as const, id: n.id, createdAt: n.createdAt, node: n }))
+    ]
+    return entries.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }, [visibleNotes, claimedNoteIds, clusterTree])
+
+  function handleCreateCluster(): void {
+    const name = newClusterName.trim()
+    if (!name) return
+    createCategory(name, 'theme', nextClusterColor(clusters.length))
+    setNewClusterName('')
+  }
+
+  function handleRootDrop(e: DragEvent): void {
+    e.preventDefault()
+    setIsRootDragOver(false)
+    const kind = e.dataTransfer.getData(DRAG_KIND_MIME)
+    const draggedId = e.dataTransfer.getData('text/plain')
+    if (!draggedId) return
+    if (kind === 'cluster') {
+      reparentCategory(draggedId, null)
+      return
+    }
+    // Notes have no hierarchy of their own (unlike codes) — dropping one
+    // back at the root only ever means "take it out of the cluster it was
+    // shown under."
+    const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
+    if (sourceClusterId) removeNoteFromCategory(sourceClusterId, draggedId)
+  }
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -199,13 +257,46 @@ function NotesPanel(): JSX.Element {
         )}
       </div>
 
-      <div className="flex-1 overflow-auto p-2">
-        {visibleNotes.length === 0 && (
-          <p className="p-3 text-center text-sm text-slate-400">No notes yet.</p>
+      <div className="flex gap-1.5 border-b border-slate-200 p-2">
+        <input
+          className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+          placeholder="New cluster…"
+          value={newClusterName}
+          onChange={(e) => setNewClusterName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleCreateCluster()}
+        />
+        <button
+          className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700"
+          onClick={handleCreateCluster}
+        >
+          Add cluster
+        </button>
+      </div>
+
+      <div
+        className={`flex-1 overflow-auto p-2 ${isRootDragOver ? 'bg-blue-50' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setIsRootDragOver(true)
+        }}
+        onDragLeave={() => setIsRootDragOver(false)}
+        onDrop={handleRootDrop}
+      >
+        {mergedRoots.length === 0 && (
+          <p className="p-3 text-center text-sm text-slate-400">No notes or clusters yet.</p>
         )}
-        {visibleNotes.map((note) => (
-          <NoteCard key={note.id} note={note} />
-        ))}
+        {mergedRoots.length > 0 && (
+          <p className="mb-1 px-1 text-[10px] text-slate-400">
+            Drag a note onto a cluster to file it there, or drop here to move it back out.
+          </p>
+        )}
+        {mergedRoots.map((entry) =>
+          entry.kind === 'note' ? (
+            <NoteCard key={entry.id} note={entry.note} />
+          ) : (
+            <NoteClusterRow key={entry.id} node={entry.node} depth={0} visibleNotes={visibleNotes} />
+          )
+        )}
       </div>
     </div>
   )
@@ -319,10 +410,169 @@ function NoteCategoryRow({ category }: { category: NoteCategoryDef }): JSX.Eleme
   )
 }
 
-function NoteCard({ note }: { note: NoteRecord }): JSX.Element {
+interface NoteClusterRowProps {
+  node: ClusterTreeNode
+  depth: number
+  /** The current filtered note list (document/category filters already
+   * applied) — a cluster's members are shown only if they pass the same
+   * filter the root-level list does, so switching "This document"/"All
+   * notes" behaves consistently whether a note happens to be filed under a
+   * cluster or not. */
+  visibleNotes: NoteRecord[]
+}
+
+/** A cluster, shown as a row in the same tree as notes — this is the same
+ * CategoryRecord the board draws as a cluster frame and the codebook tab
+ * also renders, so filing a note here (drag it onto this row) is exactly
+ * what dragging on the board or in Analysis > Clusters does. Same data
+ * either way — there's nothing separate to keep in sync. */
+function NoteClusterRow({ node, depth, visibleNotes }: NoteClusterRowProps): JSX.Element {
+  const renameCategory = useProjectStore((s) => s.renameCategory)
+  const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
+  const deleteCategory = useProjectStore((s) => s.deleteCategory)
+  const addNoteToCategory = useProjectStore((s) => s.addNoteToCategory)
+  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
+  const reparentCategory = useProjectStore((s) => s.reparentCategory)
+
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState(node.name)
+  const [isDragOver, setIsDragOver] = useState(false)
+
+  const memberNotes = useMemo(() => {
+    const byId = new Map(visibleNotes.map((n) => [n.id, n]))
+    return node.noteIds.map((id) => byId.get(id)).filter((n): n is NoteRecord => Boolean(n))
+  }, [node.noteIds, visibleNotes])
+  const otherMemberCount = node.codeIds.length + node.segmentIds.length
+
+  function commitRename(): void {
+    const trimmed = nameDraft.trim()
+    if (trimmed && trimmed !== node.name) renameCategory(node.id, trimmed)
+    setIsEditingName(false)
+  }
+
+  function handleDrop(e: DragEvent): void {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    const kind = e.dataTransfer.getData(DRAG_KIND_MIME)
+    const draggedId = e.dataTransfer.getData('text/plain')
+    if (!draggedId) return
+    if (kind === 'cluster') {
+      if (draggedId !== node.id) reparentCategory(draggedId, node.id)
+      return
+    }
+    if (kind !== 'note') return
+    addNoteToCategory(node.id, draggedId)
+    const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
+    if (sourceClusterId && sourceClusterId !== node.id) {
+      removeNoteFromCategory(sourceClusterId, draggedId)
+    }
+  }
+
+  return (
+    <div>
+      <div
+        className={`group rounded px-1.5 py-1 text-sm hover:bg-slate-50 ${
+          isDragOver ? 'bg-blue-50 ring-1 ring-blue-300' : ''
+        }`}
+        style={{ paddingLeft: `${depth * 14 + 6}px` }}
+      >
+        <div
+          className="flex items-center gap-1.5"
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('text/plain', node.id)
+            e.dataTransfer.setData(DRAG_KIND_MIME, 'cluster')
+          }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setIsDragOver(true)
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
+        >
+          <input
+            type="color"
+            className="h-4 w-4 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
+            value={node.color}
+            onChange={(e) => setCategoryColor(node.id, e.target.value)}
+            title="Change color"
+          />
+          <span className="rounded bg-slate-100 px-1 text-[10px] uppercase text-slate-500">
+            {node.kind === 'question' ? '❓' : 'cluster'}
+          </span>
+
+          {isEditingName ? (
+            <input
+              autoFocus
+              className="flex-1 rounded border border-slate-300 px-1 text-xs"
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => e.key === 'Enter' && commitRename()}
+            />
+          ) : (
+            <button
+              className="flex-1 truncate text-left font-medium"
+              onDoubleClick={() => {
+                setNameDraft(node.name)
+                setIsEditingName(true)
+              }}
+              title="Double-click to rename"
+            >
+              {node.name}
+            </button>
+          )}
+
+          {otherMemberCount > 0 && (
+            <span
+              className="flex-shrink-0 text-[10px] text-slate-400"
+              title="Codes/quotes filed here — manage in Analysis > Clusters"
+            >
+              +{otherMemberCount}
+            </span>
+          )}
+
+          <div className="hidden flex-shrink-0 gap-1 group-hover:flex">
+            <button
+              className="rounded border border-red-200 px-1 text-[10px] text-red-600 hover:bg-red-50"
+              onClick={() => {
+                if (window.confirm(`Delete "${node.name}"?`)) deleteCategory(node.id)
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+
+        {memberNotes.length === 0 && node.children.length === 0 && (
+          <p className="mt-0.5 pl-5 text-[11px] text-slate-400">Drag a note onto this row to file it here.</p>
+        )}
+      </div>
+      {node.children.map((child) => (
+        <NoteClusterRow key={child.id} node={child} depth={depth + 1} visibleNotes={visibleNotes} />
+      ))}
+      {memberNotes.map((note) => (
+        <NoteCard key={note.id} note={note} sourceClusterId={node.id} depth={depth + 1} />
+      ))}
+    </div>
+  )
+}
+
+interface NoteCardProps {
+  note: NoteRecord
+  /** Set when this card is rendered as a cluster's member rather than at
+   * the plain root — lets a drop target elsewhere know which cluster to
+   * remove it from, and shows an "Unfile" shortcut on the card itself. */
+  sourceClusterId?: string
+  depth?: number
+}
+
+function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Element {
   const data = useProjectStore((s) => s.data)
   const updateNote = useProjectStore((s) => s.updateNote)
   const deleteNote = useProjectStore((s) => s.deleteNote)
+  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
   const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
   const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const setSuggestedCodeName = useWorkspaceUiStore((s) => s.setSuggestedCodeName)
@@ -365,7 +615,16 @@ function NoteCard({ note }: { note: NoteRecord }): JSX.Element {
   }
 
   return (
-    <div className="mb-2 rounded border border-slate-200 p-2 text-xs">
+    <div
+      className="mb-2 rounded border border-slate-200 p-2 text-xs"
+      style={{ marginLeft: depth * 14 }}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', note.id)
+        e.dataTransfer.setData(DRAG_KIND_MIME, 'note')
+        e.dataTransfer.setData(SOURCE_CLUSTER_MIME, sourceClusterId ?? '')
+      }}
+    >
       <div className="mb-1 flex items-center justify-between gap-2 text-slate-400">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate font-medium text-slate-500">{description.label}</span>
@@ -449,6 +708,15 @@ function NoteCard({ note }: { note: NoteRecord }): JSX.Element {
             {note.attachedTo.kind === 'segment' && (
               <button className="text-slate-500 hover:underline" onClick={handlePromote}>
                 Promote to code
+              </button>
+            )}
+            {sourceClusterId && (
+              <button
+                className="text-slate-500 hover:underline"
+                title="Remove from this cluster"
+                onClick={() => removeNoteFromCategory(sourceClusterId, note.id)}
+              >
+                Unfile
               </button>
             )}
             <button className="text-red-500 hover:underline" onClick={() => deleteNote(note.id)}>

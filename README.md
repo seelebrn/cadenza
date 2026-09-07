@@ -88,6 +88,13 @@ quotes, AQA question/theme kind) — same `ClustersView` component, same data. (
 — intentionally keeps the word "category": a genuinely different thing, a flat per-note tag,
 not a grouping cluster.)
 
+The Notes tab got the same treatment (2026-09-07): clusters render as rows in the same tree
+as notes there too, with drag-and-drop to file a note under a cluster or pull it back out,
+and its own compact "+ New cluster" control. Add Code and Add Note stay separate creation
+forms — their fields don't overlap enough to earn a merged form — but the cluster tree
+itself is shared code (`renderer/src/lib/clusterTree.ts`), so the Codes tab, the Notes tab,
+the board, and Analysis are five views on one `data.categories`, never five copies.
+
 Fixed: a cluster created anywhere other than the board itself (the Workspace codebook
 tree, Analysis > Clusters) never showed up on any board, including the default one.
 Cause — a `BoardCluster` is a category's spatial *shape* on a given board, and nothing

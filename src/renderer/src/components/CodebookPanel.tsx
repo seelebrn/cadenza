@@ -2,25 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import type { DragEvent } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
-import type { CategoryRecord, CodeNode, TagKind } from '@shared/types'
+import { buildClusterTree, DRAG_KIND_MIME, SOURCE_CLUSTER_MIME } from '../lib/clusterTree'
+import type { ClusterTreeNode } from '../lib/clusterTree'
+import type { CodeNode, TagKind } from '@shared/types'
 
 const PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899']
 
 function nextColor(count: number): string {
   return PALETTE[count % PALETTE.length]
 }
-
-// Drag-and-drop in this panel carries a few different payloads (a code
-// being reparented/assigned, or a cluster being nested) — both use the
-// standard 'text/plain' slot for the dragged id (so a plain drop target
-// that only knows about one kind keeps working unchanged), plus this
-// custom type as a discriminator so a target that accepts both (a cluster
-// row) knows which action to take. A dragged code also carries which
-// cluster (if any) it's currently shown under, so dropping it elsewhere
-// can cleanly move it out of that one cluster rather than leaving it
-// double-homed.
-const DRAG_KIND_MIME = 'application/x-cadenza-kind'
-const SOURCE_CLUSTER_MIME = 'application/x-cadenza-source-cluster'
 
 interface TreeNode extends CodeNode {
   children: TreeNode[]
@@ -55,21 +45,6 @@ function findTreeNode(nodes: TreeNode[], id: string): TreeNode | null {
  * instead of also at its plain hierarchy position. */
 function pruneClaimed(nodes: TreeNode[], claimed: Set<string>): TreeNode[] {
   return nodes.filter((n) => !claimed.has(n.id)).map((n) => ({ ...n, children: pruneClaimed(n.children, claimed) }))
-}
-
-interface ClusterTreeNode extends CategoryRecord {
-  children: ClusterTreeNode[]
-}
-
-function buildClusterTree(clusters: CategoryRecord[]): ClusterTreeNode[] {
-  const byId = new Map<string, ClusterTreeNode>(clusters.map((c) => [c.id, { ...c, children: [] }]))
-  const roots: ClusterTreeNode[] = []
-  for (const node of byId.values()) {
-    const parent = node.parentCategoryId ? byId.get(node.parentCategoryId) : undefined
-    if (parent) parent.children.push(node)
-    else roots.push(node)
-  }
-  return roots
 }
 
 type MergedRootNode =

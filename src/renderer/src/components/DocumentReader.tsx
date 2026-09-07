@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { computeParagraphRuns, type CodingWithSegment } from '@shared/highlightRuns'
@@ -18,9 +18,16 @@ function DocumentReader(): JSX.Element {
   const codings = useProjectStore((s) => s.data?.codings ?? [])
   const segments = useProjectStore((s) => s.data?.segments ?? [])
   const codes = useProjectStore((s) => s.data?.codes ?? [])
+  const editParagraph = useProjectStore((s) => s.editParagraph)
+  const renameDocument = useProjectStore((s) => s.renameDocument)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const clearActiveSpan = useWorkspaceUiStore((s) => s.clear)
+
+  const [editingParagraphIndex, setEditingParagraphIndex] = useState<number | null>(null)
+  const [draftText, setDraftText] = useState('')
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
 
   const paragraphStartOffsets = useMemo(
     () => (document ? getParagraphStartOffsets(document.paragraphs) : []),
@@ -58,7 +65,7 @@ function DocumentReader(): JSX.Element {
   const codeById = useMemo(() => new Map(codes.map((c) => [c.id, c])), [codes])
 
   function handleMouseUp(): void {
-    if (!document) return
+    if (!document || editingParagraphIndex !== null) return
     const resolved = resolveSelectionOffsets(paragraphStartOffsets)
     if (!resolved) return
     const text = joinParagraphs(document.paragraphs).slice(resolved.start, resolved.end)
@@ -67,6 +74,25 @@ function DocumentReader(): JSX.Element {
     // Clear the native browser selection — our own rendered highlight (below)
     // takes over as the persistent visual marker for the active span.
     window.getSelection()?.removeAllRanges()
+  }
+
+  function startEditingParagraph(index: number): void {
+    if (!document) return
+    setDraftText(document.paragraphs[index])
+    setEditingParagraphIndex(index)
+  }
+
+  function commitParagraphEdit(): void {
+    if (!document || editingParagraphIndex === null) return
+    editParagraph(document.id, editingParagraphIndex, draftText)
+    setEditingParagraphIndex(null)
+  }
+
+  function commitTitle(): void {
+    if (!document) return
+    const trimmed = titleDraft.trim()
+    if (trimmed && trimmed !== document.title) renameDocument(document.id, trimmed)
+    setIsEditingTitle(false)
   }
 
   if (!document) {
@@ -79,71 +105,133 @@ function DocumentReader(): JSX.Element {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-8" onMouseUp={handleMouseUp}>
-      <h2 className="mb-1 text-xl font-semibold">{document.title}</h2>
+      {isEditingTitle ? (
+        <input
+          autoFocus
+          className="mb-1 w-full rounded border border-slate-300 px-1 text-xl font-semibold"
+          value={titleDraft}
+          onChange={(e) => setTitleDraft(e.target.value)}
+          onBlur={commitTitle}
+          onKeyDown={(e) => e.key === 'Enter' && commitTitle()}
+        />
+      ) : (
+        <h2
+          className="mb-1 text-xl font-semibold"
+          onDoubleClick={() => {
+            setTitleDraft(document.title)
+            setIsEditingTitle(true)
+          }}
+          title="Double-click to rename"
+        >
+          {document.title}
+        </h2>
+      )}
       <p className="mb-6 text-xs uppercase tracking-wide text-slate-400">
         {document.sourceFormat} · {document.paragraphs.length} paragraphs · imported{' '}
         {new Date(document.importedAt).toLocaleString()}
       </p>
       <div className="space-y-4 text-sm leading-relaxed text-slate-800">
         {document.paragraphs.map((paragraph, i) => {
+          if (editingParagraphIndex === i) {
+            const paragraphStart = paragraphStartOffsets[i]
+            const paragraphEnd = paragraphStart + paragraph.length
+            const hasCodedContent = segments.some(
+              (s) => s.documentId === document.id && s.start < paragraphEnd && s.end > paragraphStart
+            )
+            return (
+              <div key={i} className="rounded border border-slate-300 bg-slate-50 p-2">
+                {hasCodedContent && (
+                  <p className="mb-1 text-xs text-amber-700">
+                    This paragraph has coded/annotated passages — their verbatim quotes are kept, but
+                    edits here may shift where they highlight.
+                  </p>
+                )}
+                <textarea
+                  autoFocus
+                  className="w-full rounded border border-slate-300 p-2 text-sm leading-relaxed"
+                  rows={Math.max(3, Math.ceil(draftText.length / 80))}
+                  value={draftText}
+                  onChange={(e) => setDraftText(e.target.value)}
+                />
+                <div className="mt-1 flex justify-end gap-2 text-xs">
+                  <button className="text-slate-500 hover:underline" onClick={() => setEditingParagraphIndex(null)}>
+                    Cancel
+                  </button>
+                  <button className="font-medium text-slate-900 hover:underline" onClick={commitParagraphEdit}>
+                    Save
+                  </button>
+                </div>
+              </div>
+            )
+          }
+
           const runs = computeParagraphRuns(paragraph, paragraphStartOffsets[i], codingsWithSegments)
           return (
-            <p key={i} data-paragraph-index={i}>
-              {runs.map((run, runIndex) => {
-                const isActive = run.codingIds.includes(ACTIVE_MARKER)
-                const realCodingIds = run.codingIds.filter((id) => id !== ACTIVE_MARKER)
+            <div key={i} className="group relative">
+              <p data-paragraph-index={i}>
+                {runs.map((run, runIndex) => {
+                  const isActive = run.codingIds.includes(ACTIVE_MARKER)
+                  const realCodingIds = run.codingIds.filter((id) => id !== ACTIVE_MARKER)
 
-                if (realCodingIds.length === 0 && !isActive) {
-                  return <span key={runIndex}>{run.text}</span>
-                }
+                  if (realCodingIds.length === 0 && !isActive) {
+                    return <span key={runIndex}>{run.text}</span>
+                  }
 
-                const primaryEntry =
-                  realCodingIds.length > 0
-                    ? codingsWithSegments.find((c) => c.coding.id === realCodingIds[0])
-                    : undefined
-                const color = primaryEntry ? codeById.get(primaryEntry.coding.codeId)?.color : undefined
-                const title =
-                  realCodingIds.length > 0
-                    ? realCodingIds
-                        .map((id) => {
-                          const c = codingsWithSegments.find((cs) => cs.coding.id === id)
-                          return c ? codeById.get(c.coding.codeId)?.name : undefined
-                        })
-                        .filter(Boolean)
-                        .join(', ')
-                    : 'Click to add codes/items/notes — click again to cancel'
+                  const primaryEntry =
+                    realCodingIds.length > 0
+                      ? codingsWithSegments.find((c) => c.coding.id === realCodingIds[0])
+                      : undefined
+                  const color = primaryEntry ? codeById.get(primaryEntry.coding.codeId)?.color : undefined
+                  const title =
+                    realCodingIds.length > 0
+                      ? realCodingIds
+                          .map((id) => {
+                            const c = codingsWithSegments.find((cs) => cs.coding.id === id)
+                            return c ? codeById.get(c.coding.codeId)?.name : undefined
+                          })
+                          .filter(Boolean)
+                          .join(', ')
+                      : 'Click to add codes/items/notes — click again to cancel'
 
-                return (
-                  <mark
-                    key={runIndex}
-                    style={{ backgroundColor: color ? `${color}55` : isActive ? '#fde68a80' : undefined }}
-                    className={`cursor-pointer rounded-sm ${
-                      isActive ? 'outline-dashed outline-2 outline-amber-500 outline-offset-1' : ''
-                    }`}
-                    title={title}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (primaryEntry) {
-                        // Re-activate this exact segment: shows what's already
-                        // on it (via the codebook/notes panels) *and* re-arms
-                        // Apply/note actions so more can be added to it.
-                        const { segment } = primaryEntry
-                        setActiveSpan({
-                          documentId: segment.documentId,
-                          start: segment.start,
-                          end: segment.end,
-                          text: segment.text
-                        })
-                      } else if (isActive) {
-                        clearActiveSpan()
-                      }
-                    }}
-                  >
-                    {run.text}
-                  </mark>
-                )
-              })}
-            </p>
+                  return (
+                    <mark
+                      key={runIndex}
+                      style={{ backgroundColor: color ? `${color}55` : isActive ? '#fde68a80' : undefined }}
+                      className={`cursor-pointer rounded-sm ${
+                        isActive ? 'outline-dashed outline-2 outline-amber-500 outline-offset-1' : ''
+                      }`}
+                      title={title}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (primaryEntry) {
+                          // Re-activate this exact segment: shows what's already
+                          // on it (via the codebook/notes panels) *and* re-arms
+                          // Apply/note actions so more can be added to it.
+                          const { segment } = primaryEntry
+                          setActiveSpan({
+                            documentId: segment.documentId,
+                            start: segment.start,
+                            end: segment.end,
+                            text: segment.text
+                          })
+                        } else if (isActive) {
+                          clearActiveSpan()
+                        }
+                      }}
+                    >
+                      {run.text}
+                    </mark>
+                  )
+                })}
+              </p>
+              <button
+                className="absolute -right-5 top-0 hidden text-xs text-slate-300 hover:text-slate-600 group-hover:block"
+                title="Edit this paragraph's text"
+                onClick={() => startEditingParagraph(i)}
+              >
+                ✎
+              </button>
+            </div>
           )
         })}
       </div>

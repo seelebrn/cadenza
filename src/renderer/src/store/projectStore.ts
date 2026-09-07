@@ -41,6 +41,8 @@ import {
   renameCategory as renameCategoryOp,
   setCategoryColor as setCategoryColorOp
 } from '@shared/categoryOps'
+import { editParagraph as editParagraphOp, renameDocument as renameDocumentOp } from '@shared/documentOps'
+import { useWorkspaceUiStore } from './workspaceUiStore'
 
 interface ProjectState {
   data: ProjectData | null
@@ -123,6 +125,10 @@ interface ProjectState {
     text: string,
     categoryId: string
   ) => void
+
+  // Editing the imported source text itself
+  editParagraph: (documentId: string, paragraphIndex: number, newText: string) => void
+  renameDocument: (documentId: string, title: string) => void
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -364,5 +370,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().updateProject((data) => {
       const { data: withSegment, segmentId } = ensureSegmentOp(data, { documentId, start, end, text })
       return addSegmentToCategoryOp(withSegment, categoryId, segmentId)
-    })
+    }),
+
+  // Unlike applyCodeToSelection, this one deliberately DOES clear the active
+  // span afterwards: an edit can shift every subsequent segment's offsets,
+  // so a span captured before the edit is no longer trustworthy to act on.
+  editParagraph: (documentId, paragraphIndex, newText) => {
+    get().updateProject((data) => editParagraphOp(data, documentId, paragraphIndex, newText))
+    useWorkspaceUiStore.getState().clear()
+  },
+
+  renameDocument: (documentId, title) =>
+    get().updateProject((data) => renameDocumentOp(data, documentId, title))
 }))

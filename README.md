@@ -7,8 +7,10 @@ Coding is one lens among several, not the privileged one: codes, lightweight inv
 per Paillé & Mucchielli) are all first-class ways to work with a segment of text, and a
 Category can itself *be* an analytic question rather than just a theme label. Whenever text
 is coded, memoed, or itemized, the verbatim quote is captured on the spot, so it survives
-even if the source document is later edited. A freeform drag-and-drop grouping board and
-import/export with Word (.docx), OpenOffice (.odt), and Excel (.xlsx/.xls) round it out.
+even if the source document is later edited — and it can be: a per-paragraph inline editor
+lets you fix transcription errors or redact names after import, re-anchoring every existing
+coding/note automatically. A freeform drag-and-drop grouping board and import/export with
+Word (.docx), OpenOffice (.odt), and Excel (.xlsx/.xls) round it out.
 
 Runs on Windows and macOS. See `\plans\humble-herding-pike.md` for the
 full design/phase plan.

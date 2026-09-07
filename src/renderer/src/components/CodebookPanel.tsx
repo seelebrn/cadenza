@@ -10,18 +10,26 @@ function nextColor(count: number): string {
   return PALETTE[count % PALETTE.length]
 }
 
-// Drag-and-drop in this panel carries two different kinds of payload (a
-// code being reparented/assigned, or a cluster being nested) — both use
-// the standard 'text/plain' slot for the dragged id (so existing drop
-// targets that only know about codes keep working unchanged), plus this
-// custom type as a discriminator so a drop target that accepts both (a
-// cluster row) knows which action to take.
+// Drag-and-drop in this panel carries a few different payloads (a code
+// being reparented/assigned, or a cluster being nested) — both use the
+// standard 'text/plain' slot for the dragged id (so a plain drop target
+// that only knows about one kind keeps working unchanged), plus this
+// custom type as a discriminator so a target that accepts both (a cluster
+// row) knows which action to take. A dragged code also carries which
+// cluster (if any) it's currently shown under, so dropping it elsewhere
+// can cleanly move it out of that one cluster rather than leaving it
+// double-homed.
 const DRAG_KIND_MIME = 'application/x-cadenza-kind'
+const SOURCE_CLUSTER_MIME = 'application/x-cadenza-source-cluster'
 
 interface TreeNode extends CodeNode {
   children: TreeNode[]
 }
 
+/** The complete, natural code hierarchy (parentId-based), independent of
+ * cluster membership — used both for the top-level tree and as a lookup
+ * table so a cluster can pull in a member code's own subtree wherever
+ * that member is filed under a cluster instead. */
 function buildTree(codes: CodeNode[]): TreeNode[] {
   const byId = new Map<string, TreeNode>(codes.map((c) => [c.id, { ...c, children: [] }]))
   const roots: TreeNode[] = []
@@ -31,6 +39,22 @@ function buildTree(codes: CodeNode[]): TreeNode[] {
     else roots.push(node)
   }
   return roots
+}
+
+function findTreeNode(nodes: TreeNode[], id: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node
+    const found = findTreeNode(node.children, id)
+    if (found) return found
+  }
+  return null
+}
+
+/** Removes any code that's a member of some cluster from a tree — at any
+ * depth — since a clustered code is shown once, under its cluster,
+ * instead of also at its plain hierarchy position. */
+function pruneClaimed(nodes: TreeNode[], claimed: Set<string>): TreeNode[] {
+  return nodes.filter((n) => !claimed.has(n.id)).map((n) => ({ ...n, children: pruneClaimed(n.children, claimed) }))
 }
 
 interface ClusterTreeNode extends CategoryRecord {
@@ -48,14 +72,18 @@ function buildClusterTree(clusters: CategoryRecord[]): ClusterTreeNode[] {
   return roots
 }
 
+type MergedRootNode =
+  | { kind: 'code'; id: string; createdAt: string; node: TreeNode }
+  | { kind: 'cluster'; id: string; createdAt: string; node: ClusterTreeNode }
+
 function CodebookPanel(): JSX.Element {
   const data = useProjectStore((s) => s.data)
   const addCode = useProjectStore((s) => s.addCode)
   const reparentCode = useProjectStore((s) => s.reparentCode)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
   const createCategory = useProjectStore((s) => s.createCategory)
-  const addCodeToCategory = useProjectStore((s) => s.addCodeToCategory)
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
+  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
   const fileSpanUnderCategory = useProjectStore((s) => s.fileSpanUnderCategory)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const clearUi = useWorkspaceUiStore((s) => s.clear)
@@ -65,12 +93,32 @@ function CodebookPanel(): JSX.Element {
   const [newName, setNewName] = useState('')
   const [newKind, setNewKind] = useState<TagKind | 'cluster'>('code')
   const [isRootDragOver, setIsRootDragOver] = useState(false)
-  const [isClusterRootDragOver, setIsClusterRootDragOver] = useState(false)
 
   const codes = useMemo(() => data?.codes ?? [], [data])
-  const tree = useMemo(() => buildTree(codes), [codes])
   const clusters = useMemo(() => data?.categories ?? [], [data])
+
+  // The full natural code hierarchy, kept around (unpruned) as a lookup
+  // table for cluster rows to pull a member's own subtree from — a code
+  // nested under another code doesn't lose that nesting just because it's
+  // also filed under a cluster.
+  const fullCodeTree = useMemo(() => buildTree(codes), [codes])
+  const claimedCodeIds = useMemo(() => new Set(clusters.flatMap((c) => c.codeIds)), [clusters])
+  const visibleCodeRoots = useMemo(
+    () => pruneClaimed(fullCodeTree, claimedCodeIds),
+    [fullCodeTree, claimedCodeIds]
+  )
   const clusterTree = useMemo(() => buildClusterTree(clusters), [clusters])
+
+  // One combined, chronologically-ordered tree: clusters and un-clustered
+  // root codes as siblings, exactly like the user asked for — a cluster is
+  // just another kind of row in the same tree, not a separate section.
+  const mergedRoots = useMemo<MergedRootNode[]>(() => {
+    const entries: MergedRootNode[] = [
+      ...visibleCodeRoots.map((n) => ({ kind: 'code' as const, id: n.id, createdAt: n.createdAt, node: n })),
+      ...clusterTree.map((n) => ({ kind: 'cluster' as const, id: n.id, createdAt: n.createdAt, node: n }))
+    ]
+    return entries.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }, [visibleCodeRoots, clusterTree])
 
   // "Promote to code" (from the notes panel) drops a suggested name here.
   useEffect(() => {
@@ -100,17 +148,20 @@ function CodebookPanel(): JSX.Element {
   function handleRootDrop(e: DragEvent): void {
     e.preventDefault()
     setIsRootDragOver(false)
-    if (e.dataTransfer.getData(DRAG_KIND_MIME) === 'cluster') return
+    const kind = e.dataTransfer.getData(DRAG_KIND_MIME)
     const draggedId = e.dataTransfer.getData('text/plain')
-    if (draggedId) reparentCode(draggedId, null)
-  }
-
-  function handleClusterRootDrop(e: DragEvent): void {
-    e.preventDefault()
-    setIsClusterRootDragOver(false)
-    if (e.dataTransfer.getData(DRAG_KIND_MIME) !== 'cluster') return
-    const draggedId = e.dataTransfer.getData('text/plain')
-    if (draggedId) reparentCategory(draggedId, null)
+    if (!draggedId) return
+    if (kind === 'cluster') {
+      reparentCategory(draggedId, null)
+      return
+    }
+    // A code dropped at the root: if it was shown under a cluster, "outside"
+    // means leaving that cluster (its own code-hierarchy position, if any,
+    // is untouched and it'll reappear there). Otherwise this is the
+    // existing un-nest-from-parent-code gesture.
+    const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
+    if (sourceClusterId) removeCodeFromCategory(sourceClusterId, draggedId)
+    else reparentCode(draggedId, null)
   }
 
   return (
@@ -151,50 +202,38 @@ function CodebookPanel(): JSX.Element {
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto">
-        <div
-          className={`p-2 ${isRootDragOver ? 'bg-blue-50' : ''}`}
-          onDragOver={(e) => {
-            e.preventDefault()
-            setIsRootDragOver(true)
-          }}
-          onDragLeave={() => setIsRootDragOver(false)}
-          onDrop={handleRootDrop}
-        >
-          {tree.length === 0 && <p className="p-3 text-center text-sm text-slate-400">No codes yet.</p>}
-          {tree.length > 0 && (
-            <p className="mb-1 px-1 text-[10px] text-slate-400">
-              Drag a row onto another to nest it, or here to un-nest — drag onto a cluster below to group it.
-            </p>
-          )}
-          {tree.map((node) => (
-            <CodeRow key={node.id} node={node} depth={0} allCodes={codes} />
-          ))}
-        </div>
-
-        <div
-          className={`border-t border-slate-200 p-2 ${isClusterRootDragOver ? 'bg-blue-50' : ''}`}
-          onDragOver={(e) => {
-            e.preventDefault()
-            setIsClusterRootDragOver(true)
-          }}
-          onDragLeave={() => setIsClusterRootDragOver(false)}
-          onDrop={handleClusterRootDrop}
-        >
-          <p className="mb-1 px-1 text-[10px] font-semibold uppercase text-slate-400">Clusters</p>
-          {clusterTree.length === 0 ? (
-            <p className="p-3 text-center text-sm text-slate-400">
-              No clusters yet. The same clusters show up on the board, and vice versa.
-            </p>
+      <div
+        className={`flex-1 overflow-auto p-2 ${isRootDragOver ? 'bg-blue-50' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setIsRootDragOver(true)
+        }}
+        onDragLeave={() => setIsRootDragOver(false)}
+        onDrop={handleRootDrop}
+      >
+        {mergedRoots.length === 0 && (
+          <p className="p-3 text-center text-sm text-slate-400">No codes or clusters yet.</p>
+        )}
+        {mergedRoots.length > 0 && (
+          <p className="mb-1 px-1 text-[10px] text-slate-400">
+            Drag a code onto a cluster to group it, or onto another code to nest it — drop here to move it back
+            out. Clusters made here show up on the board, and vice versa.
+          </p>
+        )}
+        {mergedRoots.map((entry) =>
+          entry.kind === 'code' ? (
+            <CodeRow key={entry.id} node={entry.node} depth={0} allCodes={codes} />
           ) : (
-            <p className="mb-1 px-1 text-[10px] text-slate-400">
-              Drag a cluster onto another to nest it, or here to un-nest.
-            </p>
-          )}
-          {clusterTree.map((node) => (
-            <ClusterRow key={node.id} node={node} depth={0} />
-          ))}
-        </div>
+            <ClusterRow
+              key={entry.id}
+              node={entry.node}
+              depth={0}
+              codes={codes}
+              fullCodeTree={fullCodeTree}
+              claimedCodeIds={claimedCodeIds}
+            />
+          )
+        )}
       </div>
 
       <InspectedCodings />
@@ -206,15 +245,20 @@ interface CodeRowProps {
   node: TreeNode
   depth: number
   allCodes: CodeNode[]
+  /** Set when this row is rendered as a cluster's member rather than at the
+   * plain root — lets a drop target elsewhere know which cluster to remove
+   * it from, so a code has one home in the tree at a time. */
+  sourceClusterId?: string
 }
 
-function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
+function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.Element {
   const renameCode = useProjectStore((s) => s.renameCode)
   const setCodeColor = useProjectStore((s) => s.setCodeColor)
   const setCodeDefinition = useProjectStore((s) => s.setCodeDefinition)
   const reparentCode = useProjectStore((s) => s.reparentCode)
   const deleteCode = useProjectStore((s) => s.deleteCode)
   const mergeCodes = useProjectStore((s) => s.mergeCodes)
+  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
 
@@ -241,7 +285,13 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
     setIsDragOver(false)
     if (e.dataTransfer.getData(DRAG_KIND_MIME) === 'cluster') return
     const draggedId = e.dataTransfer.getData('text/plain')
-    if (draggedId && draggedId !== node.id) reparentCode(draggedId, node.id)
+    if (!draggedId || draggedId === node.id) return
+    reparentCode(draggedId, node.id)
+    // Nesting a code under another code is a different tree slot than
+    // "inside a cluster" — leave the cluster it came from, if any, so it
+    // now shows only in the position just dropped onto.
+    const draggedSourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
+    if (draggedSourceClusterId) removeCodeFromCategory(draggedSourceClusterId, draggedId)
   }
 
   const otherCodes = allCodes.filter((c) => c.id !== node.id)
@@ -260,6 +310,7 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
           onDragStart={(e) => {
             e.dataTransfer.setData('text/plain', node.id)
             e.dataTransfer.setData(DRAG_KIND_MIME, 'code')
+            e.dataTransfer.setData(SOURCE_CLUSTER_MIME, sourceClusterId ?? '')
           }}
           onDragOver={(e) => {
             e.preventDefault()
@@ -342,6 +393,15 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
                 ))}
               </select>
             )}
+            {sourceClusterId && (
+              <button
+                className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
+                title="Remove from this cluster"
+                onClick={() => removeCodeFromCategory(sourceClusterId, node.id)}
+              >
+                Unfile
+              </button>
+            )}
             <button
               className="rounded border border-red-200 px-1 text-[10px] text-red-600 hover:bg-red-50"
               onClick={() => {
@@ -368,7 +428,7 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
         )}
       </div>
       {node.children.map((child) => (
-        <CodeRow key={child.id} node={child} depth={depth + 1} allCodes={allCodes} />
+        <CodeRow key={child.id} node={child} depth={depth + 1} allCodes={allCodes} sourceClusterId={sourceClusterId} />
       ))}
     </div>
   )
@@ -377,17 +437,18 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
 interface ClusterRowProps {
   node: ClusterTreeNode
   depth: number
+  codes: CodeNode[]
+  fullCodeTree: TreeNode[]
+  claimedCodeIds: Set<string>
 }
 
-/** A cluster, shown alongside codes in the same tab so grouping never
- * requires leaving this panel. This is the same CategoryRecord the board
- * draws as a cluster frame — adding a code here (drag a code row onto this
- * one) or nesting a cluster here (drag one cluster row onto another) is
- * exactly what dragging on the board does, just from a list instead of a
- * canvas, so the two stay in sync automatically rather than needing to be
- * kept in sync. */
-function ClusterRow({ node, depth }: ClusterRowProps): JSX.Element {
-  const data = useProjectStore((s) => s.data)
+/** A cluster, shown as just another row in the same tree as codes — this
+ * is the same CategoryRecord the board draws as a cluster frame, so
+ * dragging a code onto this row (addCodeToCategory) or nesting one cluster
+ * onto another (reparentCategory) is exactly what dragging on the board
+ * does, just from a list instead of a canvas. Same data either way, so the
+ * two are never out of sync — there's nothing separate to keep in sync. */
+function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds }: ClusterRowProps): JSX.Element {
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
@@ -398,15 +459,22 @@ function ClusterRow({ node, depth }: ClusterRowProps): JSX.Element {
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(node.name)
   const [isDragOver, setIsDragOver] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(false)
 
-  const memberCodes = useMemo(
-    () =>
-      node.codeIds
-        .map((id) => data?.codes.find((c) => c.id === id))
-        .filter((c): c is CodeNode => Boolean(c)),
-    [data, node.codeIds]
-  )
+  // Each member code renders here with its own natural subtree intact
+  // (children pruned of anything claimed by a cluster elsewhere), so
+  // nesting codes under codes keeps working the same way inside a cluster
+  // as it does at the root.
+  const memberCodeNodes = useMemo(() => {
+    const seen = new Set<string>()
+    const out: TreeNode[] = []
+    for (const id of node.codeIds) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      const found = findTreeNode(fullCodeTree, id)
+      if (found) out.push({ ...found, children: pruneClaimed(found.children, claimedCodeIds) })
+    }
+    return out
+  }, [node.codeIds, fullCodeTree, claimedCodeIds])
   const otherMemberCount = node.noteIds.length + node.segmentIds.length
 
   function commitRename(): void {
@@ -424,8 +492,12 @@ function ClusterRow({ node, depth }: ClusterRowProps): JSX.Element {
     if (!draggedId) return
     if (kind === 'cluster') {
       if (draggedId !== node.id) reparentCategory(draggedId, node.id)
-    } else {
-      addCodeToCategory(node.id, draggedId)
+      return
+    }
+    addCodeToCategory(node.id, draggedId)
+    const sourceClusterId = e.dataTransfer.getData(SOURCE_CLUSTER_MIME)
+    if (sourceClusterId && sourceClusterId !== node.id) {
+      removeCodeFromCategory(sourceClusterId, draggedId)
     }
   }
 
@@ -473,7 +545,7 @@ function ClusterRow({ node, depth }: ClusterRowProps): JSX.Element {
             />
           ) : (
             <button
-              className="flex-1 truncate text-left"
+              className="flex-1 truncate text-left font-medium"
               onDoubleClick={() => {
                 setNameDraft(node.name)
                 setIsEditingName(true)
@@ -484,13 +556,11 @@ function ClusterRow({ node, depth }: ClusterRowProps): JSX.Element {
             </button>
           )}
 
-          <button
-            className="flex-shrink-0 text-[10px] text-slate-400 hover:text-slate-600"
-            onClick={() => setIsExpanded((v) => !v)}
-          >
-            {memberCodes.length}
-            {otherMemberCount > 0 ? `+${otherMemberCount}` : ''}
-          </button>
+          {otherMemberCount > 0 && (
+            <span className="flex-shrink-0 text-[10px] text-slate-400" title="Notes/quotes filed here — manage in Analysis > Clusters">
+              +{otherMemberCount}
+            </span>
+          )}
 
           <div className="hidden flex-shrink-0 gap-1 group-hover:flex">
             <button
@@ -504,36 +574,22 @@ function ClusterRow({ node, depth }: ClusterRowProps): JSX.Element {
           </div>
         </div>
 
-        {isExpanded && (
-          <ul className="mt-1 space-y-0.5 pl-5 text-xs">
-            {memberCodes.length === 0 && otherMemberCount === 0 && (
-              <li className="text-slate-400">Nothing filed here yet — drag a code onto this row.</li>
-            )}
-            {memberCodes.map((code) => (
-              <li key={code.id} className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-1.5 truncate">
-                  <span className="inline-block h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: code.color }} />
-                  {code.name}
-                </span>
-                <button
-                  className="flex-shrink-0 text-red-500 hover:underline"
-                  onClick={() => removeCodeFromCategory(node.id, code.id)}
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-            {otherMemberCount > 0 && (
-              <li className="text-slate-400">
-                +{otherMemberCount} note{otherMemberCount === 1 ? '' : 's'}/quote{otherMemberCount === 1 ? '' : 's'} —
-                manage in Analysis &gt; Clusters
-              </li>
-            )}
-          </ul>
+        {memberCodeNodes.length === 0 && node.children.length === 0 && (
+          <p className="mt-0.5 pl-5 text-[11px] text-slate-400">Drag a code onto this row to file it here.</p>
         )}
       </div>
       {node.children.map((child) => (
-        <ClusterRow key={child.id} node={child} depth={depth + 1} />
+        <ClusterRow
+          key={child.id}
+          node={child}
+          depth={depth + 1}
+          codes={codes}
+          fullCodeTree={fullCodeTree}
+          claimedCodeIds={claimedCodeIds}
+        />
+      ))}
+      {memberCodeNodes.map((code) => (
+        <CodeRow key={code.id} node={code} depth={depth + 1} allCodes={codes} sourceClusterId={node.id} />
       ))}
     </div>
   )

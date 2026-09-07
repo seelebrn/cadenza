@@ -70,15 +70,23 @@ Workspace), rather than mixing "category"/"cluster"/"theme". The underlying type
 already-distinct `BoardCluster` (a category's per-board position, not the category itself).
 
 Cluster creation/management lives in the Workspace's existing "Codes & items" tab, not a
-separate tab: the "New" form's second option creates a cluster instead of a code, and a
-Clusters section underneath the code tree lists them (drag a code row onto a cluster to
-group it, drag a cluster onto another to nest it, drop either back at the section root to
-un-nest). Analysis still has its own Clusters tab for full membership management (notes,
-quotes, AQA question/theme kind) — same `ClustersView` component, same `data.categories`,
-so a cluster made from the board, the codebook tab, or Analysis is the same record
-everywhere, never a copy to keep in sync. (The separate `NoteCategoryDef` concept — Note
-Descriptive/Linguistique/Conceptuelle classification tags — intentionally keeps the word
-"category": it's a genuinely different thing, a flat per-note tag, not a grouping cluster.)
+separate tab, and not even a separate section within it: clusters render as rows in the
+*same* tree as codes, not beside it. The "New" form's second option creates a cluster
+instead of a code; a cluster row sits as a sibling of root codes; and a code filed under a
+cluster (drag it onto the cluster row) renders as that cluster's child, with its own
+sub-codes nested beneath it exactly as they would at the root — a code has one place in the
+tree at a time, cluster membership or plain code-hierarchy position, and dragging it
+anywhere (another cluster, another code, back out to the root) moves it cleanly out of
+wherever it was. Clusters can nest into each other the same way. Since this tree reads and
+writes the exact same `data.categories`/`data.codes` the board does, there's no separate
+sync step — dragging in this tree *is* dragging on the board, just via a list instead of a
+canvas, and a change from either place is visible in the other immediately because it's one
+underlying record, not two views kept in agreement by a mechanism that could fall out of
+sync. Analysis still has its own Clusters tab for full membership management (notes,
+quotes, AQA question/theme kind) — same `ClustersView` component, same data. (The separate
+`NoteCategoryDef` concept — Note Descriptive/Linguistique/Conceptuelle classification tags
+— intentionally keeps the word "category": a genuinely different thing, a flat per-note tag,
+not a grouping cluster.)
 
 Fixed: dragging a cluster frame on the board stopped carrying its member items along.
 Cause — a member that had only ever appeared as a "virtual" (not-yet-persisted) fallback

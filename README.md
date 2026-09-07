@@ -25,6 +25,8 @@ full design/phase plan.
 npm install
 npm run dev        # launches the app with hot reload
 npm run typecheck  # type-checks main + renderer
+npm test           # runs the pure-logic test suite (src/shared, renderer/src/lib)
+npm run test:watch # same, in watch mode
 npm run build      # production build to ./out
 npm run build:win  # build + package a Windows installer/portable exe
 npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
@@ -366,3 +368,27 @@ user's own running dev session (window title "Cadenza", no renderer errors — o
 disk-cache warnings expected from two Electron instances sharing a user-data dir), then
 killed only that instance's PIDs and confirmed the process list returned to exactly what
 was running beforehand.
+
+### A real test suite (2026-09-07)
+
+Every correctness guarantee established across this whole session so far — nested cluster
+containment, undo/redo batching, item materialization on drag, auto-layout non-overlap,
+drag-and-drop membership transfer, the codebook search filter's ambiguous cases — had only
+ever been verified with a throwaway script (bundle with esbuild, run with node, delete).
+None of it was protected against a future regression. Added Vitest (pinned to a version
+compatible with this project's Vite 5, since latest Vitest requires Vite 6+) and ported
+the substance of that ad hoc testing into a permanent suite: `npm test` runs it,
+`npm run test:watch` for development. 232 tests across 11 files, all pure-logic (no React,
+no Electron, no DOM — a plain node environment), covering every `src/shared/*.ts` module
+with actual logic (the two without a test file, `api.ts` and `types.ts`, are pure type
+definitions with nothing to run).
+
+Also extracted the Workspace codebook tab's tree-building/search-filter logic
+(`buildTree`/`findTreeNode`/`pruneClaimed`/`filterTreeByQuery`/`filterClusterTree`/
+`treeHasMatch`) out of `CodebookPanel.tsx` into `renderer/src/lib/codebookTree.ts` —
+it was pure logic with real edge cases (a code that's both a subcode of another code AND a
+cluster member; a search match needing to keep its whole subtree rather than re-filtering
+within an already-matched branch) sitting inert inside a `.tsx` file where it couldn't be
+tested at all. Shrunk `CodebookPanel.tsx` by about 90 lines in the process — a small piece
+of the "BoardView.tsx and friends are oversized" cleanup flagged in the codebase review,
+done as a natural side effect of making this logic testable rather than a separate pass.

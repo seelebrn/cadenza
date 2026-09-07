@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export interface PendingSelection {
+export interface ActiveSpan {
   documentId: string
   start: number
   end: number
@@ -11,8 +11,12 @@ export type SidebarTab = 'codes' | 'notes'
 
 /** Ephemeral (non-persisted) workspace UI state shared across the reader,
  * codebook, and notes panels — which document is open, which sidebar tab is
- * active, a just-made text selection awaiting a code/item/note, codings
- * under an inspected highlight, and a "promote note to code" handoff. */
+ * active, and the "active span": a text span the user is currently working
+ * on, whether it's a brand-new selection with no codes yet or an existing
+ * highlighted passage they clicked to inspect. One concept serves both,
+ * because they're the same thing — a span you might want to add codes/
+ * items/notes to and/or see what's already on it. Also carries a "promote
+ * note to code" handoff. */
 interface WorkspaceUiState {
   selectedDocumentId: string | null
   setSelectedDocumentId: (id: string | null) => void
@@ -20,11 +24,8 @@ interface WorkspaceUiState {
   activeSidebarTab: SidebarTab
   setActiveSidebarTab: (tab: SidebarTab) => void
 
-  pendingSelection: PendingSelection | null
-  setPendingSelection: (selection: PendingSelection | null) => void
-
-  inspectedCodingIds: string[]
-  setInspectedCodingIds: (ids: string[]) => void
+  activeSpan: ActiveSpan | null
+  setActiveSpan: (span: ActiveSpan | null) => void
 
   /** Set by "promote note to code" so the codebook's new-code form can
    * prefill a name; consumed (cleared) once read. */
@@ -41,14 +42,11 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   activeSidebarTab: 'codes',
   setActiveSidebarTab: (tab) => set({ activeSidebarTab: tab }),
 
-  pendingSelection: null,
-  setPendingSelection: (selection) => set({ pendingSelection: selection, inspectedCodingIds: [] }),
-
-  inspectedCodingIds: [],
-  setInspectedCodingIds: (ids) => set({ inspectedCodingIds: ids, pendingSelection: null }),
+  activeSpan: null,
+  setActiveSpan: (span) => set({ activeSpan: span }),
 
   suggestedCodeName: null,
   setSuggestedCodeName: (name) => set({ suggestedCodeName: name }),
 
-  clear: () => set({ pendingSelection: null, inspectedCodingIds: [] })
+  clear: () => set({ activeSpan: null })
 }))

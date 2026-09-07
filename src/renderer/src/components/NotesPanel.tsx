@@ -16,7 +16,7 @@ function NotesPanel(): JSX.Element {
   const addNote = useProjectStore((s) => s.addNote)
   const addNoteToSelection = useProjectStore((s) => s.addNoteToSelection)
 
-  const pendingSelection = useWorkspaceUiStore((s) => s.pendingSelection)
+  const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const clearUi = useWorkspaceUiStore((s) => s.clear)
   const selectedDocumentId = useWorkspaceUiStore((s) => s.selectedDocumentId)
 
@@ -36,12 +36,12 @@ function NotesPanel(): JSX.Element {
     const tagList = parseTags(tags)
     const q = question.trim() || null
 
-    if (pendingSelection) {
+    if (activeSpan) {
       addNoteToSelection(
-        pendingSelection.documentId,
-        pendingSelection.start,
-        pendingSelection.end,
-        pendingSelection.text,
+        activeSpan.documentId,
+        activeSpan.start,
+        activeSpan.end,
+        activeSpan.text,
         q,
         trimmedAnswer,
         tagList
@@ -78,10 +78,10 @@ function NotesPanel(): JSX.Element {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {pendingSelection && (
+      {activeSpan && (
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p className="mb-1 font-medium">New note on the highlighted text:</p>
-          <p className="italic">&ldquo;{pendingSelection.text}&rdquo;</p>
+          <p className="italic">&ldquo;{activeSpan.text}&rdquo;</p>
           <button className="mt-1 text-amber-700 underline" onClick={clearUi}>
             Done — clear selection
           </button>
@@ -89,7 +89,7 @@ function NotesPanel(): JSX.Element {
       )}
 
       <div className="space-y-1.5 border-b border-slate-200 p-3">
-        {!pendingSelection && (
+        {!activeSpan && (
           <div className="flex gap-3 text-xs text-slate-500">
             <label className="flex items-center gap-1">
               <input
@@ -172,7 +172,7 @@ function NoteCard({ note }: { note: NoteRecord }): JSX.Element {
   const updateNote = useProjectStore((s) => s.updateNote)
   const deleteNote = useProjectStore((s) => s.deleteNote)
   const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
-  const setPendingSelection = useWorkspaceUiStore((s) => s.setPendingSelection)
+  const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const setSuggestedCodeName = useWorkspaceUiStore((s) => s.setSuggestedCodeName)
   const setActiveSidebarTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
 
@@ -198,7 +198,7 @@ function NoteCard({ note }: { note: NoteRecord }): JSX.Element {
     const segment = data.segments.find((s) => s.id === attachedTo.segmentId)
     if (!segment) return
     setSelectedDocumentId(segment.documentId)
-    setPendingSelection({
+    setActiveSpan({
       documentId: segment.documentId,
       start: segment.start,
       end: segment.end,

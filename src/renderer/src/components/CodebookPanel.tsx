@@ -30,7 +30,7 @@ function CodebookPanel(): JSX.Element {
   const addCode = useProjectStore((s) => s.addCode)
   const reparentCode = useProjectStore((s) => s.reparentCode)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
-  const pendingSelection = useWorkspaceUiStore((s) => s.pendingSelection)
+  const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const clearUi = useWorkspaceUiStore((s) => s.clear)
   const suggestedCodeName = useWorkspaceUiStore((s) => s.suggestedCodeName)
   const setSuggestedCodeName = useWorkspaceUiStore((s) => s.setSuggestedCodeName)
@@ -54,14 +54,8 @@ function CodebookPanel(): JSX.Element {
     if (!name) return
     const codeId = addCode({ name, kind: newKind, color: nextColor(codes.length) })
     setNewName('')
-    if (codeId && pendingSelection) {
-      applyCodeToSelection(
-        pendingSelection.documentId,
-        pendingSelection.start,
-        pendingSelection.end,
-        pendingSelection.text,
-        codeId
-      )
+    if (codeId && activeSpan) {
+      applyCodeToSelection(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, codeId)
     }
   }
 
@@ -74,12 +68,12 @@ function CodebookPanel(): JSX.Element {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {pendingSelection && (
+      {activeSpan && (
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p className="mb-1 font-medium">
             Apply as many codes/items as you like to the highlighted text below, then clear it:
           </p>
-          <p className="italic">&ldquo;{pendingSelection.text}&rdquo;</p>
+          <p className="italic">&ldquo;{activeSpan.text}&rdquo;</p>
           <button className="mt-1 text-amber-700 underline" onClick={clearUi}>
             Done — clear selection
           </button>
@@ -147,7 +141,7 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
   const deleteCode = useProjectStore((s) => s.deleteCode)
   const mergeCodes = useProjectStore((s) => s.mergeCodes)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
-  const pendingSelection = useWorkspaceUiStore((s) => s.pendingSelection)
+  const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(node.name)
@@ -229,18 +223,12 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
           )}
 
           <div className="hidden flex-shrink-0 gap-1 group-hover:flex">
-            {pendingSelection && (
+            {activeSpan && (
               <button
                 className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
-                title="Apply to selected text"
+                title="Apply to the active span"
                 onClick={() =>
-                  applyCodeToSelection(
-                    pendingSelection.documentId,
-                    pendingSelection.start,
-                    pendingSelection.end,
-                    pendingSelection.text,
-                    node.id
-                  )
+                  applyCodeToSelection(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, node.id)
                 }
               >
                 Apply
@@ -307,37 +295,32 @@ function CodeRow({ node, depth, allCodes }: CodeRowProps): JSX.Element {
   )
 }
 
+/** Shows the codings on the active span, if it happens to already have any
+ * — reactively derived from live data (not a frozen snapshot), so applying
+ * a new code or removing one updates this list immediately without
+ * needing to re-click the passage. */
 function InspectedCodings(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
   const removeCoding = useProjectStore((s) => s.removeCoding)
-  const inspectedCodingIds = useWorkspaceUiStore((s) => s.inspectedCodingIds)
-  const clearUi = useWorkspaceUiStore((s) => s.clear)
+  const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
 
   const items = useMemo(() => {
-    if (!data) return []
-    return inspectedCodingIds
-      .map((id) => data.codings.find((c) => c.id === id))
-      .filter((c): c is NonNullable<typeof c> => Boolean(c))
-      .map((coding) => ({
-        coding,
-        code: data.codes.find((c) => c.id === coding.codeId),
-        segment: data.segments.find((s) => s.id === coding.segmentId)
-      }))
-  }, [data, inspectedCodingIds])
+    if (!data || !activeSpan) return []
+    const segment = data.segments.find(
+      (s) =>
+        s.documentId === activeSpan.documentId && s.start === activeSpan.start && s.end === activeSpan.end
+    )
+    if (!segment) return []
+    return data.codings
+      .filter((c) => c.segmentId === segment.id)
+      .map((coding) => ({ coding, code: data.codes.find((c) => c.id === coding.codeId) }))
+  }, [data, activeSpan])
 
   if (items.length === 0) return null
 
   return (
     <div className="max-h-56 overflow-auto border-t border-slate-200 bg-slate-50 p-3">
-      <div className="mb-1 flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-slate-600">On this passage</h3>
-        <button className="text-xs text-slate-400 hover:text-slate-600" onClick={clearUi}>
-          Close
-        </button>
-      </div>
-      {items[0].segment && (
-        <p className="mb-2 text-xs italic text-slate-500">&ldquo;{items[0].segment.text}&rdquo;</p>
-      )}
+      <h3 className="mb-1 text-xs font-semibold text-slate-600">Already on this passage</h3>
       <ul className="space-y-1">
         {items.map(({ coding, code }) => (
           <li key={coding.id} className="flex items-center justify-between gap-2 text-xs">

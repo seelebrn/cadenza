@@ -1,10 +1,19 @@
+import { useEffect } from 'react'
+import { useProjectStore } from './store/projectStore'
+import ProjectHome from './components/ProjectHome'
+import ProjectShell from './components/ProjectShell'
+
 function App(): JSX.Element {
+  const data = useProjectStore((s) => s.data)
+  const loadRecent = useProjectStore((s) => s.loadRecent)
+
+  useEffect(() => {
+    void loadRecent()
+  }, [loadRecent])
+
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center gap-2 bg-slate-50 text-slate-800">
-      <h1 className="text-2xl font-semibold">Cadenza</h1>
-      <p className="text-sm text-slate-500">
-        Qualitative Analysis — Phase 0 scaffold — Electron + Vite + React + TypeScript is running.
-      </p>
+    <div className="h-screen w-screen bg-slate-50 text-slate-800">
+      {data ? <ProjectShell /> : <ProjectHome />}
     </div>
   )
 }

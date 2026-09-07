@@ -24,7 +24,7 @@ npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
 ## Status
 
 - [x] Phase 0 — Electron + Vite + React + TS scaffold, boots on dev and production build
-- [ ] Phase 1 — Project persistence (`.qdaproj` create/open/save, autosave)
+- [x] Phase 1 — Project persistence (`.qdaproj` create/open/save, autosave)
 - [ ] Phase 2 — Document import (.docx/.odt/.txt) + reader pane
 - [ ] Phase 3 — Coding engine (select text → code, codebook hierarchy, merge)
 - [ ] Phase 4 — Notes/AQA system (question+answer memos, attach-anywhere, promote-to-code)

@@ -1,10 +1,15 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
+import type { CadenzaApi } from '../shared/api'
 
-// Bridge for renderer <-> main IPC. Kept empty for now (Phase 0 scaffold) —
-// Phase 1 (project persistence) and later phases will add typed invoke/
-// handle channels here (e.g. openProject, saveProject, importDocument).
-const api = {}
+const api: CadenzaApi = {
+  project: {
+    create: (name) => ipcRenderer.invoke('project:create', name),
+    openDialog: () => ipcRenderer.invoke('project:open-dialog'),
+    openPath: (filePath) => ipcRenderer.invoke('project:open-path', filePath),
+    save: (data, filePath) => ipcRenderer.invoke('project:save', data, filePath),
+    saveAs: (data) => ipcRenderer.invoke('project:save-as', data),
+    getRecent: () => ipcRenderer.invoke('project:get-recent')
+  }
+}
 
 contextBridge.exposeInMainWorld('api', api)
-
-export type Api = typeof api

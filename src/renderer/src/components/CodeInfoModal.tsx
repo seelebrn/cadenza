@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { getCodeUsageDetail, CODE_USAGE_CONTEXT_WORDS } from '@shared/retrieval'
@@ -24,6 +24,18 @@ function CodeInfoModal(): JSX.Element | null {
     () => (data && inspectedCodeId ? getCodeUsageDetail(data, inspectedCodeId) : null),
     [data, inspectedCodeId]
   )
+
+  // Escape is the universal "close this overlay" convention — wire it up
+  // whenever the window is actually open, not just via the visible × / the
+  // backdrop click, which were the only ways to close it before.
+  useEffect(() => {
+    if (!inspectedCodeId) return
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setInspectedCodeId(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [inspectedCodeId, setInspectedCodeId])
 
   if (!inspectedCodeId) return null
 

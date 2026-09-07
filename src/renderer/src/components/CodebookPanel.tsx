@@ -47,6 +47,60 @@ function pruneClaimed(nodes: TreeNode[], claimed: Set<string>): TreeNode[] {
   return nodes.filter((n) => !claimed.has(n.id)).map((n) => ({ ...n, children: pruneClaimed(n.children, claimed) }))
 }
 
+/** True if this node's own name matches, or any descendant's does —
+ * `query` is expected pre-lowercased by the caller (avoids re-lowercasing
+ * on every recursive call). */
+function treeHasMatch(node: TreeNode, query: string): boolean {
+  if (node.name.toLowerCase().includes(query)) return true
+  return node.children.some((child) => treeHasMatch(child, query))
+}
+
+/** Keeps a node if it matches, or any descendant does — pruning collapses
+ * a large tree down to just the paths leading to a hit, same idea as
+ * pruneClaimed above but driven by the search box instead of cluster
+ * membership. A node that matches *itself* keeps its whole subtree as-is,
+ * unfiltered — finding "Emotions" should surface everything nested under
+ * it, not just whichever sub-codes happen to also contain the search text.
+ * An empty query is a no-op (returns `nodes` as-is). */
+function filterTreeByQuery(nodes: TreeNode[], query: string): TreeNode[] {
+  if (!query) return nodes
+  const result: TreeNode[] = []
+  for (const node of nodes) {
+    if (node.name.toLowerCase().includes(query)) {
+      result.push(node)
+      continue
+    }
+    const filteredChildren = filterTreeByQuery(node.children, query)
+    if (filteredChildren.length > 0) result.push({ ...node, children: filteredChildren })
+  }
+  return result
+}
+
+/** Same idea as filterTreeByQuery, for the cluster tree — a cluster is
+ * kept if its own name matches (in which case its whole sub-cluster
+ * subtree is kept unfiltered too, same reasoning as above), one of its
+ * direct member codes' subtree matches (via fullCodeTree, the unpruned
+ * lookup), or a nested sub-cluster (recursively) matches. */
+function filterClusterTree(nodes: ClusterTreeNode[], fullCodeTree: TreeNode[], query: string): ClusterTreeNode[] {
+  if (!query) return nodes
+  const result: ClusterTreeNode[] = []
+  for (const node of nodes) {
+    if (node.name.toLowerCase().includes(query)) {
+      result.push(node)
+      continue
+    }
+    const hasMatchingMember = node.codeIds.some((id) => {
+      const found = findTreeNode(fullCodeTree, id)
+      return found ? treeHasMatch(found, query) : false
+    })
+    const filteredChildren = filterClusterTree(node.children, fullCodeTree, query)
+    if (hasMatchingMember || filteredChildren.length > 0) {
+      result.push({ ...node, children: filteredChildren })
+    }
+  }
+  return result
+}
+
 type MergedRootNode =
   | { kind: 'code'; id: string; createdAt: string; node: TreeNode }
   | { kind: 'cluster'; id: string; createdAt: string; node: ClusterTreeNode }
@@ -68,9 +122,11 @@ function CodebookPanel(): JSX.Element {
   const [newName, setNewName] = useState('')
   const [newKind, setNewKind] = useState<TagKind | 'cluster'>('code')
   const [isRootDragOver, setIsRootDragOver] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   const codes = useMemo(() => data?.codes ?? [], [data])
   const clusters = useMemo(() => data?.categories ?? [], [data])
+  const normalizedQuery = searchQuery.trim().toLowerCase()
 
   // The full natural code hierarchy, kept around (unpruned) as a lookup
   // table for cluster rows to pull a member's own subtree from — a code
@@ -78,11 +134,14 @@ function CodebookPanel(): JSX.Element {
   // also filed under a cluster.
   const fullCodeTree = useMemo(() => buildTree(codes), [codes])
   const claimedCodeIds = useMemo(() => new Set(clusters.flatMap((c) => c.codeIds)), [clusters])
-  const visibleCodeRoots = useMemo(
-    () => pruneClaimed(fullCodeTree, claimedCodeIds),
-    [fullCodeTree, claimedCodeIds]
-  )
-  const clusterTree = useMemo(() => buildClusterTree(clusters), [clusters])
+  const visibleCodeRoots = useMemo(() => {
+    const pruned = pruneClaimed(fullCodeTree, claimedCodeIds)
+    return filterTreeByQuery(pruned, normalizedQuery)
+  }, [fullCodeTree, claimedCodeIds, normalizedQuery])
+  const clusterTree = useMemo(() => {
+    const tree = buildClusterTree(clusters)
+    return filterClusterTree(tree, fullCodeTree, normalizedQuery)
+  }, [clusters, fullCodeTree, normalizedQuery])
 
   // One combined, chronologically-ordered tree: clusters and un-clustered
   // root codes as siblings, exactly like the user asked for — a cluster is
@@ -177,6 +236,15 @@ function CodebookPanel(): JSX.Element {
         </button>
       </div>
 
+      <div className="border-b border-slate-200 p-2">
+        <input
+          className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+          placeholder="Filter codes/clusters…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </div>
+
       <div
         className={`flex-1 overflow-auto p-2 ${isRootDragOver ? 'bg-blue-50' : ''}`}
         onDragOver={(e) => {
@@ -187,9 +255,11 @@ function CodebookPanel(): JSX.Element {
         onDrop={handleRootDrop}
       >
         {mergedRoots.length === 0 && (
-          <p className="p-3 text-center text-sm text-slate-400">No codes or clusters yet.</p>
+          <p className="p-3 text-center text-sm text-slate-400">
+            {normalizedQuery ? 'Nothing matches that filter.' : 'No codes or clusters yet.'}
+          </p>
         )}
-        {mergedRoots.length > 0 && (
+        {mergedRoots.length > 0 && !normalizedQuery && (
           <p className="mb-1 px-1 text-[10px] text-slate-400">
             Drag a code onto a cluster to group it, or onto another code to nest it — drop here to move it back
             out. Clusters made here show up on the board, and vice versa.
@@ -206,6 +276,7 @@ function CodebookPanel(): JSX.Element {
               codes={codes}
               fullCodeTree={fullCodeTree}
               claimedCodeIds={claimedCodeIds}
+              searchQuery={normalizedQuery}
             />
           )
         )}
@@ -423,6 +494,11 @@ interface ClusterRowProps {
   codes: CodeNode[]
   fullCodeTree: TreeNode[]
   claimedCodeIds: Set<string>
+  /** Pre-lowercased filter text from the panel's search box — empty means
+   * no filter. This row itself is only rendered at all when it (or
+   * something inside it) already matched (see filterClusterTree), so this
+   * just narrows which of ITS OWN member codes show. */
+  searchQuery: string
 }
 
 /** A cluster, shown as just another row in the same tree as codes — this
@@ -431,7 +507,7 @@ interface ClusterRowProps {
  * onto another (reparentCategory) is exactly what dragging on the board
  * does, just from a list instead of a canvas. Same data either way, so the
  * two are never out of sync — there's nothing separate to keep in sync. */
-function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds }: ClusterRowProps): JSX.Element {
+function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds, searchQuery }: ClusterRowProps): JSX.Element {
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
@@ -443,10 +519,19 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds }: Cluste
   const [nameDraft, setNameDraft] = useState(node.name)
   const [isDragOver, setIsDragOver] = useState(false)
 
+  // If this cluster's own name is what matched the search, show
+  // everything under it unfiltered (same "found the neighborhood" logic
+  // filterClusterTree uses) — only narrow member codes/sub-clusters by the
+  // query when this row is showing at all *because* something inside it
+  // matched, not because it matched itself.
+  const selfMatches = searchQuery !== '' && node.name.toLowerCase().includes(searchQuery)
+  const effectiveChildQuery = selfMatches ? '' : searchQuery
+
   // Each member code renders here with its own natural subtree intact
   // (children pruned of anything claimed by a cluster elsewhere), so
   // nesting codes under codes keeps working the same way inside a cluster
-  // as it does at the root.
+  // as it does at the root. A search query additionally prunes down to
+  // just the members (or their sub-codes) that actually match.
   const memberCodeNodes = useMemo(() => {
     const seen = new Set<string>()
     const out: TreeNode[] = []
@@ -456,8 +541,8 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds }: Cluste
       const found = findTreeNode(fullCodeTree, id)
       if (found) out.push({ ...found, children: pruneClaimed(found.children, claimedCodeIds) })
     }
-    return out
-  }, [node.codeIds, fullCodeTree, claimedCodeIds])
+    return filterTreeByQuery(out, effectiveChildQuery)
+  }, [node.codeIds, fullCodeTree, claimedCodeIds, effectiveChildQuery])
   const otherMemberCount = node.noteIds.length + node.segmentIds.length
 
   function commitRename(): void {
@@ -569,6 +654,7 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds }: Cluste
           codes={codes}
           fullCodeTree={fullCodeTree}
           claimedCodeIds={claimedCodeIds}
+          searchQuery={effectiveChildQuery}
         />
       ))}
       {memberCodeNodes.map((code) => (

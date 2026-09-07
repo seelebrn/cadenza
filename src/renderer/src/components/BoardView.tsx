@@ -37,6 +37,8 @@ const PALETTE = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444', '#14b8a6
 const MIN_ZOOM = 0.3
 const MAX_ZOOM = 2.5
 const ZOOM_WHEEL_SENSITIVITY = 0.0015
+// Empty margin left around everything when "Fit view" zooms to show it all.
+const FIT_VIEW_PADDING = 60
 // How close two cards must get while dragging to snap/link; how far an
 // already-linked pair must be dragged apart to sever automatically.
 const SNAP_DISTANCE = 70
@@ -240,6 +242,49 @@ function BoardView(): JSX.Element {
     container.scrollTop = anchor.contentY * zoom - anchor.offsetY
     pendingZoomAnchorRef.current = null
   }, [zoom])
+
+  // "Fit view": zooms and scrolls so every cluster/item currently on the
+  // board is visible at once — handy after the auto-layout stacks a lot of
+  // clusters into a tall single column, or just to get oriented on a
+  // board you haven't looked at in a while, without hunting around
+  // manually. Reuses the same zoom-anchor mechanism as wheel-zoom (center
+  // the content's bounding-box midpoint in the viewport) when the zoom
+  // level actually needs to change; when it doesn't, corrects scroll
+  // immediately since there's no re-render to wait on.
+  function handleFitToView(): void {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const boxes = [
+      ...clusters.map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
+      ...items.map((i) => ({ x: i.x, y: i.y, width: CARD_WIDTH, height: CARD_HEIGHT }))
+    ]
+    if (boxes.length === 0) return
+
+    const minX = Math.min(...boxes.map((b) => b.x))
+    const minY = Math.min(...boxes.map((b) => b.y))
+    const maxX = Math.max(...boxes.map((b) => b.x + b.width))
+    const maxY = Math.max(...boxes.map((b) => b.y + b.height))
+    const boxWidth = maxX - minX
+    const boxHeight = maxY - minY
+    const viewportWidth = container.clientWidth
+    const viewportHeight = container.clientHeight
+
+    const zoomX = viewportWidth / (boxWidth + FIT_VIEW_PADDING * 2)
+    const zoomY = viewportHeight / (boxHeight + FIT_VIEW_PADDING * 2)
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(zoomX, zoomY)))
+    const centerX = (minX + maxX) / 2
+    const centerY = (minY + maxY) / 2
+    const offsetX = viewportWidth / 2
+    const offsetY = viewportHeight / 2
+
+    if (nextZoom === zoom) {
+      container.scrollLeft = centerX * zoom - offsetX
+      container.scrollTop = centerY * zoom - offsetY
+    } else {
+      pendingZoomAnchorRef.current = { contentX: centerX, contentY: centerY, offsetX, offsetY }
+      setZoom(nextZoom)
+    }
+  }
 
   useEffect(() => {
     if (!dragState || !data) return
@@ -659,6 +704,12 @@ function BoardView(): JSX.Element {
 
         <div className="ml-auto flex items-center gap-1 text-xs text-slate-500">
           <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
+          <button
+            className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
+            onClick={handleFitToView}
+          >
+            Fit view
+          </button>
           <button
             className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
             onClick={() => setZoom(1)}

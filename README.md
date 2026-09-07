@@ -185,3 +185,21 @@ growing to meet it. Growing toward the bottom/right (where a cluster's own resiz
 already lives) covers the common case; solving the top/left case would mean reflowing the
 destination's other existing children too, which is a bigger feature than what was asked
 for here.
+
+### Three more QoL items (2026-09-07)
+
+- **Escape closes the code-info window** — it only closed via the × or a backdrop click
+  before.
+- **"Fit view" on the board** — a toolbar button that zooms/scrolls so every cluster and
+  item currently on the board is visible at once, reusing the same zoom-anchor mechanism
+  wheel-zoom already uses (center the content's bounding-box midpoint in the viewport)
+  when the zoom level needs to change, or corrects scroll immediately when it doesn't.
+  Matters more now that the auto-layout can stack many clusters into a tall column.
+- **A filter box in the Codes & items tree** — type to narrow the tree down to just the
+  paths leading to a match (code name, cluster name, or a member code's name), scaling
+  better than scrolling once a project has dozens of codes/clusters. A node that matches
+  by its own name shows its *whole* subtree unfiltered ("found the neighborhood, show
+  everything under it") rather than pruning further within an already-matched branch —
+  deliberately not the same as a match reached only via a member code, which still filters
+  its own sub-clusters normally, tested explicitly to keep the two cases from blurring
+  together.

@@ -115,6 +115,10 @@ export interface CategoryRecord {
   noteIds: string[]
   /** Raw quotes filed directly under this category without a Note wrapper. */
   segmentIds: string[]
+  /** A superordinate category (IPA-style superordinate/subordinate themes) —
+   * same hierarchy concept as CodeNode.parentId. On the board, nesting one
+   * cluster inside another sets this. */
+  parentCategoryId: string | null
   createdAt: ISODateString
 }
 
@@ -125,18 +129,22 @@ export interface BoardItem {
   refId: string
   x: number
   y: number
-  clusterId: string | null
 }
 
-/** A visual frame on the board — dragging an item's position into/out of one
- * sets that item's clusterId. Deliberately lightweight (no color-coding
- * philosophy beyond "pick one"); "promote to category" is what turns a
- * cluster into a durable CategoryRecord (theme or AQA question). */
+/**
+ * A visual frame on the board — *always* backed by a real CategoryRecord;
+ * there is no separate "promote to category" step. name/color/membership
+ * all come from the CategoryRecord (categoryId): dragging an item into the
+ * frame adds it to that category directly, and renaming/recoloring the
+ * category from anywhere (Categories view, another board) is instantly
+ * reflected here, because it's the same record, not a copy kept in sync.
+ * A category may have a cluster shape on several boards independently (or
+ * none), since the same category can be visualized differently per board.
+ */
 export interface BoardCluster {
   id: string
   boardId: string
-  name: string
-  color: string
+  categoryId: string
   x: number
   y: number
   width: number
@@ -159,6 +167,10 @@ export interface BoardLink {
 export interface BoardRecord {
   id: string
   name: string
+  /** The default board auto-shows every code and note (see boardOps.ts) —
+   * exactly one board should have this set at a time. Other boards are
+   * opt-in/curated: codes/notes/clusters only appear once explicitly added. */
+  isDefault: boolean
 }
 
 export const PROJECT_SCHEMA_VERSION = 2

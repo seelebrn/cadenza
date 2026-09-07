@@ -4,13 +4,23 @@
 // question-category are read as answers/evidence, not theme instances.
 // Deliberately separate from NoteCategoryDef (notesOps.ts), which is a flat
 // per-note classification tag, not a grouping cluster.
+//
+// Categories can nest (parentCategoryId — IPA-style superordinate/
+// subordinate themes), the same hierarchy shape as CodeNode.parentId in
+// projectOps.ts, including the same cycle-prevention approach.
+//
+// A CategoryRecord is also the board's only clustering concept — see
+// BoardCluster in types.ts and boardOps.ts: a cluster is just a category's
+// spatial shape on a particular board, so every category-membership change
+// here is instantly visible on any board showing that category, and vice
+// versa, because it's the same record.
 
 import { nanoid } from 'nanoid'
 import type { CategoryKind, CategoryRecord, ProjectData } from './types'
 
 export function createCategory(
   data: ProjectData,
-  input: { name: string; kind: CategoryKind; color: string }
+  input: { name: string; kind: CategoryKind; color: string; parentCategoryId?: string | null }
 ): { data: ProjectData; categoryId: string } {
   const category: CategoryRecord = {
     id: nanoid(),
@@ -20,6 +30,7 @@ export function createCategory(
     codeIds: [],
     noteIds: [],
     segmentIds: [],
+    parentCategoryId: input.parentCategoryId ?? null,
     createdAt: new Date().toISOString()
   }
   return { data: { ...data, categories: [...data.categories, category] }, categoryId: category.id }
@@ -46,17 +57,62 @@ export function setCategoryKind(data: ProjectData, categoryId: string, kind: Cat
   }
 }
 
-/** Deletes a category. Notes attached directly *to* the category (via
- * NoteAttachment kind:'category') fall back to a project-level attachment
- * rather than being left pointing at a dangling id. */
+function isDescendantCategory(categories: CategoryRecord[], ancestorId: string, candidateId: string): boolean {
+  let current = categories.find((c) => c.id === candidateId)
+  while (current?.parentCategoryId) {
+    if (current.parentCategoryId === ancestorId) return true
+    current = categories.find((c) => c.id === current!.parentCategoryId)
+  }
+  return false
+}
+
+/** Nests categoryId under parentCategoryId (a "superordinate cluster").
+ * No-ops (returns data unchanged) if the move would create a cycle. */
+export function reparentCategory(
+  data: ProjectData,
+  categoryId: string,
+  parentCategoryId: string | null
+): ProjectData {
+  if (parentCategoryId === categoryId) return data
+  if (parentCategoryId && isDescendantCategory(data.categories, categoryId, parentCategoryId)) return data
+  return {
+    ...data,
+    categories: data.categories.map((c) => (c.id === categoryId ? { ...c, parentCategoryId } : c))
+  }
+}
+
+/** All direct + transitive descendant category ids of categoryId (not
+ * including itself) — used when a superordinate cluster is dragged, so its
+ * whole nested subtree moves with it. */
+export function getDescendantCategoryIds(categories: CategoryRecord[], categoryId: string): string[] {
+  const children = categories.filter((c) => c.parentCategoryId === categoryId)
+  const result: string[] = []
+  for (const child of children) {
+    result.push(child.id)
+    result.push(...getDescendantCategoryIds(categories, child.id))
+  }
+  return result
+}
+
+/** Deletes a category, promoting its children to its own parent (mirrors
+ * deleteCode) so nesting collapses one level rather than losing them.
+ * Notes attached directly *to* the category fall back to a project-level
+ * attachment, and any board clusters representing it (on any board) are
+ * removed — they have nothing left to point at. */
 export function deleteCategory(data: ProjectData, categoryId: string): ProjectData {
-  const categories = data.categories.filter((c) => c.id !== categoryId)
+  const target = data.categories.find((c) => c.id === categoryId)
+  if (!target) return data
+
+  const categories = data.categories
+    .filter((c) => c.id !== categoryId)
+    .map((c) => (c.parentCategoryId === categoryId ? { ...c, parentCategoryId: target.parentCategoryId } : c))
   const notes = data.notes.map((n) =>
     n.attachedTo.kind === 'category' && n.attachedTo.categoryId === categoryId
       ? { ...n, attachedTo: { kind: 'project' as const } }
       : n
   )
-  return { ...data, categories, notes }
+  const boardClusters = data.boardClusters.filter((bc) => bc.categoryId !== categoryId)
+  return { ...data, categories, notes, boardClusters }
 }
 
 function addMember<K extends 'codeIds' | 'noteIds' | 'segmentIds'>(
@@ -101,3 +157,37 @@ export const addSegmentToCategory = (data: ProjectData, categoryId: string, segm
   addMember(data, categoryId, 'segmentIds', segmentId)
 export const removeSegmentFromCategory = (data: ProjectData, categoryId: string, segmentId: string): ProjectData =>
   removeMember(data, categoryId, 'segmentIds', segmentId)
+
+/** Is refId (of the given kind) a member of this category? Used by the
+ * board to resolve "which items currently belong to this cluster". */
+export function isCategoryMember(
+  category: CategoryRecord,
+  refType: 'code' | 'note' | 'segment',
+  refId: string
+): boolean {
+  if (refType === 'code') return category.codeIds.includes(refId)
+  if (refType === 'note') return category.noteIds.includes(refId)
+  return category.segmentIds.includes(refId)
+}
+
+export function addMemberByRefType(
+  data: ProjectData,
+  categoryId: string,
+  refType: 'code' | 'note' | 'segment',
+  refId: string
+): ProjectData {
+  if (refType === 'code') return addCodeToCategory(data, categoryId, refId)
+  if (refType === 'note') return addNoteToCategory(data, categoryId, refId)
+  return addSegmentToCategory(data, categoryId, refId)
+}
+
+export function removeMemberByRefType(
+  data: ProjectData,
+  categoryId: string,
+  refType: 'code' | 'note' | 'segment',
+  refId: string
+): ProjectData {
+  if (refType === 'code') return removeCodeFromCategory(data, categoryId, refId)
+  if (refType === 'note') return removeNoteFromCategory(data, categoryId, refId)
+  return removeSegmentFromCategory(data, categoryId, refId)
+}

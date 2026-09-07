@@ -40,25 +40,29 @@ import {
   removeNoteFromCategory as removeNoteFromCategoryOp,
   removeSegmentFromCategory as removeSegmentFromCategoryOp,
   renameCategory as renameCategoryOp,
+  reparentCategory as reparentCategoryOp,
   setCategoryColor as setCategoryColorOp
 } from '@shared/categoryOps'
 import { editParagraph as editParagraphOp, renameDocument as renameDocumentOp } from '@shared/documentOps'
 import {
+  addAllClustersToBoard as addAllClustersToBoardOp,
+  addAllCodesToBoard as addAllCodesToBoardOp,
+  addAllNotesToBoard as addAllNotesToBoardOp,
   addItemToBoard as addItemToBoardOp,
+  assignItemToCluster as assignItemToClusterOp,
   createBoard as createBoardOp,
-  createCluster as createClusterOp,
+  createClusterForCategory as createClusterForCategoryOp,
+  createClusterWithNewCategory as createClusterWithNewCategoryOp,
   deleteBoard as deleteBoardOp,
   deleteCluster as deleteClusterOp,
   linkItems as linkItemsOp,
   moveCluster as moveClusterOp,
   moveItem as moveItemOp,
-  promoteClusterToCategory as promoteClusterToCategoryOp,
   removeItemFromBoard as removeItemFromBoardOp,
   renameBoard as renameBoardOp,
-  renameCluster as renameClusterOp,
   resizeCluster as resizeClusterOp,
-  unlinkItems as unlinkItemsOp,
-  setClusterColor as setClusterColorOp
+  unassignItemFromCluster as unassignItemFromClusterOp,
+  unlinkItems as unlinkItemsOp
 } from '@shared/boardOps'
 import { useWorkspaceUiStore } from './workspaceUiStore'
 
@@ -124,10 +128,12 @@ interface ProjectState {
   setNoteCategoryColor: (categoryId: string, color: string) => void
   deleteNoteCategory: (categoryId: string) => void
 
-  // Categories (emergent theme or AQA-style question cluster)
-  createCategory: (name: string, kind: CategoryKind, color: string) => string | null
+  // Categories (emergent theme or AQA-style question cluster) — also the
+  // board's only clustering concept; see boardOps.ts.
+  createCategory: (name: string, kind: CategoryKind, color: string, parentCategoryId?: string | null) => string | null
   renameCategory: (categoryId: string, name: string) => void
   setCategoryColor: (categoryId: string, color: string) => void
+  reparentCategory: (categoryId: string, parentCategoryId: string | null) => void
   deleteCategory: (categoryId: string) => void
   addCodeToCategory: (categoryId: string, codeId: string) => void
   removeCodeFromCategory: (categoryId: string, codeId: string) => void
@@ -152,30 +158,38 @@ interface ProjectState {
   createBoard: (name: string) => string | null
   renameBoard: (boardId: string, name: string) => void
   deleteBoard: (boardId: string) => void
-  addItemToBoard: (
-    boardId: string,
-    refType: BoardItem['refType'],
-    refId: string,
-    x: number,
-    y: number
-  ) => void
-  moveItem: (itemId: string, x: number, y: number, clusterId: string | null) => void
+  addItemToBoard: (boardId: string, refType: BoardItem['refType'], refId: string, x: number, y: number) => string | null
+  moveItem: (itemId: string, x: number, y: number) => void
   removeItemFromBoard: (itemId: string) => void
-  createCluster: (
+  /** Places an existing category as a cluster on a board (no-ops if already placed there). */
+  createClusterForCategory: (
+    boardId: string,
+    categoryId: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ) => string | null
+  /** Creates a brand-new category and places it as a cluster in one step. */
+  createClusterWithNewCategory: (
     boardId: string,
     name: string,
+    kind: CategoryKind,
     color: string,
     x: number,
     y: number,
     width: number,
     height: number
   ) => string | null
-  renameCluster: (clusterId: string, name: string) => void
-  setClusterColor: (clusterId: string, color: string) => void
   moveCluster: (clusterId: string, x: number, y: number) => void
   resizeCluster: (clusterId: string, width: number, height: number) => void
+  /** Removes the cluster's shape from this board only — the category (and its membership) survives. */
   deleteCluster: (clusterId: string) => void
-  promoteClusterToCategory: (clusterId: string, kind: CategoryKind, color: string) => string | null
+  assignItemToCluster: (clusterId: string, refType: BoardItem['refType'], refId: string) => void
+  unassignItemFromCluster: (clusterId: string, refType: BoardItem['refType'], refId: string) => void
+  addAllCodesToBoard: (boardId: string) => void
+  addAllNotesToBoard: (boardId: string) => void
+  addAllClustersToBoard: (boardId: string) => void
   linkItems: (boardId: string, itemAId: string, itemBId: string) => void
   unlinkItems: (linkId: string) => void
 }
@@ -384,10 +398,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   deleteNoteCategory: (categoryId) =>
     get().updateProject((data) => deleteNoteCategoryOp(data, categoryId)),
 
-  createCategory: (name, kind, color) => {
+  createCategory: (name, kind, color, parentCategoryId) => {
     const { data } = get()
     if (!data) return null
-    const result = createCategoryOp(data, { name, kind, color })
+    const result = createCategoryOp(data, { name, kind, color, parentCategoryId })
     get().updateProject(() => result.data)
     return result.categoryId
   },
@@ -397,6 +411,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setCategoryColor: (categoryId, color) =>
     get().updateProject((data) => setCategoryColorOp(data, categoryId, color)),
+
+  reparentCategory: (categoryId, parentCategoryId) =>
+    get().updateProject((data) => reparentCategoryOp(data, categoryId, parentCategoryId)),
 
   deleteCategory: (categoryId) => get().updateProject((data) => deleteCategoryOp(data, categoryId)),
 
@@ -444,27 +461,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   deleteBoard: (boardId) => get().updateProject((data) => deleteBoardOp(data, boardId)),
 
-  addItemToBoard: (boardId, refType, refId, x, y) =>
-    get().updateProject((data) => addItemToBoardOp(data, boardId, refType, refId, x, y).data),
+  addItemToBoard: (boardId, refType, refId, x, y) => {
+    const { data } = get()
+    if (!data) return null
+    const result = addItemToBoardOp(data, boardId, refType, refId, x, y)
+    get().updateProject(() => result.data)
+    return result.itemId
+  },
 
-  moveItem: (itemId, x, y, clusterId) =>
-    get().updateProject((data) => moveItemOp(data, itemId, x, y, clusterId)),
+  moveItem: (itemId, x, y) => get().updateProject((data) => moveItemOp(data, itemId, x, y)),
 
   removeItemFromBoard: (itemId) => get().updateProject((data) => removeItemFromBoardOp(data, itemId)),
 
-  createCluster: (boardId, name, color, x, y, width, height) => {
+  createClusterForCategory: (boardId, categoryId, x, y, width, height) => {
     const { data } = get()
     if (!data) return null
-    const result = createClusterOp(data, { boardId, name, color, x, y, width, height })
+    const result = createClusterForCategoryOp(data, { boardId, categoryId, x, y, width, height })
     get().updateProject(() => result.data)
     return result.clusterId
   },
 
-  renameCluster: (clusterId, name) =>
-    get().updateProject((data) => renameClusterOp(data, clusterId, name)),
-
-  setClusterColor: (clusterId, color) =>
-    get().updateProject((data) => setClusterColorOp(data, clusterId, color)),
+  createClusterWithNewCategory: (boardId, name, kind, color, x, y, width, height) => {
+    const { data } = get()
+    if (!data) return null
+    const result = createClusterWithNewCategoryOp(data, { boardId, name, kind, color, x, y, width, height })
+    get().updateProject(() => result.data)
+    return result.clusterId
+  },
 
   moveCluster: (clusterId, x, y) => get().updateProject((data) => moveClusterOp(data, clusterId, x, y)),
 
@@ -473,14 +496,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   deleteCluster: (clusterId) => get().updateProject((data) => deleteClusterOp(data, clusterId)),
 
-  promoteClusterToCategory: (clusterId, kind, color) => {
-    const { data } = get()
-    if (!data) return null
-    const result = promoteClusterToCategoryOp(data, clusterId, kind, color)
-    if (!result) return null
-    get().updateProject(() => result.data)
-    return result.categoryId
-  },
+  assignItemToCluster: (clusterId, refType, refId) =>
+    get().updateProject((data) => assignItemToClusterOp(data, clusterId, refType, refId)),
+
+  unassignItemFromCluster: (clusterId, refType, refId) =>
+    get().updateProject((data) => unassignItemFromClusterOp(data, clusterId, refType, refId)),
+
+  addAllCodesToBoard: (boardId) => get().updateProject((data) => addAllCodesToBoardOp(data, boardId)),
+
+  addAllNotesToBoard: (boardId) => get().updateProject((data) => addAllNotesToBoardOp(data, boardId)),
+
+  addAllClustersToBoard: (boardId) =>
+    get().updateProject((data) => addAllClustersToBoardOp(data, boardId)),
 
   linkItems: (boardId, itemAId, itemBId) =>
     get().updateProject((data) => linkItemsOp(data, boardId, itemAId, itemBId)),

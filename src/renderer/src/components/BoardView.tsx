@@ -1,8 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
-import { describeBoardItem, findClusterAtPoint, findSnapTarget, getLinkedGroup } from '@shared/boardOps'
-import type { BoardCluster, BoardItem, CategoryKind } from '@shared/types'
+import {
+  computeGridPosition,
+  describeBoardItem,
+  findClusterAtPoint,
+  findSnapTarget,
+  getClusterMemberItems,
+  getDefaultBoardId,
+  getLinkedGroup
+} from '@shared/boardOps'
+import { getDescendantCategoryIds } from '@shared/categoryOps'
+import type { BoardCluster, BoardItem, CategoryKind, CategoryRecord } from '@shared/types'
 
 const CARD_WIDTH = 180
 const CARD_HEIGHT = 64
@@ -38,7 +47,7 @@ type DragState =
        * "other side" of a new link. */
       id: string
       /** Every item that moves rigidly together with it (itself plus every
-       * item transitively linked to it) — see getLinkedGroup. */
+       * item transitively linked to it, unless shift overrides that). */
       groupItemIds: string[]
       startMouseX: number
       startMouseY: number
@@ -47,13 +56,23 @@ type DragState =
   | {
       kind: 'cluster-move'
       id: string
-      /** The cluster's current members, moved rigidly along with the frame. */
+      categoryId: string
+      /** Shift+drag detaches from the parent cluster instead of evaluating
+       * a new one, and doesn't drag descendants' membership assumptions. */
+      shiftKey: boolean
+      startWidth: number
+      startHeight: number
+      /** This cluster plus every descendant cluster present on this board —
+       * the rigid group of frames that moves together. */
+      groupClusterIds: string[]
+      clusterStartPositions: Record<string, Position>
+      /** Every item belonging to this category or any descendant category. */
       memberItemIds: string[]
+      memberStartPositions: Record<string, Position>
       startMouseX: number
       startMouseY: number
       startX: number
       startY: number
-      memberStartPositions: Record<string, Position>
     }
   | {
       kind: 'cluster-resize'
@@ -67,11 +86,18 @@ type DragState =
 function BoardView(): JSX.Element {
   const data = useProjectStore((s) => s.data)
   const createBoard = useProjectStore((s) => s.createBoard)
-  const createCluster = useProjectStore((s) => s.createCluster)
+  const createClusterForCategory = useProjectStore((s) => s.createClusterForCategory)
+  const createClusterWithNewCategory = useProjectStore((s) => s.createClusterWithNewCategory)
   const addItemToBoard = useProjectStore((s) => s.addItemToBoard)
+  const addAllCodesToBoard = useProjectStore((s) => s.addAllCodesToBoard)
+  const addAllNotesToBoard = useProjectStore((s) => s.addAllNotesToBoard)
+  const addAllClustersToBoard = useProjectStore((s) => s.addAllClustersToBoard)
   const moveItem = useProjectStore((s) => s.moveItem)
   const moveCluster = useProjectStore((s) => s.moveCluster)
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
+  const assignItemToCluster = useProjectStore((s) => s.assignItemToCluster)
+  const unassignItemFromCluster = useProjectStore((s) => s.unassignItemFromCluster)
+  const reparentCategory = useProjectStore((s) => s.reparentCategory)
   const linkItemsAction = useProjectStore((s) => s.linkItems)
   const unlinkItemsAction = useProjectStore((s) => s.unlinkItems)
 
@@ -81,6 +107,9 @@ function BoardView(): JSX.Element {
   const [newBoardName, setNewBoardName] = useState('')
   const [codeToAdd, setCodeToAdd] = useState('')
   const [noteToAdd, setNoteToAdd] = useState('')
+  const [categoryToPlace, setCategoryToPlace] = useState('')
+  const [newClusterName, setNewClusterName] = useState('')
+  const [newClusterKind, setNewClusterKind] = useState<CategoryKind>('theme')
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [liveDelta, setLiveDelta] = useState({ dx: 0, dy: 0 })
   const [zoom, setZoom] = useState(1)
@@ -94,24 +123,63 @@ function BoardView(): JSX.Element {
   } | null>(null)
 
   const boards = data?.boards ?? []
+  const categories = data?.categories ?? []
+  const categoriesById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
   useEffect(() => {
-    if (!selectedBoardId && boards.length > 0) setSelectedBoardId(boards[0].id)
+    if (!selectedBoardId && boards.length > 0) setSelectedBoardId(getDefaultBoardId(boards))
   }, [selectedBoardId, boards, setSelectedBoardId])
 
-  const items = data?.boardItems.filter((i) => i.boardId === selectedBoardId) ?? []
+  const currentBoard = boards.find((b) => b.id === selectedBoardId) ?? null
   const clusters = data?.boardClusters.filter((c) => c.boardId === selectedBoardId) ?? []
   const links = data?.boardLinks.filter((l) => l.boardId === selectedBoardId) ?? []
+  const explicitItems = data?.boardItems.filter((i) => i.boardId === selectedBoardId) ?? []
 
-  // Wheel-to-zoom, centered on the cursor. Attached as a native listener
-  // (not React's onWheel) because React registers wheel listeners as
-  // passive by default, so e.preventDefault() inside a JSX handler silently
-  // does nothing and native scrolling would fight the zoom.
+  // On the default board, every code/note is always visible — no explicit
+  // "add" required. Anything without a stored position yet gets a
+  // deterministic grid fallback; dragging it later persists a real position.
+  const items = useMemo<BoardItem[]>(() => {
+    if (!data || !currentBoard) return []
+    if (!currentBoard.isDefault) return explicitItems
+
+    const explicitByRef = new Map(explicitItems.map((i) => [`${i.refType}:${i.refId}`, i]))
+    const result: BoardItem[] = []
+    let autoIndex = 0
+    for (const code of data.codes) {
+      const key = `code:${code.id}`
+      const existing = explicitByRef.get(key)
+      if (existing) {
+        result.push(existing)
+      } else {
+        const pos = computeGridPosition(autoIndex++)
+        result.push({ id: `virtual:${key}`, boardId: currentBoard.id, refType: 'code', refId: code.id, ...pos })
+      }
+    }
+    for (const note of data.notes) {
+      const key = `note:${note.id}`
+      const existing = explicitByRef.get(key)
+      if (existing) {
+        result.push(existing)
+      } else {
+        const pos = computeGridPosition(autoIndex++)
+        result.push({ id: `virtual:${key}`, boardId: currentBoard.id, refType: 'note', refId: note.id, ...pos })
+      }
+    }
+    // Any explicitly-added segment (quote) items always show too.
+    result.push(...explicitItems.filter((i) => i.refType === 'segment'))
+    return result
+  }, [data, currentBoard, explicitItems])
+
+  // Wheel-to-zoom (Ctrl/Cmd+wheel only — plain wheel keeps scrolling/panning
+  // natively). Attached as a native listener (not React's onWheel) because
+  // React registers wheel listeners as passive by default, so
+  // e.preventDefault() inside a JSX handler silently does nothing.
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
 
     function handleWheel(e: WheelEvent): void {
+      if (!e.ctrlKey && !e.metaKey) return // let native scroll handle a plain wheel
       e.preventDefault()
       const rect = container!.getBoundingClientRect()
       const offsetX = e.clientX - rect.left
@@ -143,12 +211,11 @@ function BoardView(): JSX.Element {
   }, [zoom])
 
   useEffect(() => {
-    if (!dragState) return
+    if (!dragState || !data) return
     const state = dragState // a stable local const narrows reliably; re-reading dragState! repeatedly does not
+    const currentData = data // same reasoning — nested functions below can't rely on the outer null-check
 
     function handleMouseMove(e: MouseEvent): void {
-      // Divide by zoom: a screen-pixel mouse delta corresponds to more (when
-      // zoomed out) or fewer (zoomed in) canvas-content-space units.
       setLiveDelta({
         dx: (e.clientX - state.startMouseX) / zoom,
         dy: (e.clientY - state.startMouseY) / zoom
@@ -163,8 +230,6 @@ function BoardView(): JSX.Element {
         const grabbedStart = state.startPositions[state.id]
         const rawX = grabbedStart.x + dx
         const rawY = grabbedStart.y + dy
-        // Snap candidates exclude the whole group — a card never snaps to
-        // something it's already rigidly moving with.
         const candidates = items.filter((i) => !state.groupItemIds.includes(i.id))
         const snap = findSnapTarget(candidates, state.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
         const adjustX = snap ? snap.snappedX - rawX : 0
@@ -177,18 +242,25 @@ function BoardView(): JSX.Element {
           const finalX = start.x + dx + adjustX
           const finalY = start.y + dy + adjustY
           finalPositions.set(memberId, { x: finalX, y: finalY })
-          const cluster = findClusterAtPoint(clusters, finalX + CARD_WIDTH / 2, finalY + CARD_HEIGHT / 2)
-          moveItem(memberId, finalX, finalY, cluster?.id ?? null)
+          moveItem(memberId, finalX, finalY)
+
+          // Category (cluster) membership follows containment: left the old
+          // cluster -> unassign; entered a new one -> assign.
+          const member = items.find((i) => i.id === memberId)
+          if (!member) continue
+          const oldPos = { x: member.x, y: member.y }
+          const oldCluster = findClusterAtPoint(clusters, oldPos.x + CARD_WIDTH / 2, oldPos.y + CARD_HEIGHT / 2)
+          const newCluster = findClusterAtPoint(clusters, finalX + CARD_WIDTH / 2, finalY + CARD_HEIGHT / 2)
+          if (oldCluster?.id !== newCluster?.id) {
+            if (oldCluster) unassignItemFromCluster(oldCluster.id, member.refType, member.refId)
+            if (newCluster) assignItemToCluster(newCluster.id, member.refType, member.refId)
+          }
         }
 
         if (snap && selectedBoardId) {
           linkItemsAction(selectedBoardId, state.id, snap.targetId)
         }
 
-        // Whether or not a new snap happened, check every link that crosses
-        // the group's boundary (one endpoint inside, one outside) — if this
-        // drag pulled it further than UNLINK_DISTANCE, sever it. Links
-        // entirely inside the group can't drift apart since it moves rigidly.
         for (const link of links) {
           const aInGroup = state.groupItemIds.includes(link.itemAId)
           const bInGroup = state.groupItemIds.includes(link.itemBId)
@@ -205,12 +277,35 @@ function BoardView(): JSX.Element {
           if (dist > UNLINK_DISTANCE) unlinkItemsAction(link.id)
         }
       } else if (state.kind === 'cluster-move') {
-        moveCluster(state.id, state.startX + dx, state.startY + dy)
-        // Members stay assigned to the cluster being dragged regardless of
-        // exact overlap math — moving the frame shouldn't itself evict them.
-        for (const memberId of state.memberItemIds) {
-          const start = state.memberStartPositions[memberId]
-          if (start) moveItem(memberId, start.x + dx, start.y + dy, state.id)
+        const finalX = state.startX + dx
+        const finalY = state.startY + dy
+        moveCluster(state.id, finalX, finalY)
+        for (const clusterId of state.groupClusterIds) {
+          if (clusterId === state.id) continue
+          const start = state.clusterStartPositions[clusterId]
+          if (start) moveCluster(clusterId, start.x + dx, start.y + dy)
+        }
+        for (const itemId of state.memberItemIds) {
+          const start = state.memberStartPositions[itemId]
+          if (start) moveItem(itemId, start.x + dx, start.y + dy)
+        }
+
+        // Re-evaluate (or explicitly break, if shift) this cluster's parent.
+        const category = currentData.categories.find((c) => c.id === state.categoryId)
+        const currentParentId = category?.parentCategoryId ?? null
+        if (state.shiftKey) {
+          if (currentParentId !== null) reparentCategory(state.categoryId, null)
+        } else {
+          const excluded = new Set([
+            state.categoryId,
+            ...getDescendantCategoryIds(currentData.categories, state.categoryId)
+          ])
+          const candidateClusters = clusters.filter((c) => !excluded.has(c.categoryId))
+          const centerX = finalX + state.startWidth / 2
+          const centerY = finalY + state.startHeight / 2
+          const target = findClusterAtPoint(candidateClusters, centerX, centerY)
+          const newParentId = target?.categoryId ?? null
+          if (newParentId !== currentParentId) reparentCategory(state.categoryId, newParentId)
         }
       } else {
         resizeCluster(
@@ -230,7 +325,7 @@ function BoardView(): JSX.Element {
       window.removeEventListener('mouseup', handleMouseUp)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragState, clusters, items, links, zoom, selectedBoardId])
+  }, [dragState, clusters, items, links, zoom, selectedBoardId, data])
 
   // Live position (and snap-preview) for every item, shared by the cards
   // themselves and the link lines so both agree on where things are mid-drag.
@@ -316,35 +411,52 @@ function BoardView(): JSX.Element {
 
   function handleAddCode(codeId: string): void {
     if (!selectedBoardId) return
-    const x = 40 + ((items.length * 40) % 800)
-    const y = 40 + Math.floor((items.length * 40) / 800) * 90
-    addItemToBoard(selectedBoardId, 'code', codeId, x, y)
+    const pos = computeGridPosition(explicitItems.length)
+    addItemToBoard(selectedBoardId, 'code', codeId, pos.x, pos.y)
     setCodeToAdd('')
   }
 
   function handleAddNote(noteId: string): void {
     if (!selectedBoardId) return
-    const x = 40 + ((items.length * 40) % 800)
-    const y = 40 + Math.floor((items.length * 40) / 800) * 90
-    addItemToBoard(selectedBoardId, 'note', noteId, x, y)
+    const pos = computeGridPosition(explicitItems.length)
+    addItemToBoard(selectedBoardId, 'note', noteId, pos.x, pos.y)
     setNoteToAdd('')
+  }
+
+  function handlePlaceCategory(categoryId: string): void {
+    if (!selectedBoardId) return
+    createClusterForCategory(
+      selectedBoardId,
+      categoryId,
+      60 + clusters.length * 30,
+      60 + clusters.length * 30,
+      DEFAULT_CLUSTER_WIDTH,
+      DEFAULT_CLUSTER_HEIGHT
+    )
+    setCategoryToPlace('')
   }
 
   function handleNewCluster(): void {
     if (!selectedBoardId) return
-    createCluster(
+    const name = newClusterName.trim() || 'New cluster'
+    createClusterWithNewCategory(
       selectedBoardId,
-      'New cluster',
+      name,
+      newClusterKind,
       nextColor(clusters.length),
       60 + clusters.length * 30,
       60 + clusters.length * 30,
       DEFAULT_CLUSTER_WIDTH,
       DEFAULT_CLUSTER_HEIGHT
     )
+    setNewClusterName('')
   }
 
-  const availableCodes = data.codes.filter((c) => !items.some((i) => i.refType === 'code' && i.refId === c.id))
-  const availableNotes = data.notes.filter((n) => !items.some((i) => i.refType === 'note' && i.refId === n.id))
+  const availableCodes = data.codes.filter((c) => !explicitItems.some((i) => i.refType === 'code' && i.refId === c.id))
+  const availableNotes = data.notes.filter((n) => !explicitItems.some((i) => i.refType === 'note' && i.refId === n.id))
+  const placeableCategories = categories.filter(
+    (c) => !clusters.some((cluster) => cluster.categoryId === c.id)
+  )
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -358,6 +470,7 @@ function BoardView(): JSX.Element {
           {boards.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name}
+              {b.isDefault ? ' (default)' : ''}
             </option>
           ))}
         </select>
@@ -379,41 +492,98 @@ function BoardView(): JSX.Element {
 
         {selectedBoardId && (
           <>
-            <select
-              className="rounded border border-slate-300 px-2 py-1 text-xs"
-              value={codeToAdd}
-              onChange={(e) => {
-                if (e.target.value) handleAddCode(e.target.value)
-                else setCodeToAdd(e.target.value)
-              }}
-            >
-              <option value="">+ Add code/item…</option>
-              {availableCodes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <select
-              className="rounded border border-slate-300 px-2 py-1 text-xs"
-              value={noteToAdd}
-              onChange={(e) => {
-                if (e.target.value) handleAddNote(e.target.value)
-                else setNoteToAdd(e.target.value)
-              }}
-            >
-              <option value="">+ Add note…</option>
-              {availableNotes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {(n.question || n.answer).slice(0, 40)}
-                </option>
-              ))}
-            </select>
+            {!currentBoard?.isDefault && (
+              <>
+                <select
+                  className="rounded border border-slate-300 px-2 py-1 text-xs"
+                  value={codeToAdd}
+                  onChange={(e) => {
+                    if (e.target.value) handleAddCode(e.target.value)
+                    else setCodeToAdd(e.target.value)
+                  }}
+                >
+                  <option value="">+ Add code/item…</option>
+                  {availableCodes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="rounded border border-slate-300 px-2 py-1 text-xs"
+                  value={noteToAdd}
+                  onChange={(e) => {
+                    if (e.target.value) handleAddNote(e.target.value)
+                    else setNoteToAdd(e.target.value)
+                  }}
+                >
+                  <option value="">+ Add note…</option>
+                  {availableNotes.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {(n.question || n.answer).slice(0, 40)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                  onClick={() => addAllCodesToBoard(selectedBoardId)}
+                >
+                  + Add all codes
+                </button>
+                <button
+                  className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                  onClick={() => addAllNotesToBoard(selectedBoardId)}
+                >
+                  + Add all notes
+                </button>
+              </>
+            )}
+
+            {placeableCategories.length > 0 && (
+              <select
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                value={categoryToPlace}
+                onChange={(e) => {
+                  if (e.target.value) handlePlaceCategory(e.target.value)
+                  else setCategoryToPlace(e.target.value)
+                }}
+              >
+                <option value="">+ Place category…</option>
+                {placeableCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="flex gap-1">
+              <select
+                className="rounded border border-slate-300 px-1 py-1 text-xs"
+                value={newClusterKind}
+                onChange={(e) => setNewClusterKind(e.target.value as CategoryKind)}
+              >
+                <option value="theme">Theme</option>
+                <option value="question">Question</option>
+              </select>
+              <input
+                className="w-28 rounded border border-slate-300 px-2 py-1 text-xs"
+                placeholder="New cluster…"
+                value={newClusterName}
+                onChange={(e) => setNewClusterName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleNewCluster()}
+              />
+              <button
+                className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                onClick={handleNewCluster}
+              >
+                + New cluster
+              </button>
+            </div>
             <button
               className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
-              onClick={handleNewCluster}
+              onClick={() => addAllClustersToBoard(selectedBoardId)}
             >
-              + New cluster
+              + Add all clusters
             </button>
           </>
         )}
@@ -431,9 +601,10 @@ function BoardView(): JSX.Element {
 
       {selectedBoardId && (
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
-          Scroll to zoom · drag two cards close together to link them (they snap), and linked/clustered cards move
-          together (shift+drag to move just one) · drag a linked card away to unlink · click the × on a connector
-          to unlink directly
+          {currentBoard?.isDefault && 'Every code and note is shown automatically on this default board. '}
+          Ctrl/Cmd+scroll to zoom · drag two cards close together to link them (they snap), and linked/clustered
+          cards move together (shift+drag to move just one) · drag a cluster into another to nest it as a
+          superordinate group (shift+drag to pull it out) · click the × on a connector to unlink
         </p>
       )}
 
@@ -463,47 +634,70 @@ function BoardView(): JSX.Element {
               ))}
             </svg>
 
-            {clusters.map((cluster) => (
-              <ClusterFrame
-                key={cluster.id}
-                cluster={cluster}
-                dragState={dragState}
-                liveDelta={liveDelta}
-                onStartMove={(e) => {
-                  const memberItemIds = items.filter((i) => i.clusterId === cluster.id).map((i) => i.id)
-                  const memberStartPositions: Record<string, Position> = {}
-                  for (const i of items) {
-                    if (i.clusterId === cluster.id) memberStartPositions[i.id] = { x: i.x, y: i.y }
+            {clusters.map((cluster) => {
+              const category = categoriesById.get(cluster.categoryId)
+              if (!category) return null
+              return (
+                <ClusterFrame
+                  key={cluster.id}
+                  cluster={cluster}
+                  category={category}
+                  dragState={dragState}
+                  liveDelta={liveDelta}
+                  onStartMove={(e) => {
+                    const descendantCategoryIds = getDescendantCategoryIds(data.categories, category.id)
+                    const groupCategoryIds = [category.id, ...descendantCategoryIds]
+                    const groupCategories = data.categories.filter((c) => groupCategoryIds.includes(c.id))
+                    const groupClusters = clusters.filter((c) => groupCategoryIds.includes(c.categoryId))
+                    const clusterStartPositions: Record<string, Position> = {}
+                    for (const c of groupClusters) clusterStartPositions[c.id] = { x: c.x, y: c.y }
+
+                    const memberItemsMap = new Map<string, BoardItem>()
+                    for (const cat of groupCategories) {
+                      for (const item of getClusterMemberItems(items, cat)) memberItemsMap.set(item.id, item)
+                    }
+                    const memberStartPositions: Record<string, Position> = {}
+                    for (const item of memberItemsMap.values()) {
+                      memberStartPositions[item.id] = { x: item.x, y: item.y }
+                    }
+
+                    setDragState({
+                      kind: 'cluster-move',
+                      id: cluster.id,
+                      categoryId: category.id,
+                      shiftKey: e.shiftKey,
+                      startWidth: cluster.width,
+                      startHeight: cluster.height,
+                      groupClusterIds: groupClusters.map((c) => c.id),
+                      clusterStartPositions,
+                      memberItemIds: Array.from(memberItemsMap.keys()),
+                      memberStartPositions,
+                      startMouseX: e.clientX,
+                      startMouseY: e.clientY,
+                      startX: cluster.x,
+                      startY: cluster.y
+                    })
+                  }}
+                  onStartResize={(e) =>
+                    setDragState({
+                      kind: 'cluster-resize',
+                      id: cluster.id,
+                      startMouseX: e.clientX,
+                      startMouseY: e.clientY,
+                      startWidth: cluster.width,
+                      startHeight: cluster.height
+                    })
                   }
-                  setDragState({
-                    kind: 'cluster-move',
-                    id: cluster.id,
-                    memberItemIds,
-                    startMouseX: e.clientX,
-                    startMouseY: e.clientY,
-                    startX: cluster.x,
-                    startY: cluster.y,
-                    memberStartPositions
-                  })
-                }}
-                onStartResize={(e) =>
-                  setDragState({
-                    kind: 'cluster-resize',
-                    id: cluster.id,
-                    startMouseX: e.clientX,
-                    startMouseY: e.clientY,
-                    startWidth: cluster.width,
-                    startHeight: cluster.height
-                  })
-                }
-              />
-            ))}
+                />
+              )
+            })}
             {items.map((item) => {
               const pos = displayPositions.get(item.id) ?? { x: item.x, y: item.y, isSnapping: false }
               return (
                 <BoardItemCard
                   key={item.id}
                   item={item}
+                  boardId={selectedBoardId}
                   x={pos.x}
                   y={pos.y}
                   isDragging={
@@ -511,18 +705,26 @@ function BoardView(): JSX.Element {
                     (dragState?.kind === 'cluster-move' && dragState.memberItemIds.includes(item.id))
                   }
                   isSnapping={pos.isSnapping}
-                  onStartDrag={(e) => {
+                  onStartDrag={(e, realId) => {
+                    // A virtual (not-yet-persisted) item materializes into a
+                    // real BoardItem right before the drag starts — realId is
+                    // its actual id, since item.id (a "virtual:..." marker)
+                    // won't exist in boardItems for moveItem to find.
+                    const draggedId = realId ?? item.id
                     // Shift+drag is the escape hatch: move just this one
                     // card, ignoring whatever it's linked to.
-                    const group = e.shiftKey ? new Set([item.id]) : getLinkedGroup(links, item.id)
+                    const group = e.shiftKey ? new Set([draggedId]) : getLinkedGroup(links, draggedId)
                     const startPositions: Record<string, Position> = {}
                     for (const gid of group) {
                       const gItem = items.find((i) => i.id === gid)
                       if (gItem) startPositions[gid] = { x: gItem.x, y: gItem.y }
                     }
+                    // The dragged item itself might not be in `items` yet
+                    // under its real id if it was virtual a moment ago.
+                    if (!startPositions[draggedId]) startPositions[draggedId] = { x: item.x, y: item.y }
                     setDragState({
                       kind: 'item',
-                      id: item.id,
+                      id: draggedId,
                       groupItemIds: Array.from(group),
                       startMouseX: e.clientX,
                       startMouseY: e.clientY,
@@ -561,22 +763,22 @@ function BoardView(): JSX.Element {
 
 interface ClusterFrameProps {
   cluster: BoardCluster
+  category: CategoryRecord
   dragState: DragState | null
   liveDelta: { dx: number; dy: number }
   onStartMove: (e: React.MouseEvent) => void
   onStartResize: (e: React.MouseEvent) => void
 }
 
-function ClusterFrame({ cluster, dragState, liveDelta, onStartMove, onStartResize }: ClusterFrameProps): JSX.Element {
-  const renameCluster = useProjectStore((s) => s.renameCluster)
-  const setClusterColor = useProjectStore((s) => s.setClusterColor)
+function ClusterFrame({ cluster, category, dragState, liveDelta, onStartMove, onStartResize }: ClusterFrameProps): JSX.Element {
+  const renameCategory = useProjectStore((s) => s.renameCategory)
+  const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCluster = useProjectStore((s) => s.deleteCluster)
-  const promoteClusterToCategory = useProjectStore((s) => s.promoteClusterToCategory)
 
   const [isEditingName, setIsEditingName] = useState(false)
-  const [nameDraft, setNameDraft] = useState(cluster.name)
+  const [nameDraft, setNameDraft] = useState(category.name)
 
-  const isMoving = dragState?.kind === 'cluster-move' && dragState.id === cluster.id
+  const isMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(cluster.id)
   const isResizing = dragState?.kind === 'cluster-resize' && dragState.id === cluster.id
   const x = isMoving ? cluster.x + liveDelta.dx : cluster.x
   const y = isMoving ? cluster.y + liveDelta.dy : cluster.y
@@ -585,31 +787,30 @@ function ClusterFrame({ cluster, dragState, liveDelta, onStartMove, onStartResiz
 
   function commitRename(): void {
     const trimmed = nameDraft.trim()
-    if (trimmed && trimmed !== cluster.name) renameCluster(cluster.id, trimmed)
+    if (trimmed && trimmed !== category.name) renameCategory(category.id, trimmed)
     setIsEditingName(false)
-  }
-
-  function handlePromote(kind: CategoryKind): void {
-    promoteClusterToCategory(cluster.id, kind, cluster.color)
   }
 
   return (
     <div
       className="absolute rounded-lg border-2 border-dashed"
-      style={{ left: x, top: y, width, height, borderColor: cluster.color, backgroundColor: `${cluster.color}0f` }}
+      style={{ left: x, top: y, width, height, borderColor: category.color, backgroundColor: `${category.color}0f` }}
     >
       <div
         className="flex cursor-move items-center gap-1 rounded-t-md px-2 py-1 text-xs text-white"
-        style={{ backgroundColor: cluster.color }}
+        style={{ backgroundColor: category.color }}
         onMouseDown={onStartMove}
       >
         <input
           type="color"
           className="h-3 w-3 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
-          value={cluster.color}
+          value={category.color}
           onMouseDown={(e) => e.stopPropagation()}
-          onChange={(e) => setClusterColor(cluster.id, e.target.value)}
+          onChange={(e) => setCategoryColor(category.id, e.target.value)}
         />
+        <span className="flex-shrink-0 rounded bg-black/20 px-1 text-[9px] uppercase">
+          {category.kind === 'question' ? '❓' : '🏷'}
+        </span>
         {isEditingName ? (
           <input
             autoFocus
@@ -625,32 +826,18 @@ function ClusterFrame({ cluster, dragState, liveDelta, onStartMove, onStartResiz
             className="min-w-0 flex-1 truncate text-left font-medium"
             onDoubleClick={(e) => {
               e.stopPropagation()
-              setNameDraft(cluster.name)
+              setNameDraft(category.name)
               setIsEditingName(true)
             }}
+            title={category.parentCategoryId ? 'Nested under a superordinate cluster' : undefined}
           >
-            {cluster.name}
+            {category.name}
+            {category.parentCategoryId ? ' ↰' : ''}
           </button>
         )}
         <button
-          className="flex-shrink-0 underline"
-          title="Promote to a theme category"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => handlePromote('theme')}
-        >
-          →Theme
-        </button>
-        <button
-          className="flex-shrink-0 underline"
-          title="Promote to an AQA question category"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => handlePromote('question')}
-        >
-          →Question
-        </button>
-        <button
           className="flex-shrink-0 text-white/80 hover:text-white"
-          title="Delete cluster (items are un-clustered, not deleted)"
+          title="Remove from this board (category is kept)"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => deleteCluster(cluster.id)}
         >
@@ -659,7 +846,7 @@ function ClusterFrame({ cluster, dragState, liveDelta, onStartMove, onStartResiz
       </div>
       <div
         className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
-        style={{ backgroundColor: cluster.color }}
+        style={{ backgroundColor: category.color }}
         onMouseDown={(e) => {
           e.stopPropagation()
           onStartResize(e)
@@ -671,20 +858,26 @@ function ClusterFrame({ cluster, dragState, liveDelta, onStartMove, onStartResiz
 
 interface BoardItemCardProps {
   item: BoardItem
+  boardId: string
   x: number
   y: number
   isDragging: boolean
   isSnapping: boolean
-  onStartDrag: (e: React.MouseEvent) => void
+  /** realId is passed when a virtual item just materialized, since item.id
+   * (a "virtual:..." marker) won't exist in boardItems yet. */
+  onStartDrag: (e: React.MouseEvent, realId?: string) => void
 }
 
-function BoardItemCard({ item, x, y, isDragging, isSnapping, onStartDrag }: BoardItemCardProps): JSX.Element | null {
+function BoardItemCard({ item, boardId, x, y, isDragging, isSnapping, onStartDrag }: BoardItemCardProps): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
   const removeItemFromBoard = useProjectStore((s) => s.removeItemFromBoard)
+  const addItemToBoard = useProjectStore((s) => s.addItemToBoard)
 
   if (!data) return null
   const description = describeBoardItem(data, item)
   if (!description) return null
+
+  const isVirtual = item.id.startsWith('virtual:')
 
   return (
     <div
@@ -692,7 +885,17 @@ function BoardItemCard({ item, x, y, isDragging, isSnapping, onStartDrag }: Boar
         isSnapping ? 'border-blue-400 ring-2 ring-blue-300' : 'border-slate-300'
       } ${isDragging ? 'shadow-md' : ''}`}
       style={{ left: x, top: y, width: CARD_WIDTH, minHeight: CARD_HEIGHT }}
-      onMouseDown={onStartDrag}
+      onMouseDown={(e) => {
+        // A virtual (not-yet-persisted) item materializes into a real
+        // BoardItem the moment it's touched, so the drag has something
+        // real to move.
+        if (isVirtual) {
+          const realId = addItemToBoard(boardId, item.refType, item.refId, item.x, item.y)
+          onStartDrag(e, realId ?? undefined)
+        } else {
+          onStartDrag(e)
+        }
+      }}
     >
       <div className="mb-1 flex items-center justify-between gap-1">
         <span className="flex items-center gap-1 truncate text-[10px] uppercase text-slate-400">
@@ -708,7 +911,9 @@ function BoardItemCard({ item, x, y, isDragging, isSnapping, onStartDrag }: Boar
           className="hidden flex-shrink-0 text-slate-300 hover:text-red-500 group-hover:block"
           title="Remove from board"
           onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => removeItemFromBoard(item.id)}
+          onClick={() => {
+            if (!isVirtual) removeItemFromBoard(item.id)
+          }}
         >
           ×
         </button>

@@ -251,3 +251,43 @@ already used for documents/codes/clusters elsewhere. Renaming only changes the i
 name shown in the header and used as the default filename the next time a Save-As dialog
 opens — it does not rename the `.qdaproj` file already on disk, the same way renaming a
 document doesn't touch its imported source file.
+
+### Nested clusters genuinely integrated on the board (2026-09-07)
+
+Nesting a cluster into another from the Workspace tree wasn't showing up "integrated" on
+the board — the earlier auto-layout put every nested cluster in a single disconnected
+second column, unrelated to which category was actually its parent, since there was no
+board-drag position to anchor a Workspace-driven nesting on. Rewrote `getVisibleBoardClusters`
+around genuine recursive containment: a nested cluster is now placed *inside* its real
+parent's box (below the parent's own member cards, indented, narrower by one padding's
+worth per level), computed bottom-up (a parent's height has to account for its full nested
+subtree, not just its own direct members) then placed top-down. Nesting from the Workspace
+now looks the same as nesting by dragging on the board itself, and `getVisibleBoardItems`
+needed no changes at all — it already treats `clusters` generically, so a member's fallback
+position now correctly lands inside its actual (properly nested) cluster's box for free.
+
+Caught and fixed a bug in my own first pass via the test suite before shipping: an initial
+width floor on nested boxes (so they wouldn't shrink to nothing at extreme depth) clamped a
+deeply-nested child back up to the same width as its equally-floored parent while still
+indenting it — meaning it overflowed the parent's right edge once both hit the floor.
+Removed the floor entirely; at any realistic nesting depth width stays comfortably
+positive, and the pathological case just renders a very narrow box instead of a crash.
+Also investigated the separately-reported "notes don't follow when a cluster moves, unlike
+codes" — traced the full move/materialize path end to end and could not find any
+code-level asymmetry between refType 'code' and 'note' (three targeted runtime tests,
+including one specifically simulating a note that's a member of a *nested* cluster, all
+passed against the pre-fix code too). It's possible this was actually the nesting-
+integration issue above, now fixed — worth re-testing; flagged in the session as unresolved
+rather than claimed fixed, since I couldn't reproduce a distinct bug to point to.
+
+Verified: typecheck and build clean. Unit-tested the new layout extensively (bundled with
+esbuild, run with node, then deleted): a nested cluster fully contained inside its real
+parent, parent height growing to fit a nested child, three levels of transitive containment,
+sibling root clusters and sibling nested children both never overlapping, an explicit
+(user-placed) parent still correctly anchoring a virtual child, a later root cluster
+clearing a tall nested subtree, non-default boards still auto-showing nothing, a fully
+-cyclic pair (unreachable from any root, given the single-parentCategoryId data model)
+safely producing zero clusters rather than hanging, and a legitimate 30-level-deep chain
+placing every level without an artificial cap truncating it. Boot-tested a separate
+packaged instance (window title "Cadenza", no errors), then killed it and confirmed no
+electron process was left running.

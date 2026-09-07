@@ -284,6 +284,26 @@ function BoardView(): JSX.Element {
     return map
   }, [items, dragState, liveDelta])
 
+  // Shared endpoint/midpoint geometry for each link — computed once and used
+  // by both the (behind-cards) connector line and the (above-cards) unlink
+  // button, so they can never disagree about where the midpoint actually is.
+  const linkGeometries = useMemo(() => {
+    return links
+      .map((link) => {
+        const a = items.find((i) => i.id === link.itemAId)
+        const b = items.find((i) => i.id === link.itemBId)
+        if (!a || !b) return null
+        const posA = displayPositions.get(a.id) ?? { x: a.x, y: a.y }
+        const posB = displayPositions.get(b.id) ?? { x: b.x, y: b.y }
+        const ax = posA.x + CARD_WIDTH / 2
+        const ay = posA.y + CARD_HEIGHT / 2
+        const bx = posB.x + CARD_WIDTH / 2
+        const by = posB.y + CARD_HEIGHT / 2
+        return { link, ax, ay, bx, by, midX: (ax + bx) / 2, midY: (ay + by) / 2 }
+      })
+      .filter((g): g is NonNullable<typeof g> => g !== null)
+  }, [links, items, displayPositions])
+
   if (!data) return <></>
 
   function handleCreateBoard(): void {
@@ -412,7 +432,8 @@ function BoardView(): JSX.Element {
       {selectedBoardId && (
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
           Scroll to zoom · drag two cards close together to link them (they snap), and linked/clustered cards move
-          together · drag a linked card away to unlink · click the × on a connector to unlink directly
+          together (shift+drag to move just one) · drag a linked card away to unlink · click the × on a connector
+          to unlink directly
         </p>
       )}
 
@@ -431,47 +452,15 @@ function BoardView(): JSX.Element {
               transformOrigin: '0 0'
             }}
           >
+            {/* Connector lines only — behind clusters/items. The clickable
+                unlink control is a separate layer rendered *after* the cards
+                (below) so it's never covered by one: a link's midpoint sits
+                in the snap gap between two cards, which is narrower than the
+                button itself, so it always overlaps both cards a little. */}
             <svg className="pointer-events-none absolute left-0 top-0" width={CANVAS_WIDTH} height={CANVAS_HEIGHT}>
-              {links.map((link) => {
-                const a = items.find((i) => i.id === link.itemAId)
-                const b = items.find((i) => i.id === link.itemBId)
-                if (!a || !b) return null
-                const posA = displayPositions.get(a.id) ?? { x: a.x, y: a.y }
-                const posB = displayPositions.get(b.id) ?? { x: b.x, y: b.y }
-                const ax = posA.x + CARD_WIDTH / 2
-                const ay = posA.y + CARD_HEIGHT / 2
-                const bx = posB.x + CARD_WIDTH / 2
-                const by = posB.y + CARD_HEIGHT / 2
-                const midX = (ax + bx) / 2
-                const midY = (ay + by) / 2
-                return (
-                  <g key={link.id}>
-                    <line x1={ax} y1={ay} x2={bx} y2={by} stroke="#94a3b8" strokeWidth={2} />
-                    <circle
-                      cx={midX}
-                      cy={midY}
-                      r={9}
-                      fill="white"
-                      stroke="#94a3b8"
-                      strokeWidth={1.5}
-                      className="pointer-events-auto cursor-pointer hover:stroke-red-400"
-                      onClick={() => unlinkItemsAction(link.id)}
-                    >
-                      <title>Unlink</title>
-                    </circle>
-                    <text
-                      x={midX}
-                      y={midY + 3}
-                      textAnchor="middle"
-                      fontSize={11}
-                      className="pointer-events-none select-none"
-                      fill="#64748b"
-                    >
-                      ×
-                    </text>
-                  </g>
-                )
-              })}
+              {linkGeometries.map(({ link, ax, ay, bx, by }) => (
+                <line key={link.id} x1={ax} y1={ay} x2={bx} y2={by} stroke="#94a3b8" strokeWidth={2} />
+              ))}
             </svg>
 
             {clusters.map((cluster) => (
@@ -523,7 +512,9 @@ function BoardView(): JSX.Element {
                   }
                   isSnapping={pos.isSnapping}
                   onStartDrag={(e) => {
-                    const group = getLinkedGroup(links, item.id)
+                    // Shift+drag is the escape hatch: move just this one
+                    // card, ignoring whatever it's linked to.
+                    const group = e.shiftKey ? new Set([item.id]) : getLinkedGroup(links, item.id)
                     const startPositions: Record<string, Position> = {}
                     for (const gid of group) {
                       const gItem = items.find((i) => i.id === gid)
@@ -541,6 +532,26 @@ function BoardView(): JSX.Element {
                 />
               )
             })}
+
+            {/* Unlink buttons render last (on top of every card) so a link's
+                midpoint — which sits in a snap gap narrower than the button
+                itself — is never covered by the cards it overlaps. */}
+            <div
+              className="pointer-events-none absolute left-0 top-0"
+              style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+            >
+              {linkGeometries.map(({ link, midX, midY }) => (
+                <button
+                  key={link.id}
+                  className="pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-slate-400 bg-white text-[10px] leading-none text-slate-500 shadow hover:border-red-400 hover:text-red-500"
+                  style={{ left: midX, top: midY }}
+                  title="Unlink"
+                  onClick={() => unlinkItemsAction(link.id)}
+                >
+                  ×
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

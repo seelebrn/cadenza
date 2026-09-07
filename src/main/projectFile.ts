@@ -15,14 +15,14 @@ import {
  * bytes), keyed by the relative path stored on each DocumentRecord.
  */
 
-// Sensible defaults for the comprehensive-interview (Kaufmann) analytic
-// remark types; fully user-editable/deletable from there.
+// Default note-category catalog (IPA-style exploratory remark types);
+// fully user-editable/renameable/recolorable/deletable from there.
 function seedNoteCategories(): NoteCategoryDef[] {
   const now = new Date().toISOString()
   return [
-    { id: nanoid(), name: 'Thematic', color: '#3b82f6', createdAt: now },
-    { id: nanoid(), name: 'Linguistic', color: '#f97316', createdAt: now },
-    { id: nanoid(), name: 'Conceptual', color: '#8b5cf6', createdAt: now }
+    { id: nanoid(), name: 'Note Descriptive', color: '#22c55e', createdAt: now },
+    { id: nanoid(), name: 'Note Linguistique', color: '#3b82f6', createdAt: now },
+    { id: nanoid(), name: 'Note Conceptuelle', color: '#ef4444', createdAt: now }
   ]
 }
 

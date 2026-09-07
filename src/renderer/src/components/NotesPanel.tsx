@@ -245,7 +245,7 @@ function NoteCategoryManager(): JSX.Element {
           <div className="flex gap-1 pt-1">
             <input
               className="flex-1 rounded border border-slate-300 px-1.5 py-1"
-              placeholder="New category (e.g. Thematic)…"
+              placeholder="New category (e.g. Note Descriptive)…"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAdd()}

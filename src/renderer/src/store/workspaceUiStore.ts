@@ -11,6 +11,32 @@ export type SidebarTab = 'codes' | 'notes'
 export type MainView = 'workspace' | 'analysis' | 'board'
 export type AnalysisTab = 'retrieval' | 'categories'
 
+const SIDEBAR_WIDTH_KEY = 'cadenza.sidebarWidth'
+const DEFAULT_SIDEBAR_WIDTH = 320
+const MIN_SIDEBAR_WIDTH = 260
+const MAX_SIDEBAR_WIDTH = 640
+
+// A per-viewer UI preference (window layout), not project data — kept in
+// localStorage rather than ProjectData/.qdaproj so it isn't tangled up with
+// autosave/dirty-tracking and doesn't travel with the project file.
+function loadSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY)
+    const parsed = raw ? Number(raw) : NaN
+    return Number.isFinite(parsed) ? parsed : DEFAULT_SIDEBAR_WIDTH
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH
+  }
+}
+
+function saveSidebarWidth(width: number): void {
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width))
+  } catch {
+    // not critical if this doesn't persist
+  }
+}
+
 /** Ephemeral (non-persisted) workspace UI state shared across the reader,
  * codebook, and notes panels — which document is open, which sidebar tab is
  * active, and the "active span": a text span the user is currently working
@@ -34,6 +60,9 @@ interface WorkspaceUiState {
 
   activeSidebarTab: SidebarTab
   setActiveSidebarTab: (tab: SidebarTab) => void
+
+  sidebarWidth: number
+  setSidebarWidth: (width: number) => void
 
   activeSpan: ActiveSpan | null
   setActiveSpan: (span: ActiveSpan | null) => void
@@ -61,6 +90,13 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
 
   activeSidebarTab: 'codes',
   setActiveSidebarTab: (tab) => set({ activeSidebarTab: tab }),
+
+  sidebarWidth: loadSidebarWidth(),
+  setSidebarWidth: (width) => {
+    const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width))
+    set({ sidebarWidth: clamped })
+    saveSidebarWidth(clamped)
+  },
 
   activeSpan: null,
   setActiveSpan: (span) => set({ activeSpan: span }),

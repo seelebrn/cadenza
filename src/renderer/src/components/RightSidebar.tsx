@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import CodebookPanel from './CodebookPanel'
@@ -7,9 +7,45 @@ import NotesPanel from './NotesPanel'
 function RightSidebar(): JSX.Element {
   const activeTab = useWorkspaceUiStore((s) => s.activeSidebarTab)
   const setActiveTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
+  const sidebarWidth = useWorkspaceUiStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useWorkspaceUiStore((s) => s.setSidebarWidth)
+  const [dragStartX, setDragStartX] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (dragStartX === null) return
+    const widthAtDragStart = sidebarWidth
+
+    function handleMouseMove(e: MouseEvent): void {
+      // Dragging left (cursor moves toward negative x relative to the
+      // start) grows the sidebar, since it sits at the window's right edge.
+      setSidebarWidth(widthAtDragStart + (dragStartX! - e.clientX))
+    }
+    function handleMouseUp(): void {
+      setDragStartX(null)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+    // widthAtDragStart is captured once per drag gesture on purpose — it
+    // must not update as sidebarWidth itself changes during the drag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragStartX])
 
   return (
-    <aside className="flex w-80 flex-shrink-0 flex-col border-l border-slate-200 bg-white">
+    <aside
+      className="relative flex flex-shrink-0 flex-col border-l border-slate-200 bg-white"
+      style={{ width: sidebarWidth }}
+    >
+      <div
+        className="absolute left-0 top-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-blue-300"
+        title="Drag to resize"
+        onMouseDown={(e) => setDragStartX(e.clientX)}
+      />
+
       <FileUnderCategoryBar />
 
       <div className="flex border-b border-slate-200">

@@ -142,60 +142,22 @@ const GRID_COLUMNS = 8
 const GRID_COLUMN_WIDTH = 200
 const GRID_ROW_HEIGHT = 90
 
+/** A board item card's rendered size — kept here (not just in BoardView.tsx)
+ * because the cluster auto-layout below needs to know it to stack member
+ * cards without overlapping; BoardView imports these rather than keeping
+ * its own separate copy, so the two can't quietly drift apart. */
+export const MEMBER_CARD_WIDTH = 180
+export const MEMBER_CARD_HEIGHT = 64
+
 /** Deterministic fallback position for the Nth auto-placed item — used to
  * lay out anything that doesn't have a stored BoardItem position yet
  * (the default board's auto-visible codes/notes), and by the bulk "add
- * all ___" actions. */
-export function computeGridPosition(index: number): { x: number; y: number } {
+ * all ___" actions. `originY` shifts the whole grid down (used to keep
+ * unclustered items clear of the auto-placed cluster frames above them). */
+export function computeGridPosition(index: number, originY: number = GRID_ORIGIN_Y): { x: number; y: number } {
   const column = index % GRID_COLUMNS
   const row = Math.floor(index / GRID_COLUMNS)
-  return { x: GRID_ORIGIN_X + column * GRID_COLUMN_WIDTH, y: GRID_ORIGIN_Y + row * GRID_ROW_HEIGHT }
-}
-
-/**
- * The items a board should actually show: on the default board, every code
- * and note is visible whether or not it has an explicit BoardItem yet
- * (falling back to a deterministic grid position for anything that
- * doesn't); other boards only show what's been explicitly placed. Kept as
- * its own pure, tested function rather than inline in the component,
- * because this is exactly the kind of indexing logic that's easy to get
- * subtly wrong and hard to verify just by reading it.
- */
-export function getVisibleBoardItems(
-  board: Pick<BoardRecord, 'id' | 'isDefault'>,
-  explicitItems: BoardItem[],
-  codes: Array<{ id: string }>,
-  notes: Array<{ id: string }>
-): BoardItem[] {
-  if (!board.isDefault) return explicitItems
-
-  const explicitByRef = new Map(explicitItems.map((i) => [`${i.refType}:${i.refId}`, i]))
-  const result: BoardItem[] = []
-  let autoIndex = 0
-
-  for (const code of codes) {
-    const key = `code:${code.id}`
-    const existing = explicitByRef.get(key)
-    if (existing) {
-      result.push(existing)
-    } else {
-      const pos = computeGridPosition(autoIndex++)
-      result.push({ id: `virtual:${key}`, boardId: board.id, refType: 'code', refId: code.id, ...pos })
-    }
-  }
-  for (const note of notes) {
-    const key = `note:${note.id}`
-    const existing = explicitByRef.get(key)
-    if (existing) {
-      result.push(existing)
-    } else {
-      const pos = computeGridPosition(autoIndex++)
-      result.push({ id: `virtual:${key}`, boardId: board.id, refType: 'note', refId: note.id, ...pos })
-    }
-  }
-  // Any explicitly-added segment (quote) items always show too.
-  result.push(...explicitItems.filter((i) => i.refType === 'segment'))
-  return result
+  return { x: GRID_ORIGIN_X + column * GRID_COLUMN_WIDTH, y: originY + row * GRID_ROW_HEIGHT }
 }
 
 const CLUSTER_GRID_COLUMNS = 4
@@ -203,6 +165,13 @@ const CLUSTER_GRID_COLUMN_WIDTH = 320
 const CLUSTER_GRID_ROW_HEIGHT = 240
 const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
+const CLUSTER_GAP = 40
+const CLUSTER_HEADER_HEIGHT = 28
+const CLUSTER_PADDING = 10
+const CLUSTER_MEMBER_ROW_HEIGHT = MEMBER_CARD_HEIGHT + 8
+// Horizontal gap between the root-cluster column and the nested-cluster
+// column in the default board's auto-layout (see getVisibleBoardClusters).
+const CLUSTER_COLUMN_GAP = 40
 
 function computeClusterGridPosition(index: number): { x: number; y: number } {
   const column = index % CLUSTER_GRID_COLUMNS
@@ -213,47 +182,166 @@ function computeClusterGridPosition(index: number): { x: number; y: number } {
   }
 }
 
+/** How tall/wide a cluster frame needs to be to fit its own direct members
+ * stacked in a single column without overlapping — used for the default
+ * board's auto-layout, where a cluster's box has to actually hold its
+ * members rather than just being a fixed decorative size. */
+export function computeClusterSize(memberCount: number): { width: number; height: number } {
+  const height = Math.max(
+    DEFAULT_CLUSTER_HEIGHT,
+    CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + memberCount * CLUSTER_MEMBER_ROW_HEIGHT
+  )
+  return { width: DEFAULT_CLUSTER_WIDTH, height }
+}
+
 /**
  * The clusters a board should actually show — the cluster counterpart of
- * getVisibleBoardItems above. On the default board, every category is
+ * getVisibleBoardItems below. On the default board, every category is
  * visible as a cluster frame whether or not it has an explicit BoardCluster
- * shape yet there (falling back to a deterministic grid position/size for
- * any category that doesn't); other boards only show what's been
- * explicitly placed via "+ New cluster" / "+ Place cluster…" / "+ Add all
- * clusters". Without this, creating a category anywhere that isn't the
- * board itself (the Workspace codebook tab, Analysis > Clusters) leaves it
- * with no shape on any board — including the default one — so it silently
- * never appears until someone happens to place it.
+ * shape yet there; other boards only show what's been explicitly placed via
+ * "+ New cluster" / "+ Place cluster…" / "+ Add all clusters". Without this,
+ * creating a category anywhere that isn't the board itself (the Workspace
+ * codebook tab, Analysis > Clusters) leaves it with no shape on any board —
+ * including the default one — so it silently never appears until someone
+ * happens to place it.
+ *
+ * Root clusters (no parentCategoryId) stack in a single column, each sized
+ * to fit its own member count (computeClusterSize) before the next one is
+ * placed below it — this guarantees no two auto-placed root clusters ever
+ * overlap, regardless of how many members each has, unlike a fixed-size
+ * grid cell that only works for the default size. Nested clusters get
+ * their own second column (visual containment inside the literal parent
+ * frame isn't attempted — only the ordering/paint-order guarantee from
+ * getCategoryDepth matters for those), offset far enough right that it
+ * can never collide with the root column.
  */
 export function getVisibleBoardClusters(
   board: Pick<BoardRecord, 'id' | 'isDefault'>,
   explicitClusters: BoardCluster[],
-  categories: Array<{ id: string }>
+  categories: CategoryRecord[]
 ): BoardCluster[] {
   if (!board.isDefault) return explicitClusters
 
   const explicitByCategory = new Map(explicitClusters.map((c) => [c.categoryId, c]))
   const result: BoardCluster[] = []
-  let autoIndex = 0
 
-  for (const category of categories) {
-    const existing = explicitByCategory.get(category.id)
-    if (existing) {
-      result.push(existing)
-    } else {
-      const pos = computeClusterGridPosition(autoIndex++)
+  function layoutColumn(categoriesInColumn: CategoryRecord[], columnX: number): void {
+    let y = GRID_ORIGIN_Y
+    for (const category of categoriesInColumn) {
+      const existing = explicitByCategory.get(category.id)
+      if (existing) {
+        result.push(existing)
+        // An explicit cluster can sit anywhere the user dragged it to —
+        // only advance the running offset if it actually reaches further
+        // down than where we already are, so later auto-placed clusters
+        // in this column never land on top of it.
+        y = Math.max(y, existing.y + existing.height + CLUSTER_GAP)
+        continue
+      }
+      const memberCount = category.codeIds.length + category.noteIds.length + category.segmentIds.length
+      const size = computeClusterSize(memberCount)
       result.push({
         id: `virtual:cluster:${category.id}`,
         boardId: board.id,
         categoryId: category.id,
-        x: pos.x,
-        y: pos.y,
-        width: DEFAULT_CLUSTER_WIDTH,
-        height: DEFAULT_CLUSTER_HEIGHT,
+        x: columnX,
+        y,
+        width: size.width,
+        height: size.height,
         createdAt: ''
       })
+      y += size.height + CLUSTER_GAP
     }
   }
+
+  const roots = categories.filter((c) => !c.parentCategoryId)
+  const nested = categories.filter((c) => c.parentCategoryId)
+  layoutColumn(roots, GRID_ORIGIN_X)
+  layoutColumn(nested, GRID_ORIGIN_X + DEFAULT_CLUSTER_WIDTH + CLUSTER_COLUMN_GAP)
+
+  return result
+}
+
+/**
+ * The items a board should actually show: on the default board, every code
+ * and note is visible whether or not it has an explicit BoardItem yet;
+ * other boards only show what's been explicitly placed. Kept as its own
+ * pure, tested function rather than inline in the component, because this
+ * is exactly the kind of indexing logic that's easy to get subtly wrong and
+ * hard to verify just by reading it.
+ *
+ * `clusters` is the board's already-resolved cluster shapes (from
+ * getVisibleBoardClusters, computed first) — a code/note that's a cluster
+ * member is positioned stacked inside its cluster's box instead of the
+ * flat fallback grid, so "clustered" actually looks clustered rather than
+ * scattered elsewhere on the canvas. A ref that's a member of more than one
+ * category (multi-membership) can only occupy one position on a spatial
+ * canvas, so it homes in its first membership, in `categories` order; it
+ * still shows under every cluster it belongs to in the Workspace tree,
+ * which has no such one-position constraint. Everything left over (not a
+ * member of any category) falls back to the flat grid — shifted below the
+ * whole cluster layout so the two auto-placed regions never overlap.
+ */
+export function getVisibleBoardItems(
+  board: Pick<BoardRecord, 'id' | 'isDefault'>,
+  explicitItems: BoardItem[],
+  codes: Array<{ id: string }>,
+  notes: Array<{ id: string }>,
+  categories: CategoryRecord[] = [],
+  clusters: BoardCluster[] = []
+): BoardItem[] {
+  if (!board.isDefault) return explicitItems
+
+  const explicitByRef = new Map(explicitItems.map((i) => [`${i.refType}:${i.refId}`, i]))
+  const clusterByCategoryId = new Map(clusters.map((c) => [c.categoryId, c]))
+
+  const homeClusterByRef = new Map<string, BoardCluster>()
+  for (const category of categories) {
+    const cluster = clusterByCategoryId.get(category.id)
+    if (!cluster) continue
+    for (const codeId of category.codeIds) {
+      const key = `code:${codeId}`
+      if (!homeClusterByRef.has(key)) homeClusterByRef.set(key, cluster)
+    }
+    for (const noteId of category.noteIds) {
+      const key = `note:${noteId}`
+      if (!homeClusterByRef.has(key)) homeClusterByRef.set(key, cluster)
+    }
+  }
+
+  const memberIndexByCluster = new Map<string, number>()
+  function nextPositionInCluster(cluster: BoardCluster): { x: number; y: number } {
+    const index = memberIndexByCluster.get(cluster.id) ?? 0
+    memberIndexByCluster.set(cluster.id, index + 1)
+    return {
+      x: cluster.x + CLUSTER_PADDING,
+      y: cluster.y + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + index * CLUSTER_MEMBER_ROW_HEIGHT
+    }
+  }
+
+  const unclusteredOriginY =
+    clusters.length > 0 ? Math.max(...clusters.map((c) => c.y + c.height)) + CLUSTER_GAP : GRID_ORIGIN_Y
+
+  const result: BoardItem[] = []
+  let autoIndex = 0
+
+  function placeRef(refType: 'code' | 'note', refId: string): void {
+    const key = `${refType}:${refId}`
+    const existing = explicitByRef.get(key)
+    if (existing) {
+      result.push(existing)
+      return
+    }
+    const homeCluster = homeClusterByRef.get(key)
+    const pos = homeCluster ? nextPositionInCluster(homeCluster) : computeGridPosition(autoIndex++, unclusteredOriginY)
+    result.push({ id: `virtual:${key}`, boardId: board.id, refType, refId, ...pos })
+  }
+
+  for (const code of codes) placeRef('code', code.id)
+  for (const note of notes) placeRef('note', note.id)
+
+  // Any explicitly-added segment (quote) items always show too.
+  result.push(...explicitItems.filter((i) => i.refType === 'segment'))
   return result
 }
 
@@ -303,21 +391,26 @@ export function addAllClustersToBoard(data: ProjectData, boardId: string): Proje
 
   categoriesToPlace.forEach((category, categoryIndex) => {
     const pos = computeClusterGridPosition(startIndex + categoryIndex)
-    const clusterResult = createClusterForCategory(next, {
-      boardId,
-      categoryId: category.id,
-      x: pos.x,
-      y: pos.y,
-      width: DEFAULT_CLUSTER_WIDTH,
-      height: DEFAULT_CLUSTER_HEIGHT
-    })
-    next = clusterResult.data
-
     const members: Array<{ refType: BoardItem['refType']; refId: string }> = [
       ...category.codeIds.map((refId) => ({ refType: 'code' as const, refId })),
       ...category.noteIds.map((refId) => ({ refType: 'note' as const, refId })),
       ...category.segmentIds.map((refId) => ({ refType: 'segment' as const, refId }))
     ]
+    // Sized to actually fit the member cards stacked inside it — a fixed
+    // DEFAULT_CLUSTER_HEIGHT with members packed every 20px (the previous
+    // approach) overlapped them the moment a cluster had more than a
+    // couple of members, since a rendered card is MEMBER_CARD_HEIGHT tall.
+    const size = computeClusterSize(members.length)
+    const clusterResult = createClusterForCategory(next, {
+      boardId,
+      categoryId: category.id,
+      x: pos.x,
+      y: pos.y,
+      width: size.width,
+      height: size.height
+    })
+    next = clusterResult.data
+
     members.forEach((member, memberIndex) => {
       const alreadyOnBoard = next.boardItems.some(
         (bi) => bi.boardId === boardId && bi.refType === member.refType && bi.refId === member.refId
@@ -328,8 +421,8 @@ export function addAllClustersToBoard(data: ProjectData, boardId: string): Proje
         boardId,
         refType: member.refType,
         refId: member.refId,
-        x: pos.x + 10,
-        y: pos.y + 34 + memberIndex * 20
+        x: pos.x + CLUSTER_PADDING,
+        y: pos.y + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + memberIndex * CLUSTER_MEMBER_ROW_HEIGHT
       }
       next = { ...next, boardItems: [...next.boardItems, item] }
     })

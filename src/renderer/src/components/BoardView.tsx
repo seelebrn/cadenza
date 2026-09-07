@@ -10,13 +10,18 @@ import {
   getDefaultBoardId,
   getLinkedGroup,
   getVisibleBoardClusters,
-  getVisibleBoardItems
+  getVisibleBoardItems,
+  MEMBER_CARD_HEIGHT,
+  MEMBER_CARD_WIDTH
 } from '@shared/boardOps'
 import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
 import type { BoardCluster, BoardItem, CategoryKind, CategoryRecord } from '@shared/types'
 
-const CARD_WIDTH = 180
-const CARD_HEIGHT = 64
+// Single source of truth for a card's rendered size lives in boardOps.ts —
+// the cluster auto-layout there needs to know it too, to stack member
+// cards without overlapping.
+const CARD_WIDTH = MEMBER_CARD_WIDTH
+const CARD_HEIGHT = MEMBER_CARD_HEIGHT
 const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
 const MIN_CLUSTER_WIDTH = 140
@@ -146,18 +151,15 @@ function BoardView(): JSX.Element {
   const links = data?.boardLinks.filter((l) => l.boardId === selectedBoardId) ?? []
   const explicitItems = data?.boardItems.filter((i) => i.boardId === selectedBoardId) ?? []
 
-  const items = useMemo<BoardItem[]>(() => {
-    if (!data || !currentBoard) return []
-    return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes)
-  }, [data, currentBoard, explicitItems])
-
   // A category created anywhere (the Workspace codebook tab, Analysis >
   // Clusters, or this board) has no board shape until something places one
-  // — same reasoning as items above: on the default board, every category
-  // shows as a cluster frame automatically (a deterministic grid fallback),
-  // materializing into a real BoardCluster only once actually touched
-  // (moved/resized/dropped into), so creating a cluster in the Workspace is
-  // visible here immediately without an extra "place it" step.
+  // — same reasoning as items below: on the default board, every category
+  // shows as a cluster frame automatically, stacked so auto-placed clusters
+  // never overlap each other, materializing into a real BoardCluster only
+  // once actually touched (moved/resized/dropped into), so creating a
+  // cluster in the Workspace is visible here immediately without an extra
+  // "place it" step. Computed before `items` since a clustered code/note is
+  // positioned relative to its cluster's resolved box.
   const clusters = useMemo<BoardCluster[]>(() => {
     if (!data || !currentBoard) return []
     const visible = getVisibleBoardClusters(currentBoard, explicitClusters, data.categories)
@@ -170,6 +172,11 @@ function BoardView(): JSX.Element {
       (a, b) => getCategoryDepth(data.categories, a.categoryId) - getCategoryDepth(data.categories, b.categoryId)
     )
   }, [data, currentBoard, explicitClusters])
+
+  const items = useMemo<BoardItem[]>(() => {
+    if (!data || !currentBoard) return []
+    return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes, data.categories, clusters)
+  }, [data, currentBoard, explicitItems, clusters])
 
   /** Turns a possibly-virtual cluster into a real, persisted BoardCluster
    * (a no-op returning the same id if it already is one) — needed before

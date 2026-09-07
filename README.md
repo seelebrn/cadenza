@@ -122,3 +122,34 @@ nested into it, its larger frame painted over the nested cluster's controls enti
 Added `getCategoryDepth` (categoryOps.ts) and sort board clusters by depth before
 rendering — ancestors first, so a cluster's own frame always paints after, and on top of,
 everything it's nested inside, independent of creation order.
+
+### Default-board auto-layout rewrite (2026-09-07)
+
+Two related requests: on first opening the board for a new project, auto-placed
+(non-nested) clusters shouldn't overlap each other by accident, and a code/note that's a
+cluster member should actually render *inside* its cluster's box, not scattered in the
+separate flat item grid. The old layout put every category and every code/note through two
+completely independent fixed-size grids sharing the same origin, with no relationship
+between a cluster's box and its own members' positions — clusters could only avoid
+overlapping *each other* by coincidence of matching a fixed cell size, and a clustered
+item's auto position had nothing to do with where its cluster was drawn.
+
+Rewrote both `getVisibleBoardClusters` and `getVisibleBoardItems` (boardOps.ts) to compute
+clusters first, then items relative to them: root clusters stack in a single column, each
+sized by `computeClusterSize` to actually fit its own member count before the next one is
+placed below it — this guarantees no two auto-placed root clusters overlap regardless of
+size, unlike a fixed grid cell. Nested clusters get a second column, offset clear of the
+root one (true visual containment inside the literal parent frame wasn't attempted — only
+the paint-order fix above matters for those). A clustered code/note now stacks inside its
+resolved cluster box instead of the flat grid; anything with no cluster still uses the flat
+grid, shifted below the whole cluster layout so the two regions can't collide. A ref
+deliberately in more than one cluster (multi-membership) homes in the first one, since a
+board item has exactly one position unlike the Workspace tree.
+
+Extracted `MEMBER_CARD_WIDTH`/`MEMBER_CARD_HEIGHT` into boardOps.ts (BoardView.tsx now
+imports them instead of keeping its own separate copy) since the cluster layout needs to
+know a card's real size to stack members without overlapping — previously these lived only
+in the renderer, invisible to the shared layout logic. Also fixed `addAllClustersToBoard`'s
+member spacing, which packed members every 20px regardless of the ~64px card height it
+was actually placing (a latent overlap bug in that separate, opt-in bulk action, caught
+while touching the same sizing logic).

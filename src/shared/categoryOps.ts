@@ -94,6 +94,28 @@ export function getDescendantCategoryIds(categories: CategoryRecord[], categoryI
   return result
 }
 
+/** How many parentCategoryId hops up to a root (0 for a root cluster
+ * itself). Used to paint the board's cluster frames in ancestor-first
+ * order regardless of creation order — without it, a superordinate
+ * cluster created *after* the one nested into it renders on top and
+ * silently swallows every click over the shared area, making the nested
+ * cluster's own title bar/resize handle/delete button unreachable. Falls
+ * back to 0 on an unexpected cycle (shouldn't happen — reparentCategory
+ * already prevents creating one) rather than looping forever. */
+export function getCategoryDepth(categories: CategoryRecord[], categoryId: string): number {
+  const byId = new Map(categories.map((c) => [c.id, c]))
+  const visited = new Set<string>()
+  let depth = 0
+  let current = byId.get(categoryId)
+  while (current?.parentCategoryId) {
+    if (visited.has(current.id)) return depth
+    visited.add(current.id)
+    depth++
+    current = byId.get(current.parentCategoryId)
+  }
+  return depth
+}
+
 /** Deletes a category, promoting its children to its own parent (mirrors
  * deleteCode) so nesting collapses one level rather than losing them.
  * Notes attached directly *to* the category fall back to a project-level

@@ -113,3 +113,12 @@ dragged into the frame, has no real `BoardItem` for `moveItem` to update, so the
 silently no-op'd and the item snapped back to its grid fallback position afterward. Fixed by
 materializing every member into a real `BoardItem` the moment a cluster-drag starts, the
 same way a lone card already materializes on its own mousedown.
+
+Fixed: nesting a cluster into a superordinate one could make the nested cluster's own
+title bar, resize handle, and delete button unreachable. Cause — cluster frames paint in
+plain array order with no z-index, so whichever cluster happened to come later in
+`data.categories` rendered on top; if the superordinate one was created *after* the one
+nested into it, its larger frame painted over the nested cluster's controls entirely.
+Added `getCategoryDepth` (categoryOps.ts) and sort board clusters by depth before
+rendering — ancestors first, so a cluster's own frame always paints after, and on top of,
+everything it's nested inside, independent of creation order.

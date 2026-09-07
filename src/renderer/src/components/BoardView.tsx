@@ -12,7 +12,7 @@ import {
   getVisibleBoardClusters,
   getVisibleBoardItems
 } from '@shared/boardOps'
-import { getDescendantCategoryIds } from '@shared/categoryOps'
+import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
 import type { BoardCluster, BoardItem, CategoryKind, CategoryRecord } from '@shared/types'
 
 const CARD_WIDTH = 180
@@ -160,7 +160,15 @@ function BoardView(): JSX.Element {
   // visible here immediately without an extra "place it" step.
   const clusters = useMemo<BoardCluster[]>(() => {
     if (!data || !currentBoard) return []
-    return getVisibleBoardClusters(currentBoard, explicitClusters, data.categories)
+    const visible = getVisibleBoardClusters(currentBoard, explicitClusters, data.categories)
+    // Painted ancestor-first (shallowest depth first) regardless of
+    // creation order — plain DOM order otherwise decides which frame is
+    // on top, so a superordinate cluster created *after* the one nested
+    // into it would render over it and swallow every click on the shared
+    // area, making the nested cluster's own controls unreachable.
+    return [...visible].sort(
+      (a, b) => getCategoryDepth(data.categories, a.categoryId) - getCategoryDepth(data.categories, b.categoryId)
+    )
   }, [data, currentBoard, explicitClusters])
 
   /** Turns a possibly-virtual cluster into a real, persisted BoardCluster

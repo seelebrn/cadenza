@@ -10,7 +10,7 @@ is coded, memoed, or itemized, the verbatim quote is captured on the spot, so it
 even if the source document is later edited. A freeform drag-and-drop grouping board and
 import/export with Word (.docx), OpenOffice (.odt), and Excel (.xlsx/.xls) round it out.
 
-Runs on Windows and macOS. See `C:\Users\charb\.claude\plans\humble-herding-pike.md` for the
+Runs on Windows and macOS. See `\plans\humble-herding-pike.md` for the
 full design/phase plan.
 
 ## Development

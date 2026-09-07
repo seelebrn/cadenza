@@ -8,7 +8,8 @@ import {
   findSnapTarget,
   getClusterMemberItems,
   getDefaultBoardId,
-  getLinkedGroup
+  getLinkedGroup,
+  getVisibleBoardItems
 } from '@shared/boardOps'
 import { getDescendantCategoryIds } from '@shared/categoryOps'
 import type { BoardCluster, BoardItem, CategoryKind, CategoryRecord } from '@shared/types'
@@ -126,8 +127,17 @@ function BoardView(): JSX.Element {
   const categories = data?.categories ?? []
   const categoriesById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
+  // Re-selects the default board whenever selectedBoardId is empty OR
+  // doesn't match any board that actually exists in this project. That
+  // second case matters: without it, a stale id (left over from a
+  // different/earlier project, since nothing used to reset this on
+  // project switch) would make currentBoard resolve to null while the
+  // canvas kept rendering anyway — every "add" appeared to silently do
+  // nothing, because nothing was ever going to match a nonexistent board.
   useEffect(() => {
-    if (!selectedBoardId && boards.length > 0) setSelectedBoardId(getDefaultBoardId(boards))
+    if (boards.length === 0) return
+    const isValid = selectedBoardId !== null && boards.some((b) => b.id === selectedBoardId)
+    if (!isValid) setSelectedBoardId(getDefaultBoardId(boards))
   }, [selectedBoardId, boards, setSelectedBoardId])
 
   const currentBoard = boards.find((b) => b.id === selectedBoardId) ?? null
@@ -135,39 +145,9 @@ function BoardView(): JSX.Element {
   const links = data?.boardLinks.filter((l) => l.boardId === selectedBoardId) ?? []
   const explicitItems = data?.boardItems.filter((i) => i.boardId === selectedBoardId) ?? []
 
-  // On the default board, every code/note is always visible — no explicit
-  // "add" required. Anything without a stored position yet gets a
-  // deterministic grid fallback; dragging it later persists a real position.
   const items = useMemo<BoardItem[]>(() => {
     if (!data || !currentBoard) return []
-    if (!currentBoard.isDefault) return explicitItems
-
-    const explicitByRef = new Map(explicitItems.map((i) => [`${i.refType}:${i.refId}`, i]))
-    const result: BoardItem[] = []
-    let autoIndex = 0
-    for (const code of data.codes) {
-      const key = `code:${code.id}`
-      const existing = explicitByRef.get(key)
-      if (existing) {
-        result.push(existing)
-      } else {
-        const pos = computeGridPosition(autoIndex++)
-        result.push({ id: `virtual:${key}`, boardId: currentBoard.id, refType: 'code', refId: code.id, ...pos })
-      }
-    }
-    for (const note of data.notes) {
-      const key = `note:${note.id}`
-      const existing = explicitByRef.get(key)
-      if (existing) {
-        result.push(existing)
-      } else {
-        const pos = computeGridPosition(autoIndex++)
-        result.push({ id: `virtual:${key}`, boardId: currentBoard.id, refType: 'note', refId: note.id, ...pos })
-      }
-    }
-    // Any explicitly-added segment (quote) items always show too.
-    result.push(...explicitItems.filter((i) => i.refType === 'segment'))
-    return result
+    return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes)
   }, [data, currentBoard, explicitItems])
 
   // Wheel-to-zoom (Ctrl/Cmd+wheel only — plain wheel keeps scrolling/panning
@@ -490,9 +470,9 @@ function BoardView(): JSX.Element {
           </button>
         </div>
 
-        {selectedBoardId && (
+        {currentBoard && (
           <>
-            {!currentBoard?.isDefault && (
+            {!currentBoard.isDefault && (
               <>
                 <select
                   className="rounded border border-slate-300 px-2 py-1 text-xs"
@@ -526,13 +506,13 @@ function BoardView(): JSX.Element {
                 </select>
                 <button
                   className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
-                  onClick={() => addAllCodesToBoard(selectedBoardId)}
+                  onClick={() => addAllCodesToBoard(currentBoard.id)}
                 >
                   + Add all codes
                 </button>
                 <button
                   className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
-                  onClick={() => addAllNotesToBoard(selectedBoardId)}
+                  onClick={() => addAllNotesToBoard(currentBoard.id)}
                 >
                   + Add all notes
                 </button>
@@ -581,7 +561,7 @@ function BoardView(): JSX.Element {
             </div>
             <button
               className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
-              onClick={() => addAllClustersToBoard(selectedBoardId)}
+              onClick={() => addAllClustersToBoard(currentBoard.id)}
             >
               + Add all clusters
             </button>
@@ -599,16 +579,16 @@ function BoardView(): JSX.Element {
         </div>
       </div>
 
-      {selectedBoardId && (
+      {currentBoard && (
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
-          {currentBoard?.isDefault && 'Every code and note is shown automatically on this default board. '}
+          {currentBoard.isDefault && 'Every code and note is shown automatically on this default board. '}
           Ctrl/Cmd+scroll to zoom · drag two cards close together to link them (they snap), and linked/clustered
           cards move together (shift+drag to move just one) · drag a cluster into another to nest it as a
           superordinate group (shift+drag to pull it out) · click the × on a connector to unlink
         </p>
       )}
 
-      {!selectedBoardId ? (
+      {!currentBoard ? (
         <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
           Create a board to start grouping codes, notes, and quotes spatially.
         </div>
@@ -697,7 +677,7 @@ function BoardView(): JSX.Element {
                 <BoardItemCard
                   key={item.id}
                   item={item}
-                  boardId={selectedBoardId}
+                  boardId={currentBoard.id}
                   x={pos.x}
                   y={pos.y}
                   isDragging={

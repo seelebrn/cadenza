@@ -152,6 +152,52 @@ export function computeGridPosition(index: number): { x: number; y: number } {
   return { x: GRID_ORIGIN_X + column * GRID_COLUMN_WIDTH, y: GRID_ORIGIN_Y + row * GRID_ROW_HEIGHT }
 }
 
+/**
+ * The items a board should actually show: on the default board, every code
+ * and note is visible whether or not it has an explicit BoardItem yet
+ * (falling back to a deterministic grid position for anything that
+ * doesn't); other boards only show what's been explicitly placed. Kept as
+ * its own pure, tested function rather than inline in the component,
+ * because this is exactly the kind of indexing logic that's easy to get
+ * subtly wrong and hard to verify just by reading it.
+ */
+export function getVisibleBoardItems(
+  board: Pick<BoardRecord, 'id' | 'isDefault'>,
+  explicitItems: BoardItem[],
+  codes: Array<{ id: string }>,
+  notes: Array<{ id: string }>
+): BoardItem[] {
+  if (!board.isDefault) return explicitItems
+
+  const explicitByRef = new Map(explicitItems.map((i) => [`${i.refType}:${i.refId}`, i]))
+  const result: BoardItem[] = []
+  let autoIndex = 0
+
+  for (const code of codes) {
+    const key = `code:${code.id}`
+    const existing = explicitByRef.get(key)
+    if (existing) {
+      result.push(existing)
+    } else {
+      const pos = computeGridPosition(autoIndex++)
+      result.push({ id: `virtual:${key}`, boardId: board.id, refType: 'code', refId: code.id, ...pos })
+    }
+  }
+  for (const note of notes) {
+    const key = `note:${note.id}`
+    const existing = explicitByRef.get(key)
+    if (existing) {
+      result.push(existing)
+    } else {
+      const pos = computeGridPosition(autoIndex++)
+      result.push({ id: `virtual:${key}`, boardId: board.id, refType: 'note', refId: note.id, ...pos })
+    }
+  }
+  // Any explicitly-added segment (quote) items always show too.
+  result.push(...explicitItems.filter((i) => i.refType === 'segment'))
+  return result
+}
+
 const CLUSTER_GRID_COLUMNS = 4
 const CLUSTER_GRID_COLUMN_WIDTH = 320
 const CLUSTER_GRID_ROW_HEIGHT = 240

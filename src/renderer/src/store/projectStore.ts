@@ -223,6 +223,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   newProject: async (name) => {
     const data = await window.api.project.create(name)
     set({ data, assets: {}, filePath: null, isDirty: true, error: null })
+    useWorkspaceUiStore.getState().resetForProjectSwitch()
   },
 
   openProject: async () => {
@@ -236,6 +237,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         isDirty: false,
         error: null
       })
+      useWorkspaceUiStore.getState().resetForProjectSwitch()
       await get().loadRecent()
     } catch (e) {
       set({ error: `Could not open project: ${(e as Error).message}` })
@@ -252,6 +254,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         isDirty: false,
         error: null
       })
+      useWorkspaceUiStore.getState().resetForProjectSwitch()
       await get().loadRecent()
     } catch (e) {
       set({ error: `Could not open ${filePath}: ${(e as Error).message}` })
@@ -293,6 +296,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   closeProject: () => {
     if (autosaveTimer) clearTimeout(autosaveTimer)
     set({ data: null, assets: {}, filePath: null, isDirty: false, error: null })
+    useWorkspaceUiStore.getState().resetForProjectSwitch()
   },
 
   updateProject: (updater) => {

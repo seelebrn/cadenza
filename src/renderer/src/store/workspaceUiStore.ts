@@ -73,6 +73,18 @@ interface WorkspaceUiState {
   setSuggestedCodeName: (name: string | null) => void
 
   clear: () => void
+
+  /** Resets everything that references *this project's* ids (selected
+   * document/board, active span, etc.) — called on newProject/openProject/
+   * openRecent/closeProject. Without this, e.g. selectedBoardId from a
+   * previously open project (or an earlier test project) keeps pointing at
+   * a board id that doesn't exist in whatever's open now: the board canvas
+   * still renders (nothing here checked whether the id actually resolved),
+   * but its item list silently comes back empty regardless of what's on
+   * the board, since nothing matches a nonexistent board. Deliberately
+   * leaves sidebarWidth alone — that's a window-layout preference, not
+   * tied to project content. */
+  resetForProjectSwitch: () => void
 }
 
 export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
@@ -104,5 +116,16 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   suggestedCodeName: null,
   setSuggestedCodeName: (name) => set({ suggestedCodeName: name }),
 
-  clear: () => set({ activeSpan: null })
+  clear: () => set({ activeSpan: null }),
+
+  resetForProjectSwitch: () =>
+    set({
+      selectedDocumentId: null,
+      mainView: 'workspace',
+      analysisTab: 'retrieval',
+      selectedBoardId: null,
+      activeSidebarTab: 'codes',
+      activeSpan: null,
+      suggestedCodeName: null
+    })
 }))

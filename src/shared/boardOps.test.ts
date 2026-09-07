@@ -32,6 +32,7 @@ import {
   unassignItemFromCluster,
   unlinkItems
 } from './boardOps'
+import { addCodeToCategory } from './categoryOps'
 import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ProjectData } from './types'
 
 // --- test fixtures -----------------------------------------------------
@@ -470,6 +471,47 @@ describe('resetDefaultBoardClusterLayout', () => {
     data = resetDefaultBoardClusterLayout(data, 'b1')
     visible = getVisibleBoardClusters(DEFAULT_BOARD, data.boardClusters, data.categories)
     expect(rectsOverlap(visible.find((c) => c.categoryId === 'A')!, visible.find((c) => c.categoryId === 'B')!)).toBe(false)
+  })
+
+  it('a code added to an already-explicit (frozen-size) cluster is positioned inside it once reflowed, and the box grows to fit', () => {
+    let data = makeData({
+      boards: [{ id: 'b1', name: 'Main', isDefault: true }],
+      categories: [makeCategory('A')],
+      codes: [{ id: 'code1', kind: 'code', name: 'Fear', color: '#111', definition: '', parentId: null, createdAt: '0' }]
+    })
+    // An explicit shape, frozen at a size that predates the new member —
+    // this is the state a board is in right after a user has dragged/resized
+    // a cluster by hand, before the code is ever added to it.
+    data = createClusterForCategory(data, { boardId: 'b1', categoryId: 'A', x: 40, y: 40, width: 60, height: 60 }).data
+    const before = getVisibleBoardClusters(DEFAULT_BOARD, data.boardClusters, data.categories).find(
+      (c) => c.categoryId === 'A'
+    )!
+
+    // Simulates addCodeToCategoryAndReflowBoard: membership change, then reflow.
+    data = addCodeToCategory(data, 'A', 'code1')
+    data = resetDefaultBoardClusterLayout(data, 'b1')
+
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, data.boardClusters, data.categories)
+    const cluster = clusters.find((c) => c.categoryId === 'A')!
+    const items = getVisibleBoardItems(DEFAULT_BOARD, data.boardItems, data.codes, [], data.categories, clusters)
+    const codeItem = items.find((i) => i.refType === 'code' && i.refId === 'code1')!
+
+    // The frozen 60x60 box couldn't fit a member row — after reflow it must
+    // have grown to accommodate one.
+    expect(cluster.width * cluster.height).toBeGreaterThan(before.width * before.height)
+    // And the new member actually lands inside the (grown) box, not outside it.
+    expect(
+      rectContains(cluster, {
+        id: 'x',
+        boardId: 'b1',
+        categoryId: 'A',
+        x: codeItem.x,
+        y: codeItem.y,
+        width: 180,
+        height: 64,
+        createdAt: '0'
+      })
+    ).toBe(true)
   })
 })
 

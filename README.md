@@ -392,3 +392,47 @@ within an already-matched branch) sitting inert inside a `.tsx` file where it co
 tested at all. Shrunk `CodebookPanel.tsx` by about 90 lines in the process — a small piece
 of the "BoardView.tsx and friends are oversized" cleanup flagged in the codebase review,
 done as a natural side effect of making this logic testable rather than a separate pass.
+
+### Reflow was still missing for plain membership changes (2026-09-07)
+
+The user reported the same visual symptom again after the two fixes above: codes not
+landing inside their cluster's box after joining/splitting clusters, still logically
+linked but not positioned right, and suggested larger default cluster boxes might help.
+
+The default sizing was never actually the problem — `getVisibleBoardClusters`'s
+`computeHeight` already sizes a cluster dynamically from its real content
+(`Math.max(DEFAULT_CLUSTER_HEIGHT, ownContentHeight + childrenHeight)`), so tuning the
+constants wouldn't have touched the actual bug. The real gap: the reflow-on-change wiring
+added in the two sections above only covered a *cluster's own nesting* changing
+(`reparentCategoryAndReflowBoard`, calling `reparentCategory`). It never covered a
+*code or note's cluster membership* changing — `addCodeToCategory`, `removeCodeFromCategory`,
+`addNoteToCategory`, `removeNoteFromCategory` all still went through unreflowed. So the
+moment any cluster had an explicit (materialized) shape, filing a code/note into or out of
+it from the Workspace tree or the Analysis > Clusters picker left the cluster's frame
+frozen at its old size — exactly the reported symptom, and the more common path to hitting
+it than re-nesting a whole cluster.
+
+Fixed by extending the same pattern to these four actions: a new `reflowDefaultBoard(get,
+boards)` module-level helper in `projectStore.ts` (factored out of what
+`reparentCategoryAndReflowBoard` was already doing inline) backs four new store actions —
+`addCodeToCategoryAndReflowBoard`, `removeCodeFromCategoryAndReflowBoard`,
+`addNoteToCategoryAndReflowBoard`, `removeNoteFromCategoryAndReflowBoard` — each the plain
+action plus a reflow, batched into one undo step. `CodebookPanel.tsx`, `NotesPanel.tsx`,
+and `ClustersView.tsx` (the Analysis > Clusters picker) now call these instead of the plain
+actions for every membership change that originates off the board. `BoardView.tsx`'s own
+drag-based membership changes (dragging a card into/out of a cluster) keep calling the
+plain actions unchanged, same reasoning as before — a board drag already positions
+everything itself, so resetting on top of it would discard the position just dragged to.
+Left `removeSegmentFromCategory` in `ClustersView.tsx` on the plain action deliberately: a
+raw quote/segment filed directly under a category has no auto-position-inside-its-cluster
+treatment at all yet (`getVisibleBoardItems` only homes codes/notes), so reflowing wouldn't
+currently do anything for it — a separate, smaller, acknowledged gap, out of scope here.
+
+Verified: typecheck and full test suite (233 tests, up from 232) clean, including a new
+`resetDefaultBoardClusterLayout` case that reproduces the exact bug in isolation — an
+already-explicit 60x60 cluster too small for a member row, a code added to it via
+`addCodeToCategory`, then reset + recompute, asserting the box actually grew and the new
+member's row lands inside it. Production build clean. Boot-tested a separate packaged
+instance alongside the user's own running dev session (only the expected shared-user-data-
+dir disk-cache warnings, no real errors), then killed only that instance's PIDs and
+confirmed the process list returned to exactly what was running beforehand.

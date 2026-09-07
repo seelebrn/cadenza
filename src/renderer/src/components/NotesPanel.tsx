@@ -38,7 +38,7 @@ function NotesPanel(): JSX.Element {
   // a placement from (unlike doing it on the board itself), so it also
   // resets the default board's cluster layout to recompute fresh.
   const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
-  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
+  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategoryAndReflowBoard)
 
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
   const clearUi = useWorkspaceUiStore((s) => s.clear)
@@ -433,8 +433,11 @@ function NoteClusterRow({ node, depth, visibleNotes }: NoteClusterRowProps): JSX
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
-  const addNoteToCategory = useProjectStore((s) => s.addNoteToCategory)
-  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
+  // Joining/leaving a cluster from this tree has no board-drag position to
+  // size/place it from — reflows the default board so the destination
+  // visibly grows/shrinks to fit.
+  const addNoteToCategory = useProjectStore((s) => s.addNoteToCategoryAndReflowBoard)
+  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategoryAndReflowBoard)
   const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
   const withBatch = useProjectStore((s) => s.withBatch)
 
@@ -578,7 +581,7 @@ function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Elem
   const data = useProjectStore((s) => s.data)
   const updateNote = useProjectStore((s) => s.updateNote)
   const deleteNote = useProjectStore((s) => s.deleteNote)
-  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
+  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategoryAndReflowBoard)
   const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
   const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const setSuggestedCodeName = useWorkspaceUiStore((s) => s.setSuggestedCodeName)

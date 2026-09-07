@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   BoardItem,
+  BoardRecord,
   CategoryKind,
   NoteAttachment,
   ProjectData,
@@ -167,6 +168,19 @@ interface ProjectState {
   removeCodeFromCategory: (categoryId: string, codeId: string) => void
   addNoteToCategory: (categoryId: string, noteId: string) => void
   removeNoteFromCategory: (categoryId: string, noteId: string) => void
+  /** Same "also reflow the default board's cluster layout" reasoning as
+   * reparentCategoryAndReflowBoard, applied to plain membership changes:
+   * a code/note joining or leaving a cluster from the Workspace tree has
+   * no board-drag position to size/place it from, so without this the
+   * destination cluster's frame doesn't grow/shrink to fit and the
+   * member ends up positioned outside it. Use these from the Workspace
+   * codebook/notes trees; BoardView keeps calling the plain actions,
+   * since dragging an item into/out of a cluster on the board already
+   * positions everything itself. */
+  addCodeToCategoryAndReflowBoard: (categoryId: string, codeId: string) => void
+  removeCodeFromCategoryAndReflowBoard: (categoryId: string, codeId: string) => void
+  addNoteToCategoryAndReflowBoard: (categoryId: string, noteId: string) => void
+  removeNoteFromCategoryAndReflowBoard: (categoryId: string, noteId: string) => void
   removeSegmentFromCategory: (categoryId: string, segmentId: string) => void
   /** Files a text span under a category as a raw quote, creating/reusing
    * its Segment the same way coding/memoing does. */
@@ -231,6 +245,19 @@ function scheduleAutosave(get: () => ProjectState): void {
   autosaveTimer = setTimeout(() => {
     void get().save()
   }, AUTOSAVE_DELAY_MS)
+}
+
+/** Resets the default board's cluster layout — see resetDefaultBoardClusterLayout
+ * for why a full reset rather than an incremental patch. `boards` should be
+ * a snapshot from before the change that triggered this (boards themselves
+ * are never touched by a reparent/membership change, so using the
+ * pre-change list is equivalent and avoids re-reading get().data just for
+ * this). Shared by every "...AndReflowBoard" action below. */
+function reflowDefaultBoard(get: () => ProjectState, boards: BoardRecord[]): void {
+  const defaultBoardId = getDefaultBoardId(boards)
+  if (defaultBoardId) {
+    get().updateProject((data) => resetDefaultBoardClusterLayoutOp(data, defaultBoardId))
+  }
 }
 
 const MAX_HISTORY = 50
@@ -517,11 +544,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const changed = Boolean(category) && category!.parentCategoryId !== parentCategoryId
     get().withBatch(() => {
       get().reparentCategory(categoryId, parentCategoryId)
-      if (!changed) return
-      const defaultBoardId = getDefaultBoardId(before.boards)
-      if (defaultBoardId) {
-        get().updateProject((data) => resetDefaultBoardClusterLayoutOp(data, defaultBoardId))
-      }
+      if (changed) reflowDefaultBoard(get, before.boards)
     })
   },
 
@@ -538,6 +561,42 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   removeNoteFromCategory: (categoryId, noteId) =>
     get().updateProject((data) => removeNoteFromCategoryOp(data, categoryId, noteId)),
+
+  addCodeToCategoryAndReflowBoard: (categoryId, codeId) => {
+    const before = get().data
+    if (!before) return
+    get().withBatch(() => {
+      get().addCodeToCategory(categoryId, codeId)
+      reflowDefaultBoard(get, before.boards)
+    })
+  },
+
+  removeCodeFromCategoryAndReflowBoard: (categoryId, codeId) => {
+    const before = get().data
+    if (!before) return
+    get().withBatch(() => {
+      get().removeCodeFromCategory(categoryId, codeId)
+      reflowDefaultBoard(get, before.boards)
+    })
+  },
+
+  addNoteToCategoryAndReflowBoard: (categoryId, noteId) => {
+    const before = get().data
+    if (!before) return
+    get().withBatch(() => {
+      get().addNoteToCategory(categoryId, noteId)
+      reflowDefaultBoard(get, before.boards)
+    })
+  },
+
+  removeNoteFromCategoryAndReflowBoard: (categoryId, noteId) => {
+    const before = get().data
+    if (!before) return
+    get().withBatch(() => {
+      get().removeNoteFromCategory(categoryId, noteId)
+      reflowDefaultBoard(get, before.boards)
+    })
+  },
 
   removeSegmentFromCategory: (categoryId, segmentId) =>
     get().updateProject((data) => removeSegmentFromCategoryOp(data, categoryId, segmentId)),

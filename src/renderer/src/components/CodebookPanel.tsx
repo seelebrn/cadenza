@@ -30,7 +30,10 @@ function CodebookPanel(): JSX.Element {
   // otherwise a cluster that's already been touched once on the board
   // stays frozen wherever it was, ignoring this change entirely.
   const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
-  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
+  // Removing a code from a cluster (the root drop zone's "outside" case)
+  // has no board-drag position to shrink the cluster from — reflows the
+  // default board so the destination visibly shrinks back down.
+  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategoryAndReflowBoard)
   const fileSpanUnderCategory = useProjectStore((s) => s.fileSpanUnderCategory)
   const withBatch = useProjectStore((s) => s.withBatch)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
@@ -227,7 +230,7 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
   const reparentCode = useProjectStore((s) => s.reparentCode)
   const deleteCode = useProjectStore((s) => s.deleteCode)
   const mergeCodes = useProjectStore((s) => s.mergeCodes)
-  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
+  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategoryAndReflowBoard)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
   const withBatch = useProjectStore((s) => s.withBatch)
   const activeSpan = useWorkspaceUiStore((s) => s.activeSpan)
@@ -437,8 +440,12 @@ function ClusterRow({ node, depth, codes, fullCodeTree, claimedCodeIds, searchQu
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
-  const addCodeToCategory = useProjectStore((s) => s.addCodeToCategory)
-  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
+  // Joining/leaving a cluster from this tree has no board-drag position to
+  // size/place it from — reflows the default board so the destination
+  // visibly grows/shrinks to fit, instead of leaving a frame frozen at
+  // whatever size it happened to already be.
+  const addCodeToCategory = useProjectStore((s) => s.addCodeToCategoryAndReflowBoard)
+  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategoryAndReflowBoard)
   const reparentCategory = useProjectStore((s) => s.reparentCategoryAndReflowBoard)
   const withBatch = useProjectStore((s) => s.withBatch)
 

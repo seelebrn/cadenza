@@ -100,10 +100,13 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
-  const addCodeToCategory = useProjectStore((s) => s.addCodeToCategory)
-  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategory)
-  const addNoteToCategory = useProjectStore((s) => s.addNoteToCategory)
-  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategory)
+  // Same reasoning as the codebook/notes trees: adding/removing a member
+  // here has no board-drag position to size the cluster's frame from, so
+  // it also reflows the default board's cluster layout.
+  const addCodeToCategory = useProjectStore((s) => s.addCodeToCategoryAndReflowBoard)
+  const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategoryAndReflowBoard)
+  const addNoteToCategory = useProjectStore((s) => s.addNoteToCategoryAndReflowBoard)
+  const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategoryAndReflowBoard)
   const removeSegmentFromCategory = useProjectStore((s) => s.removeSegmentFromCategory)
 
   const [isEditingName, setIsEditingName] = useState(false)

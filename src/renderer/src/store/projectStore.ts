@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  BoardItem,
   CategoryKind,
   NoteAttachment,
   ProjectData,
@@ -42,6 +43,21 @@ import {
   setCategoryColor as setCategoryColorOp
 } from '@shared/categoryOps'
 import { editParagraph as editParagraphOp, renameDocument as renameDocumentOp } from '@shared/documentOps'
+import {
+  addItemToBoard as addItemToBoardOp,
+  createBoard as createBoardOp,
+  createCluster as createClusterOp,
+  deleteBoard as deleteBoardOp,
+  deleteCluster as deleteClusterOp,
+  moveCluster as moveClusterOp,
+  moveItem as moveItemOp,
+  promoteClusterToCategory as promoteClusterToCategoryOp,
+  removeItemFromBoard as removeItemFromBoardOp,
+  renameBoard as renameBoardOp,
+  renameCluster as renameClusterOp,
+  resizeCluster as resizeClusterOp,
+  setClusterColor as setClusterColorOp
+} from '@shared/boardOps'
 import { useWorkspaceUiStore } from './workspaceUiStore'
 
 interface ProjectState {
@@ -129,6 +145,35 @@ interface ProjectState {
   // Editing the imported source text itself
   editParagraph: (documentId: string, paragraphIndex: number, newText: string) => void
   renameDocument: (documentId: string, title: string) => void
+
+  // Visual grouping board
+  createBoard: (name: string) => string | null
+  renameBoard: (boardId: string, name: string) => void
+  deleteBoard: (boardId: string) => void
+  addItemToBoard: (
+    boardId: string,
+    refType: BoardItem['refType'],
+    refId: string,
+    x: number,
+    y: number
+  ) => void
+  moveItem: (itemId: string, x: number, y: number, clusterId: string | null) => void
+  removeItemFromBoard: (itemId: string) => void
+  createCluster: (
+    boardId: string,
+    name: string,
+    color: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ) => string | null
+  renameCluster: (clusterId: string, name: string) => void
+  setClusterColor: (clusterId: string, color: string) => void
+  moveCluster: (clusterId: string, x: number, y: number) => void
+  resizeCluster: (clusterId: string, width: number, height: number) => void
+  deleteCluster: (clusterId: string) => void
+  promoteClusterToCategory: (clusterId: string, kind: CategoryKind, color: string) => string | null
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -381,5 +426,55 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   renameDocument: (documentId, title) =>
-    get().updateProject((data) => renameDocumentOp(data, documentId, title))
+    get().updateProject((data) => renameDocumentOp(data, documentId, title)),
+
+  createBoard: (name) => {
+    const { data } = get()
+    if (!data) return null
+    const result = createBoardOp(data, name)
+    get().updateProject(() => result.data)
+    return result.boardId
+  },
+
+  renameBoard: (boardId, name) => get().updateProject((data) => renameBoardOp(data, boardId, name)),
+
+  deleteBoard: (boardId) => get().updateProject((data) => deleteBoardOp(data, boardId)),
+
+  addItemToBoard: (boardId, refType, refId, x, y) =>
+    get().updateProject((data) => addItemToBoardOp(data, boardId, refType, refId, x, y).data),
+
+  moveItem: (itemId, x, y, clusterId) =>
+    get().updateProject((data) => moveItemOp(data, itemId, x, y, clusterId)),
+
+  removeItemFromBoard: (itemId) => get().updateProject((data) => removeItemFromBoardOp(data, itemId)),
+
+  createCluster: (boardId, name, color, x, y, width, height) => {
+    const { data } = get()
+    if (!data) return null
+    const result = createClusterOp(data, { boardId, name, color, x, y, width, height })
+    get().updateProject(() => result.data)
+    return result.clusterId
+  },
+
+  renameCluster: (clusterId, name) =>
+    get().updateProject((data) => renameClusterOp(data, clusterId, name)),
+
+  setClusterColor: (clusterId, color) =>
+    get().updateProject((data) => setClusterColorOp(data, clusterId, color)),
+
+  moveCluster: (clusterId, x, y) => get().updateProject((data) => moveClusterOp(data, clusterId, x, y)),
+
+  resizeCluster: (clusterId, width, height) =>
+    get().updateProject((data) => resizeClusterOp(data, clusterId, width, height)),
+
+  deleteCluster: (clusterId) => get().updateProject((data) => deleteClusterOp(data, clusterId)),
+
+  promoteClusterToCategory: (clusterId, kind, color) => {
+    const { data } = get()
+    if (!data) return null
+    const result = promoteClusterToCategoryOp(data, clusterId, kind, color)
+    if (!result) return null
+    get().updateProject(() => result.data)
+    return result.categoryId
+  }
 }))

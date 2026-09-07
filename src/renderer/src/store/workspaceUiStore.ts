@@ -8,7 +8,7 @@ export interface ActiveSpan {
 }
 
 export type SidebarTab = 'codes' | 'notes'
-export type MainView = 'workspace' | 'analysis'
+export type MainView = 'workspace' | 'analysis' | 'board'
 export type AnalysisTab = 'retrieval' | 'categories'
 
 /** Ephemeral (non-persisted) workspace UI state shared across the reader,
@@ -28,6 +28,9 @@ interface WorkspaceUiState {
 
   analysisTab: AnalysisTab
   setAnalysisTab: (tab: AnalysisTab) => void
+
+  selectedBoardId: string | null
+  setSelectedBoardId: (id: string | null) => void
 
   activeSidebarTab: SidebarTab
   setActiveSidebarTab: (tab: SidebarTab) => void
@@ -52,6 +55,9 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
 
   analysisTab: 'retrieval',
   setAnalysisTab: (tab) => set({ analysisTab: tab }),
+
+  selectedBoardId: null,
+  setSelectedBoardId: (id) => set({ selectedBoardId: id }),
 
   activeSidebarTab: 'codes',
   setActiveSidebarTab: (tab) => set({ activeSidebarTab: tab }),

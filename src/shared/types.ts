@@ -128,6 +128,22 @@ export interface BoardItem {
   clusterId: string | null
 }
 
+/** A visual frame on the board — dragging an item's position into/out of one
+ * sets that item's clusterId. Deliberately lightweight (no color-coding
+ * philosophy beyond "pick one"); "promote to category" is what turns a
+ * cluster into a durable CategoryRecord (theme or AQA question). */
+export interface BoardCluster {
+  id: string
+  boardId: string
+  name: string
+  color: string
+  x: number
+  y: number
+  width: number
+  height: number
+  createdAt: ISODateString
+}
+
 export interface BoardRecord {
   id: string
   name: string
@@ -150,6 +166,7 @@ export interface ProjectData {
   categories: CategoryRecord[]
   boards: BoardRecord[]
   boardItems: BoardItem[]
+  boardClusters: BoardCluster[]
 }
 
 export interface RecentProjectEntry {

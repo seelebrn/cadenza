@@ -42,7 +42,8 @@ export function createEmptyProject(name: string): ProjectData {
     noteCategories: seedNoteCategories(),
     categories: [],
     boards: [],
-    boardItems: []
+    boardItems: [],
+    boardClusters: []
   }
 }
 

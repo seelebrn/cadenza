@@ -167,7 +167,7 @@ function DocumentReader(): JSX.Element {
 
           const runs = computeParagraphRuns(paragraph, paragraphStartOffsets[i], codingsWithSegments)
           return (
-            <div key={i} className="group relative">
+            <div key={i} className="group relative pr-6">
               <p data-paragraph-index={i}>
                 {runs.map((run, runIndex) => {
                   const isActive = run.codingIds.includes(ACTIVE_MARKER)
@@ -225,7 +225,7 @@ function DocumentReader(): JSX.Element {
                 })}
               </p>
               <button
-                className="absolute -right-5 top-0 hidden text-xs text-slate-300 hover:text-slate-600 group-hover:block"
+                className="absolute right-0 top-0 hidden text-xs text-slate-300 hover:text-slate-600 group-hover:block"
                 title="Edit this paragraph's text"
                 onClick={() => startEditingParagraph(i)}
               >

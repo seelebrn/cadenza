@@ -1,6 +1,7 @@
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import AnalysisView from './AnalysisView'
+import BoardView from './BoardView'
 import DocumentList from './DocumentList'
 import DocumentReader from './DocumentReader'
 import RightSidebar from './RightSidebar'
@@ -44,6 +45,12 @@ function ProjectShell(): JSX.Element | null {
             >
               Analysis
             </button>
+            <button
+              className={`px-3 py-1 ${mainView === 'board' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'}`}
+              onClick={() => setMainView('board')}
+            >
+              Board
+            </button>
           </div>
           <div className="flex gap-2">
             <button
@@ -75,7 +82,7 @@ function ProjectShell(): JSX.Element | null {
         </div>
       )}
 
-      {mainView === 'workspace' ? (
+      {mainView === 'workspace' && (
         <div className="flex flex-1 overflow-hidden">
           <DocumentList />
           <main className="flex-1 overflow-auto">
@@ -83,9 +90,15 @@ function ProjectShell(): JSX.Element | null {
           </main>
           <RightSidebar />
         </div>
-      ) : (
+      )}
+      {mainView === 'analysis' && (
         <div className="flex-1 overflow-hidden">
           <AnalysisView />
+        </div>
+      )}
+      {mainView === 'board' && (
+        <div className="flex-1 overflow-hidden">
+          <BoardView />
         </div>
       )}
     </div>

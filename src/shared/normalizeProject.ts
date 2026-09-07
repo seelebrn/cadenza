@@ -16,6 +16,9 @@ export function normalizeProjectData(raw: ProjectData): ProjectData {
     notes: raw.notes.map((n) => (n.noteCategoryId === undefined ? { ...n, noteCategoryId: null } : n)),
     categories: (raw.categories ?? []).map((c) =>
       c.color === undefined ? { ...c, color: FALLBACK_CATEGORY_COLOR } : c
-    )
+    ),
+    boards: raw.boards ?? [],
+    boardItems: raw.boardItems ?? [],
+    boardClusters: raw.boardClusters ?? []
   }
 }

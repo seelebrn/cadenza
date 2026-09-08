@@ -42,7 +42,8 @@ import {
   removeSegmentFromCategory as removeSegmentFromCategoryOp,
   renameCategory as renameCategoryOp,
   reparentCategory as reparentCategoryOp,
-  setCategoryColor as setCategoryColorOp
+  setCategoryColor as setCategoryColorOp,
+  setCategoryDefinition as setCategoryDefinitionOp
 } from '@shared/categoryOps'
 import { editParagraph as editParagraphOp, renameDocument as renameDocumentOp } from '@shared/documentOps'
 import {
@@ -153,6 +154,9 @@ interface ProjectState {
   createCategory: (name: string, kind: CategoryKind, color: string, parentCategoryId?: string | null) => string | null
   renameCategory: (categoryId: string, name: string) => void
   setCategoryColor: (categoryId: string, color: string) => void
+  /** The theme's own write-up — same idea as setCodeDefinition, on
+   * CategoryRecord.definition instead of CodeNode.definition. */
+  setCategoryDefinition: (categoryId: string, definition: string) => void
   reparentCategory: (categoryId: string, parentCategoryId: string | null) => void
   /** Same as reparentCategory, but also resets the default board's cluster
    * layout so nesting/un-nesting from the Workspace tree (which has no
@@ -541,6 +545,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setCategoryColor: (categoryId, color) =>
     get().updateProject((data) => setCategoryColorOp(data, categoryId, color)),
+
+  setCategoryDefinition: (categoryId, definition) =>
+    get().updateProject((data) => setCategoryDefinitionOp(data, categoryId, definition)),
 
   reparentCategory: (categoryId, parentCategoryId) =>
     get().updateProject((data) => reparentCategoryOp(data, categoryId, parentCategoryId)),

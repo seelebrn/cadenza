@@ -206,7 +206,7 @@ describe('pruneOrphanSegment', () => {
   it('keeps a segment referenced by a category', () => {
     const data = makeData({
       segments: [makeSegment('s1')],
-      categories: [{ id: 'cat1', kind: 'theme', name: 'A', color: '#fff', codeIds: [], noteIds: [], segmentIds: ['s1'], parentCategoryId: null, createdAt: '0' }]
+      categories: [{ id: 'cat1', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: ['s1'], parentCategoryId: null, createdAt: '0' }]
     })
     expect(pruneOrphanSegment(data, 's1').segments).toHaveLength(1)
   })
@@ -239,7 +239,7 @@ describe('deleteCode', () => {
       notes: [
         { id: 'n1', attachedTo: { kind: 'code', codeId: 'parent' }, question: null, answer: 'x', tags: [], noteCategoryId: null, createdAt: '0', updatedAt: '0' }
       ],
-      categories: [{ id: 'cat1', kind: 'theme', name: 'A', color: '#fff', codeIds: ['parent'], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' }],
+      categories: [{ id: 'cat1', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: ['parent'], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' }],
       boardItems: [{ id: 'bi1', boardId: 'b1', refType: 'code', refId: 'parent', x: 0, y: 0 }]
     }
 
@@ -298,7 +298,7 @@ describe('mergeCodes', () => {
   it('reassigns category membership without duplicating if the target is already a member', () => {
     const data = makeData({
       codes: [makeCode('source'), makeCode('target')],
-      categories: [{ id: 'cat1', kind: 'theme', name: 'A', color: '#fff', codeIds: ['source', 'target'], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' }]
+      categories: [{ id: 'cat1', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: ['source', 'target'], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' }]
     })
     const next = mergeCodes(data, 'source', 'target')
     expect(next.categories[0].codeIds).toEqual(['target'])

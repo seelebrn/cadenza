@@ -75,6 +75,10 @@ function CodeInfoModal(): JSX.Element | null {
           </button>
         </div>
 
+        {code?.definition && (
+          <p className="border-b border-slate-200 px-4 py-2 text-xs italic text-slate-500">{code.definition}</p>
+        )}
+
         {code && usage && (
           <>
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-2 text-xs text-slate-500">

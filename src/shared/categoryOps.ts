@@ -20,13 +20,14 @@ import type { CategoryKind, CategoryRecord, ProjectData } from './types'
 
 export function createCategory(
   data: ProjectData,
-  input: { name: string; kind: CategoryKind; color: string; parentCategoryId?: string | null }
+  input: { name: string; kind: CategoryKind; color: string; parentCategoryId?: string | null; definition?: string }
 ): { data: ProjectData; categoryId: string } {
   const category: CategoryRecord = {
     id: nanoid(),
     kind: input.kind,
     name: input.name,
     color: input.color,
+    definition: input.definition ?? '',
     codeIds: [],
     noteIds: [],
     segmentIds: [],
@@ -47,6 +48,13 @@ export function setCategoryColor(data: ProjectData, categoryId: string, color: s
   return {
     ...data,
     categories: data.categories.map((c) => (c.id === categoryId ? { ...c, color } : c))
+  }
+}
+
+export function setCategoryDefinition(data: ProjectData, categoryId: string, definition: string): ProjectData {
+  return {
+    ...data,
+    categories: data.categories.map((c) => (c.id === categoryId ? { ...c, definition } : c))
   }
 }
 

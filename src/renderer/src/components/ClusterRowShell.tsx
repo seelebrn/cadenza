@@ -57,6 +57,7 @@ function ClusterRowShell({
 }: ClusterRowShellProps): JSX.Element {
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
+  const setCategoryDefinition = useProjectStore((s) => s.setCategoryDefinition)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
   // Nesting one cluster onto another from either tree has no board-drag
   // position to derive a placement from, so it also reflows the default
@@ -67,12 +68,24 @@ function ClusterRowShell({
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(node.name)
+  const [isEditingDefinition, setIsEditingDefinition] = useState(false)
+  const [definitionDraft, setDefinitionDraft] = useState(node.definition)
   const [isDragOver, setIsDragOver] = useState(false)
 
   function commitRename(): void {
     const trimmed = nameDraft.trim()
     if (trimmed && trimmed !== node.name) renameCategory(node.id, trimmed)
     setIsEditingName(false)
+  }
+
+  // Same "what this actually means, why it's distinct" write-up a code's
+  // own Def toggle already gives it — several of the methods this app
+  // targets (Reflexive TA's theme definitions, IPA's superordinate-theme
+  // write-ups) treat this as a required deliverable for a theme, not a
+  // nice-to-have.
+  function commitDefinition(): void {
+    if (definitionDraft !== node.definition) setCategoryDefinition(node.id, definitionDraft)
+    setIsEditingDefinition(false)
   }
 
   function handleDrop(e: DragEvent): void {
@@ -159,6 +172,16 @@ function ClusterRowShell({
 
           <div className="hidden flex-shrink-0 gap-1 group-hover:flex">
             <button
+              className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
+              title="Edit definition"
+              onClick={() => {
+                setDefinitionDraft(node.definition)
+                setIsEditingDefinition((v) => !v)
+              }}
+            >
+              Def
+            </button>
+            <button
               className="rounded border border-red-200 px-1 text-[10px] text-red-600 hover:bg-red-50"
               onClick={() => {
                 if (window.confirm(`Delete "${node.name}"?`)) deleteCategory(node.id)
@@ -168,6 +191,21 @@ function ClusterRowShell({
             </button>
           </div>
         </div>
+
+        {isEditingDefinition && (
+          <textarea
+            autoFocus
+            className="mt-1 w-full rounded border border-slate-300 p-1 text-xs"
+            rows={2}
+            placeholder="Definition — what this theme means, why it's distinct…"
+            value={definitionDraft}
+            onChange={(e) => setDefinitionDraft(e.target.value)}
+            onBlur={commitDefinition}
+          />
+        )}
+        {!isEditingDefinition && node.definition && (
+          <p className="mt-0.5 pl-5 line-clamp-2 text-[11px] italic text-slate-400">{node.definition}</p>
+        )}
 
         {isEmpty && <p className="mt-0.5 pl-5 text-[11px] text-slate-400">{emptyPlaceholder}</p>}
       </div>

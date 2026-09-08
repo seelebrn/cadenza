@@ -105,7 +105,7 @@ describe('deleteNote', () => {
     const { data, noteId } = addNote(makeData(), { attachedTo: { kind: 'project' }, answer: 'x' })
     const withExtras: ProjectData = {
       ...data,
-      categories: [{ id: 'cat1', kind: 'theme', name: 'A', color: '#fff', codeIds: [], noteIds: [noteId], segmentIds: [], parentCategoryId: null, createdAt: '0' }],
+      categories: [{ id: 'cat1', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [noteId], segmentIds: [], parentCategoryId: null, createdAt: '0' }],
       boardItems: [{ id: 'bi1', boardId: 'b1', refType: 'note', refId: noteId, x: 0, y: 0 }]
     }
     const next = deleteNote(withExtras, noteId)

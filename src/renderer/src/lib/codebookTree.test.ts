@@ -12,6 +12,7 @@ function makeCategory(id: string, name: string, opts: Partial<CategoryRecord> = 
     kind: 'theme',
     name,
     color: '#fff',
+    definition: '',
     codeIds: opts.codeIds ?? [],
     noteIds: [],
     segmentIds: [],

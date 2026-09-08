@@ -137,6 +137,7 @@ function buildNotesSection(data: ProjectData, includeVerbatim: boolean, contextW
   function walk(node: ClusterTreeNode, depth: number): void {
     const label = node.kind === 'question' ? `“${node.name}”` : node.name
     blocks.push({ kind: 'heading', level: 3, text: indentedName(label, depth), color: node.color })
+    if (node.definition.trim()) blocks.push({ kind: 'paragraph', text: node.definition })
     const notes = node.noteIds.map((id) => noteById.get(id)).filter((n): n is NoteRecord => Boolean(n))
     if (notes.length === 0 && node.children.length === 0) {
       blocks.push({ kind: 'paragraph', text: '(no notes filed here)', style: 'meta' })

@@ -44,6 +44,7 @@ function makeCategory(id: string, overrides: Partial<CategoryRecord> = {}): Cate
     kind: 'theme',
     name: id,
     color: '#fff',
+    definition: '',
     codeIds: [],
     noteIds: [],
     segmentIds: [],

@@ -99,6 +99,7 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
   const data = useProjectStore((s) => s.data)
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
+  const setCategoryDefinition = useProjectStore((s) => s.setCategoryDefinition)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
   // Same reasoning as the codebook/notes trees: adding/removing a member
   // here has no board-drag position to size the cluster's frame from, so
@@ -111,6 +112,7 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(category.name)
+  const [definitionDraft, setDefinitionDraft] = useState(category.definition)
   const [isExpanded, setIsExpanded] = useState(category.kind === 'question')
 
   if (!data) return null
@@ -132,6 +134,10 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
     const trimmed = nameDraft.trim()
     if (trimmed && trimmed !== category.name) renameCategory(category.id, trimmed)
     setIsEditingName(false)
+  }
+
+  function commitDefinition(): void {
+    if (definitionDraft !== category.definition) setCategoryDefinition(category.id, definitionDraft)
   }
 
   const itemCount = memberCodes.length + memberNotes.length + memberSegments.length
@@ -185,6 +191,20 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
 
       {isExpanded && (
         <div className="mt-3 space-y-3 text-xs">
+          <div>
+            <span className="mb-1 block font-medium text-slate-500">
+              Definition — what this {category.kind === 'question' ? 'question' : 'theme'} means
+            </span>
+            <textarea
+              className="w-full rounded border border-slate-300 p-1.5"
+              rows={2}
+              placeholder="What does this theme mean? Why is it distinct from a neighboring one?"
+              value={definitionDraft}
+              onChange={(e) => setDefinitionDraft(e.target.value)}
+              onBlur={commitDefinition}
+            />
+          </div>
+
           <div>
             <div className="mb-1 flex items-center gap-2">
               <span className="font-medium text-slate-500">Codes/items</span>

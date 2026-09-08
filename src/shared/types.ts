@@ -111,6 +111,14 @@ export interface CategoryRecord {
   kind: CategoryKind
   name: string
   color: string
+  /** The theme's own write-up — what it means, why it's distinct from a
+   * neighboring theme, the analytic rationale for it. Optional and empty
+   * by default, same as CodeNode.definition; several methods this app
+   * targets treat a theme's definition as a required deliverable rather
+   * than a nice-to-have (Reflexive TA's theme definitions, IPA's
+   * superordinate-theme write-ups), so it needed a first-class home
+   * instead of only being reachable via a Note attached to the category. */
+  definition: string
   codeIds: string[]
   noteIds: string[]
   /** Raw quotes filed directly under this category without a Note wrapper. */

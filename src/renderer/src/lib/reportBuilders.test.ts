@@ -12,6 +12,7 @@ function makeCategory(id: string, overrides: Partial<CategoryRecord> = {}): Cate
     kind: 'theme',
     name: id,
     color: '#222',
+    definition: '',
     codeIds: [],
     noteIds: [],
     segmentIds: [],
@@ -153,6 +154,20 @@ describe('buildProjectReport', () => {
     const headings = report.blocks.filter((b) => b.kind === 'heading').map((b) => (b as { text: string }).text)
     expect(headings).toContain('“Why?”')
     expect(report.blocks).toContainEqual({ kind: 'paragraph', text: 'Because.' })
+  })
+
+  it('includeNotes shows a cluster\'s own definition when it has one, omits the paragraph when it does not', () => {
+    const withDefinition = makeCategory('c1', { name: 'Isolation', definition: 'A sense of working alone.', noteIds: ['n1'] })
+    const withoutDefinition = makeCategory('c2', { name: 'Support', noteIds: ['n2'] })
+    const data = makeData({
+      categories: [withDefinition, withoutDefinition],
+      notes: [makeNote('n1', { answer: 'a' }), makeNote('n2', { answer: 'b' })]
+    })
+    const report = buildProjectReport(data, { ...NONE, includeNotes: true })
+    expect(report.blocks).toContainEqual({ kind: 'paragraph', text: 'A sense of working alone.' })
+    // "Support" has no definition -- its own paragraph block is just its note's answer, not an empty definition line.
+    const supportIdx = report.blocks.findIndex((b) => b.kind === 'heading' && b.text === 'Support')
+    expect(report.blocks[supportIdx + 1]).toEqual({ kind: 'paragraph', text: 'b' })
   })
 
   it('includeNotes lists a note not filed under any cluster in an "Unfiled notes" section', () => {

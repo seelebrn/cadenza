@@ -815,3 +815,41 @@ way back, could end up unreachable off-screen with no other way to recover it.
 
 Verified: typecheck clean, full suite still 269/269 (no shared/pure logic touched — this is
 a self-contained UI/store change), production build clean, boot-tested cleanly.
+
+### Methodology check-in, and a real gap: themes had no definition field (2026-09-08)
+
+Asked for an honest assessment against the app's four target methods (Reflexive TA, IPA,
+AQA, Kaufmann's comprehensive interview analysis) before starting Phase 9. Overall verdict:
+genuinely usable for all four, and better-aligned than expected — AQA and Kaufmann
+especially, since the default note categories (Descriptive/Linguistique/Conceptuelle)
+already mirror both Kaufmann's own three-fold remark scheme and IPA's "initial noting," and
+Phase 7/8's cross-case comparison work maps closely onto a Group Experiential Themes table.
+The Board's spatial clustering matches Reflexive TA's own recommended mind-map-style
+candidate-theme sorting.
+
+One real gap, not just a nice-to-have: `CategoryRecord` (a theme/cluster) had no
+`definition` field, while `CodeNode` did. Reflexive TA treats a written theme definition as
+a required deliverable, not optional, and IPA's superordinate themes need the same
+write-up — the only way to attach one before this was a workaround (a separate Note
+attached to the category), not a first-class field shown inline where the theme itself
+lives.
+
+Added `CategoryRecord.definition: string` (mirroring `CodeNode.definition` exactly),
+`setCategoryDefinition` (categoryOps.ts) and its store action, and surfaced it everywhere a
+code's own definition already shows: a "Def" toggle + inline textarea in `ClusterRowShell.tsx`
+(shared by the codebook and notes trees' cluster rows, so both got it from one change), an
+always-visible textarea in `ClustersView.tsx`'s expanded cluster cards, and in the notes
+export section (`reportBuilders.ts`) right after a cluster's heading, same placement as a
+code's definition in the codebook export section. Also added, while in the neighborhood: a
+code's own definition previously didn't appear in `CodeInfoModal.tsx` at all — a real,
+independent small gap, now shown right under the header.
+
+Verified: typecheck clean, full suite 271/271 (2 new tests: `setCategoryDefinition` only
+touches its target, `createCategory` accepts an explicit definition at creation; extended
+the existing `normalizeProjectData` category-backfill tests to cover `definition` too; a
+new `reportBuilders.ts` test confirming a cluster's definition shows in the notes export
+when present and is omitted — not an empty paragraph — when it isn't). Re-verified backward
+compatibility directly against `LargeProjectTest.qdaproj` and `MultiCaseTest.qdaproj`, both
+genuinely pre-dating this field (confirmed `'definition' in category` was `false` on the
+raw parsed JSON before normalizing) — both load cleanly with `definition` backfilled to
+`''`. Production build clean, boot-tested cleanly.

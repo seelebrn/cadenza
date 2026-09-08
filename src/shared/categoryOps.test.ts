@@ -16,6 +16,7 @@ import {
   renameCategory,
   reparentCategory,
   setCategoryColor,
+  setCategoryDefinition,
   setCategoryKind
 } from './categoryOps'
 import type { CategoryRecord, ProjectData } from './types'
@@ -26,6 +27,7 @@ function makeCategory(id: string, overrides: Partial<CategoryRecord> = {}): Cate
     kind: 'theme',
     name: id,
     color: '#fff',
+    definition: '',
     codeIds: [],
     noteIds: [],
     segmentIds: [],
@@ -57,10 +59,31 @@ function makeData(categories: CategoryRecord[] = []): ProjectData {
 }
 
 describe('createCategory', () => {
-  it('creates a category with empty membership lists and no parent by default', () => {
+  it('creates a category with empty membership lists, no parent, and no definition by default', () => {
     const { data, categoryId } = createCategory(makeData(), { name: 'Emotions', kind: 'theme', color: '#f00' })
     const category = data.categories.find((c) => c.id === categoryId)!
-    expect(category).toMatchObject({ name: 'Emotions', kind: 'theme', color: '#f00', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null })
+    expect(category).toMatchObject({
+      name: 'Emotions',
+      kind: 'theme',
+      color: '#f00',
+      definition: '',
+      codeIds: [],
+      noteIds: [],
+      segmentIds: [],
+      parentCategoryId: null
+    })
+  })
+
+  it('accepts an explicit definition at creation time', () => {
+    const { data, categoryId } = createCategory(makeData(), {
+      name: 'Emotions',
+      kind: 'theme',
+      color: '#f00',
+      definition: 'Passages expressing an emotional reaction.'
+    })
+    expect(data.categories.find((c) => c.id === categoryId)?.definition).toBe(
+      'Passages expressing an emotional reaction.'
+    )
   })
 
   it('accepts an explicit parentCategoryId at creation time', () => {
@@ -74,7 +97,7 @@ describe('createCategory', () => {
   })
 })
 
-describe('renameCategory / setCategoryColor / setCategoryKind', () => {
+describe('renameCategory / setCategoryColor / setCategoryKind / setCategoryDefinition', () => {
   it('each only touches the targeted category', () => {
     const data = makeData([makeCategory('A'), makeCategory('B')])
     const renamed = renameCategory(data, 'A', 'New name')
@@ -88,6 +111,10 @@ describe('renameCategory / setCategoryColor / setCategoryKind', () => {
     const rekinded = setCategoryKind(data, 'A', 'question')
     expect(rekinded.categories.find((c) => c.id === 'A')?.kind).toBe('question')
     expect(rekinded.categories.find((c) => c.id === 'B')?.kind).toBe('theme')
+
+    const redefined = setCategoryDefinition(data, 'A', 'What this theme actually means.')
+    expect(redefined.categories.find((c) => c.id === 'A')?.definition).toBe('What this theme actually means.')
+    expect(redefined.categories.find((c) => c.id === 'B')?.definition).toBe('')
   })
 })
 

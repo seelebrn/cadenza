@@ -46,23 +46,40 @@ describe('normalizeProjectData', () => {
     expect(next.notes[0].noteCategoryId).toBe('cat1')
   })
 
-  it('backfills a category\'s missing color and parentCategoryId', () => {
+  it('backfills a category\'s missing color, parentCategoryId, and definition', () => {
     const next = normalizeProjectData(
       rawData({ categories: [{ id: 'c1', kind: 'theme', name: 'A', codeIds: [], noteIds: [], segmentIds: [], createdAt: '0' }] })
     )
     expect(next.categories[0].color).toBeTruthy()
     expect(next.categories[0].parentCategoryId).toBeNull()
+    expect(next.categories[0].definition).toBe('')
   })
 
   it('leaves a fully-specified category untouched', () => {
     const next = normalizeProjectData(
       rawData({
         categories: [
-          { id: 'c1', kind: 'theme', name: 'A', color: '#123456', codeIds: ['x'], noteIds: [], segmentIds: [], parentCategoryId: 'root', createdAt: '0' }
+          {
+            id: 'c1',
+            kind: 'theme',
+            name: 'A',
+            color: '#123456',
+            definition: 'What this theme means.',
+            codeIds: ['x'],
+            noteIds: [],
+            segmentIds: [],
+            parentCategoryId: 'root',
+            createdAt: '0'
+          }
         ]
       })
     )
-    expect(next.categories[0]).toMatchObject({ color: '#123456', parentCategoryId: 'root', codeIds: ['x'] })
+    expect(next.categories[0]).toMatchObject({
+      color: '#123456',
+      definition: 'What this theme means.',
+      parentCategoryId: 'root',
+      codeIds: ['x']
+    })
   })
 
   it('creates a default board from scratch when there are none', () => {

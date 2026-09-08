@@ -82,6 +82,7 @@ function migrateLegacyClusters(
       kind: 'theme',
       name: cluster.name ?? 'Migrated cluster',
       color: cluster.color ?? FALLBACK_CATEGORY_COLOR,
+      definition: '',
       codeIds: members.filter((m) => m.refType === 'code').map((m) => m.refId),
       noteIds: members.filter((m) => m.refType === 'note').map((m) => m.refId),
       segmentIds: members.filter((m) => m.refType === 'segment').map((m) => m.refId),
@@ -123,7 +124,8 @@ export function normalizeProjectData(raw: ProjectData): ProjectData {
       ...(raw.categories ?? []).map((c) => ({
         ...c,
         color: c.color ?? FALLBACK_CATEGORY_COLOR,
-        parentCategoryId: c.parentCategoryId ?? null
+        parentCategoryId: c.parentCategoryId ?? null,
+        definition: c.definition ?? ''
       })),
       ...migratedCategories
     ],

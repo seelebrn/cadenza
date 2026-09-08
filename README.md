@@ -918,3 +918,27 @@ by re-running it). Not yet confirmed: an actual installer file for any of the th
 platforms, and the release workflow itself end-to-end — both need a real tag push to
 observe, which is a public action on the user's own repository and wasn't done without
 asking first.
+
+### The release pipeline worked first try — the binaries were just invisible (2026-09-08)
+
+The user pushed `v0.1.0` and, separately, ran the workflow manually — both real end-to-end
+tests of the pipeline above. Checked the results via the GitHub API (no `gh` CLI available
+in this environment; public, unauthenticated REST calls were enough): both runs' `test` job
+and all three `build` matrix legs (windows-latest/macos-latest/ubuntu-latest) came back
+`success` — the whole three-platform pipeline, including the Windows packaging step that
+couldn't be verified locally, worked on the very first real attempt.
+
+But `GET /repos/seelebrn/cadenza/releases` came back empty — no binaries visible anywhere,
+matching what the user saw. Root cause: electron-builder's GitHub publisher defaults
+`releaseType` to `"draft"` (confirmed in `builder-util-runtime`'s own type definitions,
+`@default draft`) — a draft release is invisible on the public Releases page and to any
+unauthenticated request, visible only to the repository owner while logged in. The releases
+were sitting there the whole time, just not published. Added `"releaseType": "release"` to
+`package.json`'s `publish` block so every future tag push (or manual run) publishes
+immediately with no extra manual step — the existing `v0.1.0` draft still needs a one-time
+manual "Publish release" click on GitHub (already has the real, working binaries from the
+successful runs — no need to rebuild it) since this config change only affects releases
+created *after* it.
+
+Verified: package.json still valid JSON, typecheck clean — this is a one-line publish
+config change, no application code or workflow logic touched.

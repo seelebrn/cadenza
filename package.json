@@ -74,7 +74,8 @@
     "publish": {
       "provider": "github",
       "owner": "seelebrn",
-      "repo": "cadenza"
+      "repo": "cadenza",
+      "releaseType": "release"
     }
   },
   "allowScripts": {

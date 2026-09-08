@@ -41,7 +41,7 @@ npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
 - [x] Phase 4 — Notes/AQA system (question+answer memos, attach-anywhere, promote-to-code)
 - [x] Phase 5 — Retrieval (by code/note) + Cluster management (AQA question log)
 - [x] Phase 6 — Visual grouping board (drag-and-drop clustering of codes/notes/quotes)
-- [ ] Phase 7 — Cross-case comparison (Kaufmann contrastive view, IPA-style GECT table)
+- [x] Phase 7 — Cross-case comparison (Kaufmann contrastive view, IPA-style GECT table)
 - [ ] Phase 8 — Excel import (row=case) + exporters (annotated .docx, .xlsx reports, backup)
 - [ ] Phase 9 — Packaging polish (icons, verified Windows + macOS builds)
 
@@ -533,3 +533,39 @@ disk-cache warnings, killed only that instance and confirmed the process list re
 its prior state. The stuck-drag fix specifically still needs the user's own hands-on
 confirmation next time it comes up, since the underlying trigger couldn't be reproduced
 in this session.
+
+### Phase 7: cross-case comparison (2026-09-08)
+
+The plan called for a Kaufmann-style contrastive view across interviews and an IPA-style
+Group Experiential Themes (GECT) table (themes × cases) — flagged as "an upgrade of Phase
+5's retrieval view into a matrix." Implemented as a new Analysis > Compare cases tab.
+
+No separate case/participant concept exists in the data model, so a "case" is simply one
+document — matches how documents are already used everywhere else (one transcript per
+import), confirmed as the right call before building rather than assumed. Added
+`comparison.ts` (`getCases`: every document as a case, oldest-imported first; `getCodeCaseMatrix`:
+count of coded passages per code per case, reusing the already-tested `retrieveByCode`
+rather than re-deriving the same segment/coding/document joins a second time) plus a new
+component, `ComparisonView.tsx`, with two linked sub-views:
+
+- **Themes × cases**: a table, codes down the rows (indented by depth, same list source as
+  the plain retrieval view) and cases across the columns, each cell the count of coded
+  passages — the GECT table, using the existing code hierarchy as the theming structure (a
+  parent code as a superordinate theme, its children as sub-themes) rather than inventing a
+  second, category-based rollup alongside it. A "Roll up sub-codes" toggle matches the
+  plain retrieval view's equivalent option. Clicking a non-zero cell jumps straight to the
+  contrast view below, already filtered to that code — a low-cost way to drill from "how
+  much" to "what, exactly," without building a separate expansion UI per cell.
+- **Contrast one code**: pick a code, see every case's instances of it in its own
+  side-by-side column, including a case with zero instances (shown as "No instances in this
+  case" rather than omitted) — this is the Kaufmann-style reading, where whether a case
+  addresses something at all is as analytically meaningful as what it says when it does.
+  Each quote has a "Go to passage" link, reusing the same navigate-to-source-text pattern
+  already used by the plain retrieval view.
+
+Verified: typecheck clean, full suite 242/242 (six new `comparison.ts` tests: cases sorted
+by import date, per-code-per-case counts, descendant roll-up on/off, zero-count cells
+omitted rather than carried as explicit zeros, multiple codes counted independently).
+Production build clean. Boot-tested a fresh packaged instance (no other instance was
+running this time, so no shared-user-data-dir warnings either — a clean launch with no
+errors at all), then killed it and confirmed no electron process was left running.

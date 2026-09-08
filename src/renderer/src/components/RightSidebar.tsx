@@ -9,19 +9,33 @@ function RightSidebar(): JSX.Element {
   const setActiveTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
   const sidebarWidth = useWorkspaceUiStore((s) => s.sidebarWidth)
   const setSidebarWidth = useWorkspaceUiStore((s) => s.setSidebarWidth)
-  const [dragStartX, setDragStartX] = useState<number | null>(null)
+  const isDocked = useWorkspaceUiStore((s) => s.sidebarDocked)
+  const setDocked = useWorkspaceUiStore((s) => s.setSidebarDocked)
+  const floatPosition = useWorkspaceUiStore((s) => s.sidebarFloatPosition)
+  const setFloatPosition = useWorkspaceUiStore((s) => s.setSidebarFloatPosition)
+  const floatSize = useWorkspaceUiStore((s) => s.sidebarFloatSize)
+  const setFloatSize = useWorkspaceUiStore((s) => s.setSidebarFloatSize)
 
+  const [widthDragStartX, setWidthDragStartX] = useState<number | null>(null)
+  const [moveDrag, setMoveDrag] = useState<{ mouseX: number; mouseY: number; startX: number; startY: number } | null>(
+    null
+  )
+  const [resizeDrag, setResizeDrag] = useState<{ mouseX: number; mouseY: number; startWidth: number; startHeight: number } | null>(
+    null
+  )
+
+  // Docked-width resize (unchanged from before undocking existed).
   useEffect(() => {
-    if (dragStartX === null) return
+    if (widthDragStartX === null) return
     const widthAtDragStart = sidebarWidth
 
     function handleMouseMove(e: MouseEvent): void {
       // Dragging left (cursor moves toward negative x relative to the
       // start) grows the sidebar, since it sits at the window's right edge.
-      setSidebarWidth(widthAtDragStart + (dragStartX! - e.clientX))
+      setSidebarWidth(widthAtDragStart + (widthDragStartX! - e.clientX))
     }
     function handleMouseUp(): void {
-      setDragStartX(null)
+      setWidthDragStartX(null)
     }
 
     window.addEventListener('mousemove', handleMouseMove)
@@ -33,7 +47,125 @@ function RightSidebar(): JSX.Element {
     // widthAtDragStart is captured once per drag gesture on purpose — it
     // must not update as sidebarWidth itself changes during the drag.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragStartX])
+  }, [widthDragStartX])
+
+  // Floating-panel move (drag the title bar).
+  useEffect(() => {
+    if (!moveDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setFloatPosition({ x: moveDrag!.startX + (e.clientX - moveDrag!.mouseX), y: moveDrag!.startY + (e.clientY - moveDrag!.mouseY) })
+    }
+    function handleMouseUp(): void {
+      setMoveDrag(null)
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+    // moveDrag's start values are captured once per drag gesture on
+    // purpose, same reasoning as widthAtDragStart above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moveDrag])
+
+  // Floating-panel resize (drag the corner handle).
+  useEffect(() => {
+    if (!resizeDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setFloatSize({
+        width: resizeDrag!.startWidth + (e.clientX - resizeDrag!.mouseX),
+        height: resizeDrag!.startHeight + (e.clientY - resizeDrag!.mouseY)
+      })
+    }
+    function handleMouseUp(): void {
+      setResizeDrag(null)
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resizeDrag])
+
+  const tabButtons = (
+    <>
+      <button
+        className={`flex-1 px-2 py-2 text-sm font-medium ${
+          activeTab === 'codes' ? 'border-b-2 border-slate-900 text-slate-900' : 'text-slate-400 hover:text-slate-600'
+        }`}
+        onClick={() => setActiveTab('codes')}
+      >
+        Codes &amp; items
+      </button>
+      <button
+        className={`flex-1 px-2 py-2 text-sm font-medium ${
+          activeTab === 'notes' ? 'border-b-2 border-slate-900 text-slate-900' : 'text-slate-400 hover:text-slate-600'
+        }`}
+        onClick={() => setActiveTab('notes')}
+      >
+        Notes
+      </button>
+    </>
+  )
+
+  const panelBody = (
+    <>
+      {activeTab === 'codes' && <CodebookPanel />}
+      {activeTab === 'notes' && <NotesPanel />}
+    </>
+  )
+
+  if (!isDocked) {
+    return (
+      <div
+        className="fixed z-40 flex flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl"
+        style={{ left: floatPosition.x, top: floatPosition.y, width: floatSize.width, height: floatSize.height }}
+      >
+        <div
+          className="flex flex-shrink-0 cursor-move select-none items-center justify-between border-b border-slate-200 bg-slate-100 px-2 py-1"
+          title="Drag to move"
+          onMouseDown={(e) => {
+            if (e.button !== 0) return
+            setMoveDrag({ mouseX: e.clientX, mouseY: e.clientY, startX: floatPosition.x, startY: floatPosition.y })
+          }}
+          // See BoardItemCard.tsx/ClusterFrame.tsx's identical guard — a
+          // mousedown-then-move gesture starting on plain text can be
+          // interpreted as a native "drag this selected text" instead of
+          // (or racing) this drag, leaving the move uncommitted.
+          onDragStart={(e) => e.preventDefault()}
+        >
+          <span className="truncate text-xs font-semibold text-slate-500">Codebook &amp; Notes</span>
+          <button
+            className="flex-shrink-0 rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => setDocked(true)}
+            title="Dock back into the sidebar"
+          >
+            Dock
+          </button>
+        </div>
+        <FileUnderClusterBar />
+        <div className="flex border-b border-slate-200">{tabButtons}</div>
+        <div className="flex flex-1 flex-col overflow-hidden">{panelBody}</div>
+        <div
+          className="absolute bottom-0 right-0 h-3.5 w-3.5 cursor-nwse-resize"
+          title="Drag to resize"
+          onMouseDown={(e) => {
+            if (e.button !== 0) return
+            e.stopPropagation()
+            setResizeDrag({ mouseX: e.clientX, mouseY: e.clientY, startWidth: floatSize.width, startHeight: floatSize.height })
+          }}
+        >
+          <svg viewBox="0 0 10 10" className="h-full w-full text-slate-400">
+            <path d="M9 1 1 9M9 5 5 9M9 9 9 9" stroke="currentColor" strokeWidth="1" fill="none" />
+          </svg>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <aside
@@ -43,32 +175,23 @@ function RightSidebar(): JSX.Element {
       <div
         className="absolute left-0 top-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-blue-300"
         title="Drag to resize"
-        onMouseDown={(e) => setDragStartX(e.clientX)}
+        onMouseDown={(e) => setWidthDragStartX(e.clientX)}
       />
 
       <FileUnderClusterBar />
 
-      <div className="flex border-b border-slate-200">
+      <div className="flex items-center border-b border-slate-200">
+        {tabButtons}
         <button
-          className={`flex-1 px-2 py-2 text-sm font-medium ${
-            activeTab === 'codes' ? 'border-b-2 border-slate-900 text-slate-900' : 'text-slate-400 hover:text-slate-600'
-          }`}
-          onClick={() => setActiveTab('codes')}
+          className="flex-shrink-0 px-2 text-xs font-medium text-slate-400 hover:text-slate-600"
+          onClick={() => setDocked(false)}
+          title="Undock into a floating, resizable panel"
         >
-          Codes &amp; items
-        </button>
-        <button
-          className={`flex-1 px-2 py-2 text-sm font-medium ${
-            activeTab === 'notes' ? 'border-b-2 border-slate-900 text-slate-900' : 'text-slate-400 hover:text-slate-600'
-          }`}
-          onClick={() => setActiveTab('notes')}
-        >
-          Notes
+          Undock
         </button>
       </div>
 
-      {activeTab === 'codes' && <CodebookPanel />}
-      {activeTab === 'notes' && <NotesPanel />}
+      {panelBody}
     </aside>
   )
 }

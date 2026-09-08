@@ -37,6 +37,62 @@ function saveSidebarWidth(width: number): void {
   }
 }
 
+export interface FloatingPosition {
+  x: number
+  y: number
+}
+export interface FloatingSize {
+  width: number
+  height: number
+}
+
+// Same "per-viewer layout preference, not project data" reasoning as
+// sidebarWidth above, for the Workspace right sidebar's docked/undocked
+// state — undocking floats it (position: fixed, so it's simply removed
+// from the flex layout's flow, freeing that space for the reader) as a
+// draggable, resizable panel instead of the fixed sidebar column.
+const SIDEBAR_DOCKED_KEY = 'cadenza.sidebarDocked'
+const SIDEBAR_FLOAT_POSITION_KEY = 'cadenza.sidebarFloatPosition'
+const SIDEBAR_FLOAT_SIZE_KEY = 'cadenza.sidebarFloatSize'
+const DEFAULT_FLOAT_POSITION: FloatingPosition = { x: 120, y: 80 }
+const DEFAULT_FLOAT_SIZE: FloatingSize = { width: 380, height: 520 }
+const MIN_FLOAT_WIDTH = 280
+const MIN_FLOAT_HEIGHT = 200
+
+function loadSidebarDocked(): boolean {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_DOCKED_KEY)
+    return raw === null ? true : raw === 'true'
+  } catch {
+    return true
+  }
+}
+function saveSidebarDocked(docked: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_DOCKED_KEY, String(docked))
+  } catch {
+    // not critical if this doesn't persist
+  }
+}
+
+function loadJsonPref<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? { ...fallback, ...parsed } : fallback
+  } catch {
+    return fallback
+  }
+}
+function saveJsonPref(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // not critical if this doesn't persist
+  }
+}
+
 /** Ephemeral (non-persisted) workspace UI state shared across the reader,
  * codebook, and notes panels — which document is open, which sidebar tab is
  * active, and the "active span": a text span the user is currently working
@@ -63,6 +119,17 @@ interface WorkspaceUiState {
 
   sidebarWidth: number
   setSidebarWidth: (width: number) => void
+
+  /** True = the normal fixed sidebar column; false = floating (position,
+   * draggable, resizable — see sidebarFloatPosition/sidebarFloatSize
+   * below) so the reader/board can reclaim that width when more space to
+   * work is what's wanted. */
+  sidebarDocked: boolean
+  setSidebarDocked: (docked: boolean) => void
+  sidebarFloatPosition: FloatingPosition
+  setSidebarFloatPosition: (position: FloatingPosition) => void
+  sidebarFloatSize: FloatingSize
+  setSidebarFloatSize: (size: FloatingSize) => void
 
   activeSpan: ActiveSpan | null
   setActiveSpan: (span: ActiveSpan | null) => void
@@ -121,6 +188,33 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
     const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width))
     set({ sidebarWidth: clamped })
     saveSidebarWidth(clamped)
+  },
+
+  sidebarDocked: loadSidebarDocked(),
+  setSidebarDocked: (docked) => {
+    set({ sidebarDocked: docked })
+    saveSidebarDocked(docked)
+  },
+
+  sidebarFloatPosition: loadJsonPref(SIDEBAR_FLOAT_POSITION_KEY, DEFAULT_FLOAT_POSITION),
+  setSidebarFloatPosition: (position) => {
+    // Keeps a grabbable corner on-screen at all times — the only way back
+    // to docked is the panel's own "Dock" button, which can't be clicked
+    // if the whole panel has drifted off-screen (e.g. dragged near an
+    // edge, then the window shrunk on a later launch).
+    const clamped = {
+      x: Math.min(Math.max(position.x, -DEFAULT_FLOAT_SIZE.width + 120), window.innerWidth - 120),
+      y: Math.min(Math.max(position.y, 0), window.innerHeight - 40)
+    }
+    set({ sidebarFloatPosition: clamped })
+    saveJsonPref(SIDEBAR_FLOAT_POSITION_KEY, clamped)
+  },
+
+  sidebarFloatSize: loadJsonPref(SIDEBAR_FLOAT_SIZE_KEY, DEFAULT_FLOAT_SIZE),
+  setSidebarFloatSize: (size) => {
+    const clamped = { width: Math.max(MIN_FLOAT_WIDTH, size.width), height: Math.max(MIN_FLOAT_HEIGHT, size.height) }
+    set({ sidebarFloatSize: clamped })
+    saveJsonPref(SIDEBAR_FLOAT_SIZE_KEY, clamped)
   },
 
   activeSpan: null,

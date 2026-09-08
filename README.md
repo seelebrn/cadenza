@@ -786,3 +786,32 @@ only once this second fix was in, not before it.
 
 Verified: typecheck clean, full suite still 269/269 (again a pure DOM event binding change),
 production build clean, boot-tested cleanly.
+
+### Dock/undock the Workspace right sidebar (2026-09-08)
+
+Requested with an explicit ask for an opinion first, since "undock" has two quite different
+implementations: a floating panel within the same OS window (no new plumbing — same React
+tree, same store), or a genuinely separate `BrowserWindow` (needed for true multi-monitor
+placement, but requires syncing project state across two renderer processes — undo/redo,
+every edit, window lifecycle, all of it). Recommended the floating-panel version as the
+right first step, since "more space to think" doesn't itself need a second monitor, and
+that's what got built — a true separate window stays a bigger, separate undertaking if
+multi-monitor turns out to matter later.
+
+`RightSidebar.tsx` now renders one of two ways depending on `sidebarDocked`
+(`workspaceUiStore.ts`, persisted to localStorage alongside the existing `sidebarWidth`
+preference — a window-layout choice, not project data): docked is the unchanged fixed
+column; undocked is a `position: fixed` panel with its own draggable title bar and a
+resize handle, positioned/sized from `sidebarFloatPosition`/`sidebarFloatSize` (also
+persisted). Undocking needed no changes anywhere else — a `position: fixed` element
+contributes no space to its flex container, so the reader/board simply reclaims the width
+the sidebar used to occupy the moment it floats, with zero coordination required from
+`ProjectShell.tsx`. The move/resize drags reuse the same mousedown/mousemove/mouseup
+pattern already established for board dragging (including the left-button-only guard from
+the fix above, applied here too since the same right-click-leaking-into-drag risk exists
+anywhere a mousedown starts a drag). The floating position is clamped on every move so a
+grabbable corner always stays on-screen — otherwise the panel's own "Dock" button, the only
+way back, could end up unreachable off-screen with no other way to recover it.
+
+Verified: typecheck clean, full suite still 269/269 (no shared/pure logic touched — this is
+a self-contained UI/store change), production build clean, boot-tested cleanly.

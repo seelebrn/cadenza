@@ -4,12 +4,17 @@ import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { getCodeUsageDetail, CODE_USAGE_CONTEXT_WORDS } from '@shared/retrieval'
 
 /** The code-info window: double-click a code anywhere it appears (a coded
- * passage in the source text, a row in the Workspace codebook tree, or a
- * card on the board) to see its name, how many times it's been used, and
- * every verbatim instance — optionally with surrounding context. Mounted
- * once at the app level (see App.tsx) so it works the same regardless of
- * which of those three triggered it, and survives switching views while
- * open. */
+ * passage in the source text, or a row in the Workspace codebook tree) —
+ * or *right*-click it on the board (see BoardItemCard.tsx: a board
+ * double-click is ambiguous with two independent single clicks close
+ * together in time, since a card's own mousedown always starts a
+ * drag-and-possibly-snap gesture with no minimum drag distance, so the
+ * first click of an attempted double-click can itself complete a snap-link
+ * to a neighboring card before the second click arrives) — to see its
+ * name, how many times it's been used, and every verbatim instance,
+ * optionally with surrounding context. Mounted once at the app level (see
+ * ProjectShell.tsx) so it works the same regardless of which trigger
+ * opened it, and survives switching views while open. */
 function CodeInfoModal(): JSX.Element | null {
   const inspectedCodeId = useWorkspaceUiStore((s) => s.inspectedCodeId)
   const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)

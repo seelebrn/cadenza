@@ -73,14 +73,15 @@ interface WorkspaceUiState {
   setSuggestedCodeName: (name: string | null) => void
 
   /** The code whose info window is open (double-clicked in the source
-   * text, the Workspace codebook tree, or a board card) — null when
-   * closed. One flag serves all three triggers since the window itself
-   * doesn't care where the double-click came from. */
+   * text or the Workspace codebook tree, right-clicked on a board card —
+   * see BoardItemCard.tsx for why the board uses right-click instead) —
+   * null when closed. One flag serves all three triggers since the window
+   * itself doesn't care where it came from. */
   inspectedCodeId: string | null
   setInspectedCodeId: (id: string | null) => void
 
   /** Same idea as inspectedCodeId, for notes — double-clicked in the
-   * Workspace notes tree or a board card. */
+   * Workspace notes tree, right-clicked on a board card. */
   inspectedNoteId: string | null
   setInspectedNoteId: (id: string | null) => void
 

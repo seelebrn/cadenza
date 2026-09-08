@@ -826,7 +826,8 @@ function BoardView(): JSX.Element {
             'Every code, note, and cluster is shown automatically on this default board. '}
           Ctrl/Cmd+scroll to zoom · drag two cards close together to link them (they snap), and linked/clustered
           cards move together (shift+drag to move just one) · drag a cluster into another to nest it as a
-          superordinate group (shift+drag to pull it out) · click the × on a connector to unlink
+          superordinate group (shift+drag to pull it out) · click the × on a connector to unlink · right-click a
+          code/note card for its full info and verbatim excerpts
         </p>
       )}
 

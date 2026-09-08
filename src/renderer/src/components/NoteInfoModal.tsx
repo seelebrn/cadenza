@@ -6,15 +6,17 @@ import { CODE_USAGE_CONTEXT_WORDS } from '@shared/retrieval'
 import { getSurroundingWords, joinParagraphs } from '@shared/text'
 
 /** The note-info window — the same idea as CodeInfoModal, for notes:
- * double-click a note anywhere it appears (a card in the Workspace notes
- * tree, or a card on the board) to see its full question/answer, which
- * cluster(s) it's filed under, and — when it's attached to a passage —
- * the verbatim quote, optionally with surrounding context. Mounted once
- * at the app level (see ProjectShell.tsx) so it works the same regardless
- * of which trigger opened it. Unlike a code (which can have many
- * instances), a note has at most one verbatim quote — the segment it's
- * attached to, if any — so this is simpler than CodeInfoModal's
- * usage-list: no count, just the one quote when there is one. */
+ * double-click a note card in the Workspace notes tree, or *right*-click
+ * it on the board (see BoardItemCard.tsx/CodeInfoModal.tsx for why the
+ * board specifically uses right-click instead) — to see its full
+ * question/answer, which cluster(s) it's filed under, and — when it's
+ * attached to a passage — the verbatim quote, optionally with surrounding
+ * context. Mounted once at the app level (see ProjectShell.tsx) so it
+ * works the same regardless of which trigger opened it. Unlike a code
+ * (which can have many instances), a note has at most one verbatim quote
+ * — the segment it's attached to, if any — so this is simpler than
+ * CodeInfoModal's usage-list: no count, just the one quote when there is
+ * one. */
 function NoteInfoModal(): JSX.Element | null {
   const inspectedNoteId = useWorkspaceUiStore((s) => s.inspectedNoteId)
   const setInspectedNoteId = useWorkspaceUiStore((s) => s.setInspectedNoteId)

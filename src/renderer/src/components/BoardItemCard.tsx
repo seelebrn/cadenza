@@ -59,7 +59,18 @@ function BoardItemCard({
           onStartDrag(e)
         }
       }}
-      onDoubleClick={() => {
+      // Right-click, not double-click: two cards sitting close together
+      // (a common outcome of the auto-layout, or just a tightly-packed
+      // cluster) make a double-click ambiguous with two independent single
+      // clicks close together in time — since onMouseDown always starts a
+      // drag-and-possibly-snap gesture (findSnapTarget has no minimum drag
+      // distance), the first click of an attempted double-click can itself
+      // register as a completed drag that lands within snap range of a
+      // neighboring card and links the two, before the second click ever
+      // arrives. Right-click never enters that mousedown/drag/snap path at
+      // all, so it can't conflict with it.
+      onContextMenu={(e) => {
+        e.preventDefault()
         if (item.refType === 'code') setInspectedCodeId(item.refId)
         else if (item.refType === 'note') setInspectedNoteId(item.refId)
       }}

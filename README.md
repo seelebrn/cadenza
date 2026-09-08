@@ -742,3 +742,27 @@ nested) and a board PDF export (`Main board.pdf`, valid `%PDF-1.4`, ~2.3MB for t
 500-code board) landed in the project folder as real, valid, substantial files — genuine
 end-to-end confirmation of the exact path the sandboxed smoke test couldn't conclusively
 finish checking. Production build clean throughout.
+
+### Board info window: right-click instead of double-click (2026-09-08)
+
+Surfaced by trying the just-generated multi-case test project's board: with two code/note
+cards sitting close together (common with the auto-grid layout, or a tightly-packed
+cluster), double-clicking to open the info window would sometimes link the two cards
+together instead. Root cause: a card's `onMouseDown` always starts a drag-and-possibly-snap
+gesture, and `findSnapTarget` has no minimum drag distance — so the *first* click of an
+attempted double-click can itself register as a completed "drag" landing within snap range
+of the neighboring card, linking them, before the second click (which was supposed to
+complete the double-click) ever arrives. Double-click and the drag/snap gesture both
+listen on the same `onMouseDown`, so they can't be told apart once cards are close enough.
+
+Right-click doesn't go through `onMouseDown`/drag/snap at all, so it can't conflict with
+it by construction — swapped `BoardItemCard.tsx`'s trigger from `onDoubleClick` to
+`onContextMenu` (with `preventDefault()` to suppress the native OS context menu). Only the
+board's trigger changed; double-click still opens the info window from the source text and
+the Workspace codebook/notes trees, where there's no drag gesture on the same element to
+conflict with. Updated the board's own on-screen hint text and the relevant code comments
+(`CodeInfoModal.tsx`, `NoteInfoModal.tsx`, `workspaceUiStore.ts`) so both now correctly
+describe a mixed double-click/right-click convention instead of double-click everywhere.
+
+Verified: typecheck clean, full suite still 269/269 (no shared/pure logic touched — this
+is purely a DOM event binding change), production build clean, boot-tested cleanly.

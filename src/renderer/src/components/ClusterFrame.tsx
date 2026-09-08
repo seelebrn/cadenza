@@ -16,6 +16,13 @@ function fillOpacityForDepth(depth: number): string {
   return CLUSTER_FILL_OPACITY_BY_DEPTH[Math.min(depth, CLUSTER_FILL_OPACITY_BY_DEPTH.length - 1)]
 }
 
+// Fixed accent for "you're about to become a child of the cluster being
+// resized" — deliberately NOT the cluster's own color (which is already
+// used for its border/fill and wouldn't stand out against them), and
+// distinct from a nest-target's highlight (that one reuses the dragged
+// cluster's own color, since it's a more direct "drop here" cue).
+const ENCLOSED_BY_RESIZE_COLOR = '#3b82f6'
+
 interface ClusterFrameProps {
   cluster: BoardCluster
   category: CategoryRecord
@@ -29,6 +36,15 @@ interface ClusterFrameProps {
    * nest into it on drop — the size this frame would grow to, shown as a
    * ghost outline so the resize isn't a surprise once committed. */
   resizePreview: { width: number; height: number } | null
+  /** True while another cluster is being dragged onto this one and would
+   * nest into it on drop (independent of resizePreview, which stays null
+   * when this frame is already roomy enough not to need the ghost — still
+   * the target, still worth flagging clearly). */
+  isNestTarget: boolean
+  /** True while a *different* cluster is being resized and this one is
+   * currently fully enclosed by that growing frame — it's about to become
+   * that cluster's child on release. */
+  isEnclosedByResize: boolean
   onStartMove: (e: React.MouseEvent) => void
   onStartResize: (e: React.MouseEvent) => void
 }
@@ -40,6 +56,8 @@ function ClusterFrame({
   dragState,
   liveDelta,
   resizePreview,
+  isNestTarget,
+  isEnclosedByResize,
   onStartMove,
   onStartResize
 }: ClusterFrameProps): JSX.Element {
@@ -79,20 +97,54 @@ function ClusterFrame({
         />
       )}
       <div
-        className="absolute rounded-lg border-2 border-dashed"
+        className={`absolute select-none rounded-lg border-2 ${
+          isNestTarget || isEnclosedByResize ? 'border-solid' : 'border-dashed'
+        }`}
         style={{
           left: x,
           top: y,
           width,
           height,
-          borderColor: category.color,
-          backgroundColor: `${category.color}${fillOpacityForDepth(depth)}`
+          borderColor: isEnclosedByResize ? ENCLOSED_BY_RESIZE_COLOR : category.color,
+          backgroundColor: `${category.color}${fillOpacityForDepth(depth)}`,
+          boxShadow: isNestTarget
+            ? `0 0 0 3px ${category.color}`
+            : isEnclosedByResize
+              ? `0 0 0 3px ${ENCLOSED_BY_RESIZE_COLOR}`
+              : undefined
         }}
       >
+        {isNestTarget && (
+          <span
+            className="pointer-events-none absolute -top-2.5 right-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-medium text-white shadow"
+            style={{ backgroundColor: category.color }}
+          >
+            Drop to nest here
+          </span>
+        )}
+        {isEnclosedByResize && (
+          <span
+            className="pointer-events-none absolute -top-2.5 right-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-medium text-white shadow"
+            style={{ backgroundColor: ENCLOSED_BY_RESIZE_COLOR }}
+          >
+            Will become a child
+          </span>
+        )}
       <div
-        className="flex cursor-move items-center gap-1 rounded-t-md px-2 py-1 text-xs text-white"
+        className="flex cursor-move select-none items-center gap-1 rounded-t-md px-2 py-1 text-xs text-white"
         style={{ backgroundColor: category.color }}
         onMouseDown={onStartMove}
+        // The name/emoji in here are plain text, so a mousedown-then-move
+        // gesture starting on top of them can be interpreted as a native
+        // "drag this selected text" instead of (or racing) our own
+        // mousemove-driven drag below. When that happens the OS shows the
+        // "no-drop" cursor and, worse, swallows the mouseup that our
+        // mousemove effect's window listener is waiting for — so the move
+        // never commits and the cluster appears to snap back to where it
+        // started. select-none (above) stops the selection that triggers
+        // it; this is the belt-and-suspenders backstop in case a selection
+        // already existed before the mousedown.
+        onDragStart={(e) => e.preventDefault()}
       >
         <input
           type="color"

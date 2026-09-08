@@ -478,3 +478,58 @@ Verified: typecheck clean, full test suite still 233/233 (nothing here touches
 Boot-tested a separate packaged instance alongside the user's own running dev session
 (only the expected disk-cache warnings), then killed only that instance's PIDs and
 confirmed the process list returned to exactly what was running beforehand.
+
+### Board ease-of-use: a stuck-drag bug and highlighting cluster nesting (2026-09-08)
+
+Two requests. The first ("clusters sometimes won't move — cursor turns into a 'no-drop'
+forbidden icon, and the box snaps back to where it started") was hard for the user to
+reproduce on demand, so this is a diagnosis-and-fix rather than a confirmed root cause —
+worth saying plainly rather than claiming certainty. `ClusterFrame`'s draggable header
+(and `BoardItemCard`'s card) move via a custom mousedown/mousemove/mouseup implementation,
+not native HTML5 drag-and-drop — but the header's content is plain text (the cluster name,
+an emoji), and neither element had `select-none`. A mousedown-then-move gesture that lands
+on that text can be interpreted by the browser as "drag this selected text" instead of (or
+racing) the app's own drag: the OS shows exactly the reported forbidden cursor, and —
+worse — a native drag swallows the `mouseup` event the app's `window` listener is waiting
+for, so the move never commits. Since nothing ever actually changed in the store, the
+cluster's next render draws it right back at its stored position: the reported "reverts to
+its original position." Matches the "hard to reproduce" complaint too, since it depends on
+exactly where the mousedown lands relative to the text, not on any particular cluster or
+action. Fixed by adding `select-none` to both `ClusterFrame`'s frame/header and
+`BoardItemCard`, plus `onDragStart={(e) => e.preventDefault()}` on both as a backstop for
+a selection that already existed before the mousedown. If this turns out not to be the
+whole story, the next time it's reproducible, checking whether a text selection was
+visible right beforehand would confirm or rule this out.
+
+The second request: a visual highlight for board nesting, in both directions the user
+asked for.
+
+- **Dragging an existing cluster onto another** already showed a dashed ghost of how much
+  the destination would need to grow, but that ghost stays hidden whenever the destination
+  is already roomy enough — leaving no signal at all that a drop right there would nest
+  into it. Split the old `resizePreview` computation into `dragNestTarget` (the target
+  cluster, always known while hovering over one) and an optional `growSize` (only when a
+  ghost is actually useful), and added `isNestTarget` to `ClusterFrame`: a solid highlight
+  ring in the destination's own color, plus a small "Drop to nest here" badge.
+- **Resizing a cluster to enclose other existing ones** — a "draw a box around them"
+  motion — previously did nothing beyond the resize itself; there was no way to
+  batch-nest several existing clusters at once, only one at a time via the drag-to-nest
+  above. Added `findClustersEnclosedBy` (boardOps.ts): the clusters fully contained by a
+  given box, excluding a given set of category ids (the resizing cluster itself, and
+  anything already nested under it — already correct, not newly enclosed). Wired into
+  `BoardView.tsx` two ways: a live `resizeEnclosedCategoryIds` set drives a matching
+  highlight (a blue ring + "Will become a child" badge, a fixed accent independent of
+  either cluster's own color so it reads consistently) on every cluster currently inside
+  the growing frame, and `handleMouseUp`'s resize branch re-runs the identical containment
+  check against the final size and calls `reparentCategory` on each one — so what got
+  highlighted during the drag is exactly what ends up nested, never a surprise either way.
+
+Verified: typecheck clean, full test suite 236/236 (three new `findClustersEnclosedBy`
+cases: only fully-contained clusters count, not merely-overlapping ones; excluded
+category ids are still excluded even if geometrically enclosed; an exact size match
+counts as contained). Production build clean. Boot-tested a separate packaged instance
+alongside the user's own running dev session, confirmed no errors beyond the expected
+disk-cache warnings, killed only that instance and confirmed the process list returned to
+its prior state. The stuck-drag fix specifically still needs the user's own hands-on
+confirmation next time it comes up, since the underlying trigger couldn't be reproduced
+in this session.

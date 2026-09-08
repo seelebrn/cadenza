@@ -5,6 +5,7 @@ import {
   computeAccommodatingSize,
   computeGridPosition,
   findClusterAtPoint,
+  findClustersEnclosedBy,
   findSnapTarget,
   getClusterMemberItems,
   getDefaultBoardId,
@@ -356,11 +357,27 @@ function BoardView(): JSX.Element {
             }
           }
         } else {
-          resizeCluster(
-            state.id,
-            Math.max(MIN_CLUSTER_WIDTH, state.startWidth + dx),
-            Math.max(MIN_CLUSTER_HEIGHT, state.startHeight + dy)
-          )
+          const width = Math.max(MIN_CLUSTER_WIDTH, state.startWidth + dx)
+          const height = Math.max(MIN_CLUSTER_HEIGHT, state.startHeight + dy)
+          resizeCluster(state.id, width, height)
+
+          // Resizing to enclose other existing clusters "draws a box
+          // around" them — nest whichever ones ended up entirely inside
+          // the grown frame. Same containment check the live highlight
+          // during the drag used (resizeEnclosedCategoryIds below), just
+          // against the final size, so what got highlighted is exactly
+          // what nests.
+          const resizingCluster = clusters.find((c) => c.id === state.id)
+          if (resizingCluster) {
+            const box = { x: resizingCluster.x, y: resizingCluster.y, width, height }
+            const excluded = new Set([
+              state.categoryId,
+              ...getDescendantCategoryIds(currentData.categories, state.categoryId)
+            ])
+            for (const enclosed of findClustersEnclosedBy(clusters, box, excluded)) {
+              reparentCategory(enclosed.categoryId, state.categoryId)
+            }
+          }
         }
       })
       setDragState(null)
@@ -429,12 +446,14 @@ function BoardView(): JSX.Element {
   }, [items, dragState, liveDelta])
 
   // While dragging a cluster over another one it would nest into on drop,
-  // shows a live "ghost" preview of how big the destination would need to
-  // grow to fit it — computed with the same candidate/target logic
+  // identifies that destination so ClusterFrame can highlight it clearly
+  // (not just show the size-change ghost below, which stays null whenever
+  // the destination is already big enough — a real, valid target the user
+  // still needs to see) — computed with the same candidate/target logic
   // handleMouseUp uses at drop time, just fed the in-progress liveDelta
   // instead of the final dx/dy, so the two can never disagree about what
   // counts as a valid target.
-  const resizePreview = useMemo(() => {
+  const dragNestTarget = useMemo(() => {
     if (!data || dragState?.kind !== 'cluster-move' || dragState.shiftKey) return null
     const finalX = dragState.startX + liveDelta.dx
     const finalY = dragState.startY + liveDelta.dy
@@ -449,8 +468,31 @@ function BoardView(): JSX.Element {
     if (!target) return null
     const childRect = { x: finalX, y: finalY, width: dragState.startWidth, height: dragState.startHeight }
     const size = computeAccommodatingSize(target, childRect, CLUSTER_NEST_PADDING)
-    if (size.width === target.width && size.height === target.height) return null
-    return { targetClusterId: target.id, width: size.width, height: size.height }
+    // A ghost outline is only useful when the target actually needs to
+    // grow — but it's still the nest target (and still gets highlighted)
+    // when it's already roomy enough to not need one.
+    const growSize = size.width === target.width && size.height === target.height ? null : size
+    return { targetClusterId: target.id, growSize }
+  }, [data, dragState, liveDelta, clusters])
+
+  // While resizing a cluster so its frame grows to enclose other existing
+  // clusters, live-highlights which ones are currently fully inside the
+  // growing box — the set that becomes this cluster's new children on
+  // release (handleMouseUp's cluster-resize branch re-runs this same
+  // containment check against the final size, so what's highlighted here
+  // is exactly what nests).
+  const resizeEnclosedCategoryIds = useMemo(() => {
+    if (!data || dragState?.kind !== 'cluster-resize') return new Set<string>()
+    const resizingCluster = clusters.find((c) => c.id === dragState.id)
+    if (!resizingCluster) return new Set<string>()
+    const width = Math.max(MIN_CLUSTER_WIDTH, dragState.startWidth + liveDelta.dx)
+    const height = Math.max(MIN_CLUSTER_HEIGHT, dragState.startHeight + liveDelta.dy)
+    const box = { x: resizingCluster.x, y: resizingCluster.y, width, height }
+    const excluded = new Set([
+      dragState.categoryId,
+      ...getDescendantCategoryIds(data.categories, dragState.categoryId)
+    ])
+    return new Set(findClustersEnclosedBy(clusters, box, excluded).map((c) => c.categoryId))
   }, [data, dragState, liveDelta, clusters])
 
   // Shared endpoint/midpoint geometry for each link — computed once and used
@@ -726,7 +768,9 @@ function BoardView(): JSX.Element {
                   depth={getCategoryDepth(data.categories, category.id)}
                   dragState={dragState}
                   liveDelta={liveDelta}
-                  resizePreview={resizePreview?.targetClusterId === cluster.id ? resizePreview : null}
+                  resizePreview={dragNestTarget?.targetClusterId === cluster.id ? dragNestTarget.growSize : null}
+                  isNestTarget={dragNestTarget?.targetClusterId === cluster.id}
+                  isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}
                   onStartMove={(e) => {
                     const descendantCategoryIds = getDescendantCategoryIds(data.categories, category.id)
                     const groupCategoryIds = [category.id, ...descendantCategoryIds]
@@ -790,6 +834,7 @@ function BoardView(): JSX.Element {
                     setDragState({
                       kind: 'cluster-resize',
                       id: materializeCluster(cluster),
+                      categoryId: category.id,
                       startMouseX: e.clientX,
                       startMouseY: e.clientY,
                       startWidth: cluster.width,

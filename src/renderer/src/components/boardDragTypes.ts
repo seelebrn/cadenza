@@ -48,6 +48,10 @@ export type DragState =
   | {
       kind: 'cluster-resize'
       id: string
+      /** Needed to exclude this cluster's own category (and its existing
+       * descendants) when checking which other clusters the growing box
+       * now encloses — see findClustersEnclosedBy. */
+      categoryId: string
       startMouseX: number
       startMouseY: number
       startWidth: number

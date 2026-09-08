@@ -16,6 +16,7 @@ import {
   describeBoardItem,
   findClusterAtPoint,
   findClusterForCategoryOnBoard,
+  findClustersEnclosedBy,
   findSnapTarget,
   getClusterMemberItems,
   getDefaultBoardId,
@@ -177,6 +178,30 @@ describe('computeAccommodatingSize', () => {
   it('does NOT accommodate a child poking out the top/left — documented trade-off', () => {
     const childPokesLeft = { x: 50, y: 150, width: 40, height: 50 }
     expect(computeAccommodatingSize(parent, childPokesLeft, 20)).toEqual({ width: 280, height: 200 })
+  })
+})
+
+// --- findClustersEnclosedBy ------------------------------------------------
+
+describe('findClustersEnclosedBy', () => {
+  const box = { x: 0, y: 0, width: 400, height: 400 }
+  const inside: BoardCluster = { id: 'inside', boardId: 'b1', categoryId: 'A', x: 50, y: 50, width: 100, height: 100, createdAt: '0' }
+  const partiallyOut: BoardCluster = { id: 'partial', boardId: 'b1', categoryId: 'B', x: 350, y: 50, width: 100, height: 100, createdAt: '0' }
+  const fullyOutside: BoardCluster = { id: 'outside', boardId: 'b1', categoryId: 'C', x: 500, y: 500, width: 50, height: 50, createdAt: '0' }
+
+  it('only includes clusters entirely inside the box, not ones merely overlapping it', () => {
+    const result = findClustersEnclosedBy([inside, partiallyOut, fullyOutside], box, new Set())
+    expect(result.map((c) => c.id)).toEqual(['inside'])
+  })
+
+  it('excludes categories in excludeCategoryIds even if geometrically enclosed', () => {
+    const result = findClustersEnclosedBy([inside, partiallyOut, fullyOutside], box, new Set(['A']))
+    expect(result).toEqual([])
+  })
+
+  it('a cluster exactly matching the box counts as enclosed (inclusive bounds)', () => {
+    const exact: BoardCluster = { id: 'exact', boardId: 'b1', categoryId: 'D', x: 0, y: 0, width: 400, height: 400, createdAt: '0' }
+    expect(findClustersEnclosedBy([exact], box, new Set()).map((c) => c.id)).toEqual(['exact'])
   })
 })
 

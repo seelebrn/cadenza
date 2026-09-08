@@ -61,6 +61,10 @@ function BoardItemCard({
       onDoubleClick={() => {
         if (item.refType === 'code') setInspectedCodeId(item.refId)
       }}
+      // See ClusterFrame.tsx's identical guard — select-none (above) stops
+      // a mousedown-on-text gesture from starting a native text-drag, and
+      // this is the backstop in case a selection already existed.
+      onDragStart={(e) => e.preventDefault()}
     >
       <div className="mb-1 flex items-center justify-between gap-1">
         <span className="flex items-center gap-1 truncate text-[10px] uppercase text-slate-400">

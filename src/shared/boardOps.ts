@@ -98,6 +98,29 @@ export function computeAccommodatingSize(parent: Rect, child: Rect, padding: num
   }
 }
 
+/**
+ * The clusters fully enclosed by `box` — used when resizing a cluster so
+ * its frame grows to visually "draw a box around" other existing
+ * clusters: whichever ones end up entirely inside become that cluster's
+ * new children on release. `excludeCategoryIds` leaves out the cluster
+ * being resized itself and anything already nested under it (already
+ * correctly a child, not a *new* one this resize is about to create).
+ *
+ * Containment, not overlap — a cluster only half-covered by the growing
+ * box isn't a candidate yet, matching what the user actually sees ("is
+ * this one fully inside the box I'm drawing").
+ */
+export function findClustersEnclosedBy(
+  clusters: BoardCluster[],
+  box: Rect,
+  excludeCategoryIds: Set<string>
+): BoardCluster[] {
+  return clusters.filter((c) => {
+    if (excludeCategoryIds.has(c.categoryId)) return false
+    return c.x >= box.x && c.y >= box.y && c.x + c.width <= box.x + box.width && c.y + c.height <= box.y + box.height
+  })
+}
+
 // --- Boards ---
 
 export function getDefaultBoardId(boards: BoardRecord[]): string | null {

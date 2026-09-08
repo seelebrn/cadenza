@@ -1,4 +1,7 @@
 import type { ImportedDocument, ProjectData, RecentProjectEntry, SerializedAssets } from './types'
+import type { Report } from './reportModel'
+
+export type ReportExportFormat = 'html' | 'docx' | 'pdf'
 
 export interface OpenProjectResult {
   data: ProjectData
@@ -28,5 +31,17 @@ export interface CadenzaApi {
   document: {
     /** Opens a native file picker (.docx/.odt/.txt) and imports the chosen file. Null = user canceled. */
     importDialog: () => Promise<ImportedDocument | null>
+  }
+  export: {
+    /** Renders `report` to the given format and shows a save dialog for it.
+     * Returns the chosen path, or null if the user canceled. */
+    report: (report: Report, format: ReportExportFormat, suggestedName: string) => Promise<string | null>
+    /**
+     * Renders a pre-captured HTML snapshot of a board (already carrying its
+     * own inline styles and a copy of the app's stylesheet — see
+     * BoardView.tsx's export handler) to a single-page PDF sized exactly to
+     * `widthPx`/`heightPx`, and shows a save dialog. Null = user canceled.
+     */
+    boardPdf: (html: string, widthPx: number, heightPx: number, suggestedName: string) => Promise<string | null>
   }
 }

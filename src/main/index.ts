@@ -1,13 +1,25 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import type { ProjectData, SerializedAssets } from '../shared/types'
+import type { ReportExportFormat } from '../shared/api'
 import { importDocumentDialog } from './import'
 import { createEmptyProject, readProjectFile, writeProjectFile } from './projectFile'
 import { addRecentProject, getRecentProjects } from './recentProjects'
+import { renderReportToDocx } from './export/docxRenderer'
+import { renderHtmlToPdf } from './export/pdfRenderer'
+import { renderReportToHtml } from '../shared/reportModel'
+import type { Report } from '../shared/reportModel'
 
 const isDev = !app.isPackaged
 
 const PROJECT_FILE_FILTERS = [{ name: 'Cadenza Project', extensions: ['qdaproj'] }]
+
+const REPORT_FILE_FILTERS: Record<ReportExportFormat, { name: string; extensions: string[] }[]> = {
+  html: [{ name: 'HTML', extensions: ['html'] }],
+  docx: [{ name: 'Word Document', extensions: ['docx'] }],
+  pdf: [{ name: 'PDF', extensions: ['pdf'] }]
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -98,9 +110,46 @@ function registerDocumentHandlers(): void {
   ipcMain.handle('document:import-dialog', () => importDocumentDialog())
 }
 
+function registerExportHandlers(): void {
+  ipcMain.handle(
+    'export:report',
+    async (_event, report: Report, format: ReportExportFormat, suggestedName: string) => {
+      const result = await dialog.showSaveDialog({
+        defaultPath: `${suggestedName}.${format}`,
+        filters: REPORT_FILE_FILTERS[format]
+      })
+      if (result.canceled || !result.filePath) return null
+
+      if (format === 'html') {
+        await writeFile(result.filePath, renderReportToHtml(report), 'utf8')
+      } else if (format === 'docx') {
+        await writeFile(result.filePath, await renderReportToDocx(report))
+      } else {
+        await writeFile(result.filePath, await renderHtmlToPdf(renderReportToHtml(report)))
+      }
+      return result.filePath
+    }
+  )
+
+  ipcMain.handle(
+    'export:board-pdf',
+    async (_event, html: string, widthPx: number, heightPx: number, suggestedName: string) => {
+      const result = await dialog.showSaveDialog({
+        defaultPath: `${suggestedName}.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      })
+      if (result.canceled || !result.filePath) return null
+      const pdf = await renderHtmlToPdf(html, { widthPx, heightPx })
+      await writeFile(result.filePath, pdf)
+      return result.filePath
+    }
+  )
+}
+
 app.whenReady().then(() => {
   registerProjectHandlers()
   registerDocumentHandlers()
+  registerExportHandlers()
   createWindow()
 
   app.on('activate', () => {

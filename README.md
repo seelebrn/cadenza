@@ -42,7 +42,10 @@ npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
 - [x] Phase 5 — Retrieval (by code/note) + Cluster management (AQA question log)
 - [x] Phase 6 — Visual grouping board (drag-and-drop clustering of codes/notes/quotes)
 - [x] Phase 7 — Cross-case comparison (Kaufmann contrastive view, IPA-style GECT table)
-- [ ] Phase 8 — Excel import (row=case) + exporters (annotated .docx, .xlsx reports, backup)
+- [x] Phase 8 — Exporters (board PDF, codebook/notes/comparison reports in docx/html/pdf)
+  — redefined by the user to drop the original plan's Excel-import-as-cases and .xlsx
+  report ideas in favor of a document-report exporter; Excel import (row=case) specifically
+  is not built and stays a backlog item if it's ever wanted
 - [ ] Phase 9 — Packaging polish (icons, verified Windows + macOS builds)
 
 ### Methodology reality-check (2026-09-07)
@@ -653,3 +656,89 @@ sub-clusters actually grid inside their superordinates with zero overlap, and th
 500-code/35-cluster layout still computes in ~1ms. Production build clean. Boot-tested a
 fresh packaged instance after every change in this batch, no errors beyond (when another
 instance happened to be running) the expected shared-user-data-dir cache warnings.
+
+### Phase 8: exporters (2026-09-08)
+
+The user redefined Phase 8's scope directly rather than the original plan's one-liner
+(Excel-import-as-cases + `.xlsx` reports): a board PDF export, a codebook export, a notes
+export showing which clusters they're filed under, a codebook+verbatim variant, a
+notes+clusters+verbatim variant, a configurable words-of-context option, and doc/docx/odt/
+html/pdf formats. Talked through the format list before building: legacy binary `.doc` has
+no viable JS writer and nothing modern needs it (dropped, `.docx` already covers "Word
+doc"); native `.odt` has no mature JS library either, and OpenOffice/LibreOffice already
+open `.docx` natively (dropped, matching the original plan's own reasoning for deferring
+it); landed on **docx/html/pdf**. Also added, at the user's confirmation: a code-frequency
+table, and exporting the cross-case comparison (Phase 7) matrix.
+
+Built as one flexible report rather than four fixed report types, since the four listed
+variants (codebook / codebook+verbatim / notes+clusters / notes+clusters+verbatim) are all
+just checkbox combinations of the same underlying content:
+
+- **`reportModel.ts`** (shared): a tiny format-agnostic document model — headings,
+  paragraphs (with `quote`/`meta` styling), tables — plus `renderReportToHtml`. Every
+  format renders the *same* Report, so the actual content logic is written once.
+- **`reportBuilders.ts`** (renderer/src/lib, since it needs `buildClusterTree` from that
+  same directory): `buildProjectReport(data, options)` assembles one Report from whichever
+  sections are checked — codes (with hierarchy + definitions), notes (walked through the
+  cluster tree, a question-cluster labeled with curly quotes matching the app's existing
+  AQA convention, plus an "Unfiled notes" section), cross-case comparison (the codes ×
+  cases matrix), each optionally with verbatim quotes and N words of surrounding context
+  (reusing `getSurroundingWords`, the same mechanism the code-info window already used —
+  user-configurable in the dialog, defaulting to 15), plus an independent code-frequency
+  table toggle.
+- **`docxRenderer.ts`** (main process, via the new `docx` package dependency) and the
+  PDF path — a real PDF-generation library turned out to be unnecessary: Electron's own
+  `webContents.printToPDF` renders a hidden window's HTML straight to PDF, so `pdfRenderer.ts`
+  is just "write the HTML to a temp file, load it in a `show:false` window, print it."
+  A custom `pageSize` (in inches, converted from the content's actual CSS pixel dimensions)
+  produces one page sized exactly to fit — used for the board export below; report PDFs
+  print at a normal A4 page and paginate naturally.
+- New **Export** tab (`ExportView.tsx`) with the checkboxes described above and a
+  format picker, wired through `window.api.export.report` (shared/api.ts, preload,
+  main/index.ts IPC handlers).
+
+**Board PDF** works differently, and lives in `BoardView.tsx` itself rather than the
+Export tab: rather than reconstructing the board's visual layout as a second HTML
+generator (risking it drifting from what the board actually looks like), it clones the
+*live* canvas DOM directly (`canvasRef`), forces its zoom transform back to `none` and
+resizes it to the board's actual full content bounding box (not the current viewport —
+always the whole board regardless of what zoom the user happens to be at), and copies the
+app's own already-parsed stylesheets (`document.styleSheets`) inline so the exported page
+looks the same without needing to locate the compiled CSS bundle on disk. Sent over IPC as
+one HTML string to `window.api.export.boardPdf`, which prints it at a custom page size
+matching that bounding box — one page, the whole board, actual size.
+
+One real bug caught along the way: `pdfRenderer.ts`'s hidden `BrowserWindow` was first
+written with `webPreferences.offscreen: true`, which switches Chromium to a separate
+off-screen-rendering pipeline (meant for continuously capturing frames, e.g. video) —
+manual testing hit real GPU-state errors from it. Removed; a plain `show: false` window
+still renders normally through the standard compositor without ever showing an OS window,
+and is what `printToPDF` is actually meant to be used against.
+
+Also, unrelated to exporting but raised in the same conversation: the code-info window
+(double-click a code anywhere to see its usage + verbatim instances) had no equivalent for
+notes. Added `NoteInfoModal.tsx`, wired to the same double-click convention (a note card in
+the Workspace notes tree, or a note card on the board) via a new `inspectedNoteId` UI-store
+flag mirroring `inspectedCodeId`. Simpler than the code version — a note has at most one
+verbatim quote (the segment it's attached to, if any), not a list of instances — and adds
+what a note card's inline preview doesn't have room for: its full tag list and which
+cluster(s) it's filed under, plus the same word-of-context toggle.
+
+Verified: typecheck clean, full suite 269/269 (13 new `reportBuilders.ts` tests covering
+every section and combination; 4 new `reportModel.ts` HTML-rendering tests including HTML-
+escaping of user content; 2 new `docxRenderer.ts` tests, actually checking the produced
+buffer starts with the ZIP magic bytes a real `.docx` always has — genuine verification,
+not just "didn't throw"). `pdfRenderer.ts` itself isn't unit-tested (needs a real
+`BrowserWindow`, not just Node) — a standalone Electron-script smoke test of the
+`printToPDF` call outside the full app (separate from the real app boot-testing) is what
+actually caught the `offscreen` bug above, though a fully conclusive independent re-run of
+that same standalone script proved unreliable in this sandboxed session afterward. That
+gap closed itself, though: partway through this work the user tried both export paths live
+in their own running session against the real `LargeProjectTest.qdaproj` — both a report
+export (`Large Test Project (500 codes).html`, correctly walking the notes/cluster
+hierarchy, including the three sub-clusters that had been dragged into root position
+during earlier board testing, each rendered as their own top-level section rather than
+nested) and a board PDF export (`Main board.pdf`, valid `%PDF-1.4`, ~2.3MB for the full
+500-code board) landed in the project folder as real, valid, substantial files — genuine
+end-to-end confirmation of the exact path the sandboxed smoke test couldn't conclusively
+finish checking. Production build clean throughout.

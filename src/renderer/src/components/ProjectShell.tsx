@@ -6,6 +6,8 @@ import BoardView from './BoardView'
 import CodeInfoModal from './CodeInfoModal'
 import DocumentList from './DocumentList'
 import DocumentReader from './DocumentReader'
+import ExportView from './ExportView'
+import NoteInfoModal from './NoteInfoModal'
 import RightSidebar from './RightSidebar'
 
 function ProjectShell(): JSX.Element | null {
@@ -116,6 +118,12 @@ function ProjectShell(): JSX.Element | null {
             >
               Board
             </button>
+            <button
+              className={`px-3 py-1 ${mainView === 'export' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'}`}
+              onClick={() => setMainView('export')}
+            >
+              Export
+            </button>
           </div>
           <div className="flex gap-2">
             <button
@@ -182,8 +190,14 @@ function ProjectShell(): JSX.Element | null {
           <BoardView />
         </div>
       )}
+      {mainView === 'export' && (
+        <div className="flex-1 overflow-hidden">
+          <ExportView />
+        </div>
+      )}
 
       <CodeInfoModal />
+      <NoteInfoModal />
     </div>
   )
 }

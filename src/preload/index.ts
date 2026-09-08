@@ -12,6 +12,11 @@ const api: CadenzaApi = {
   },
   document: {
     importDialog: () => ipcRenderer.invoke('document:import-dialog')
+  },
+  export: {
+    report: (report, format, suggestedName) => ipcRenderer.invoke('export:report', report, format, suggestedName),
+    boardPdf: (html, widthPx, heightPx, suggestedName) =>
+      ipcRenderer.invoke('export:board-pdf', html, widthPx, heightPx, suggestedName)
   }
 }
 

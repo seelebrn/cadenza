@@ -483,6 +483,7 @@ function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Elem
   const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const setSuggestedCodeName = useWorkspaceUiStore((s) => s.setSuggestedCodeName)
   const setActiveSidebarTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
+  const setInspectedNoteId = useWorkspaceUiStore((s) => s.setInspectedNoteId)
 
   const [isEditing, setIsEditing] = useState(false)
   const [questionDraft, setQuestionDraft] = useState(note.question ?? '')
@@ -529,6 +530,11 @@ function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Elem
         e.dataTransfer.setData('text/plain', note.id)
         e.dataTransfer.setData(DRAG_KIND_MIME, 'note')
         e.dataTransfer.setData(SOURCE_CLUSTER_MIME, sourceClusterId ?? '')
+      }}
+      onDoubleClick={() => {
+        // Not while actively editing — a double-click there is normal text
+        // selection inside the textarea, not "open the info window".
+        if (!isEditing) setInspectedNoteId(note.id)
       }}
     >
       <div className="mb-1 flex items-center justify-between gap-2 text-slate-400">

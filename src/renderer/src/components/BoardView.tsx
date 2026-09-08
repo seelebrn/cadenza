@@ -84,6 +84,13 @@ function BoardView(): JSX.Element {
   const [zoom, setZoom] = useState(1)
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  // The actual content layer (holds every cluster/item, sized to the full
+  // fixed canvas and zoom-transformed) — captured directly for "Export as
+  // PDF" rather than trying to reconstruct the same DOM from React state a
+  // second time, so the export can never visually drift from what's
+  // actually on screen.
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
   const pendingZoomAnchorRef = useRef<{
     contentX: number
     contentY: number
@@ -249,6 +256,60 @@ function BoardView(): JSX.Element {
     } else {
       pendingZoomAnchorRef.current = { contentX: centerX, contentY: centerY, offsetX, offsetY }
       setZoom(nextZoom)
+    }
+  }
+
+  // "Export as PDF": captures the *live* canvas DOM (clusters + item cards,
+  // however they're actually rendered right now) rather than rebuilding an
+  // equivalent HTML tree from scratch — the export can never visually
+  // drift from what the board actually looks like. Always exports the
+  // full content at 100% zoom (ignoring whatever zoom the user happens to
+  // be viewing at) so the PDF is the whole board, not just whatever's
+  // currently in the viewport.
+  async function handleExportBoardPdf(): Promise<void> {
+    if (!currentBoard || !canvasRef.current) return
+    const boxes = [
+      ...clusters.map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
+      ...items.map((i) => ({ x: i.x, y: i.y, width: CARD_WIDTH, height: CARD_HEIGHT }))
+    ]
+    if (boxes.length === 0) {
+      window.alert('Nothing on this board yet to export.')
+      return
+    }
+    const pageWidth = Math.max(...boxes.map((b) => b.x + b.width)) + FIT_VIEW_PADDING
+    const pageHeight = Math.max(...boxes.map((b) => b.y + b.height)) + FIT_VIEW_PADDING
+
+    setIsExportingPdf(true)
+    try {
+      // The app's own compiled styles (Tailwind utility classes and
+      // everything else) — read straight from the live page's already-
+      // parsed stylesheets rather than trying to locate the CSS bundle
+      // file on disk, so this works identically in dev and in a packaged
+      // build. A stylesheet that throws on .cssRules (a cross-origin one,
+      // not expected here but cheap to guard) is just skipped.
+      const css = Array.from(document.styleSheets)
+        .map((sheet) => {
+          try {
+            return Array.from(sheet.cssRules)
+              .map((rule) => rule.cssText)
+              .join('\n')
+          } catch {
+            return ''
+          }
+        })
+        .join('\n')
+
+      const snapshot = canvasRef.current.cloneNode(true) as HTMLElement
+      snapshot.style.transform = 'none'
+      snapshot.style.width = `${pageWidth}px`
+      snapshot.style.height = `${pageHeight}px`
+
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${css}\nhtml,body{margin:0;padding:0;}</style></head><body>${snapshot.outerHTML}</body></html>`
+
+      const savedPath = await window.api.export.boardPdf(html, pageWidth, pageHeight, currentBoard.name)
+      if (savedPath) window.alert(`Exported to ${savedPath}`)
+    } finally {
+      setIsExportingPdf(false)
     }
   }
 
@@ -733,6 +794,16 @@ function BoardView(): JSX.Element {
               Reset placement
             </button>
           )}
+          {currentBoard && (
+            <button
+              className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100 disabled:opacity-40"
+              title="Export this board's full layout (not just what's currently visible) as a single-page PDF"
+              disabled={isExportingPdf}
+              onClick={() => void handleExportBoardPdf()}
+            >
+              {isExportingPdf ? 'Exporting…' : 'Export as PDF'}
+            </button>
+          )}
           <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
           <button
             className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
@@ -766,6 +837,7 @@ function BoardView(): JSX.Element {
       ) : (
         <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-50">
           <div
+            ref={canvasRef}
             className="relative"
             style={{
               width: CANVAS_WIDTH,

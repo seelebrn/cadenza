@@ -34,6 +34,7 @@ function BoardItemCard({
   const removeItemFromBoard = useProjectStore((s) => s.removeItemFromBoard)
   const addItemToBoard = useProjectStore((s) => s.addItemToBoard)
   const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)
+  const setInspectedNoteId = useWorkspaceUiStore((s) => s.setInspectedNoteId)
 
   if (!data) return null
   const description = describeBoardItem(data, item)
@@ -60,6 +61,7 @@ function BoardItemCard({
       }}
       onDoubleClick={() => {
         if (item.refType === 'code') setInspectedCodeId(item.refId)
+        else if (item.refType === 'note') setInspectedNoteId(item.refId)
       }}
       // See ClusterFrame.tsx's identical guard — select-none (above) stops
       // a mousedown-on-text gesture from starting a native text-drag, and

@@ -8,7 +8,7 @@ export interface ActiveSpan {
 }
 
 export type SidebarTab = 'codes' | 'notes'
-export type MainView = 'workspace' | 'analysis' | 'board'
+export type MainView = 'workspace' | 'analysis' | 'board' | 'export'
 export type AnalysisTab = 'retrieval' | 'categories' | 'compare'
 
 const SIDEBAR_WIDTH_KEY = 'cadenza.sidebarWidth'
@@ -79,6 +79,11 @@ interface WorkspaceUiState {
   inspectedCodeId: string | null
   setInspectedCodeId: (id: string | null) => void
 
+  /** Same idea as inspectedCodeId, for notes — double-clicked in the
+   * Workspace notes tree or a board card. */
+  inspectedNoteId: string | null
+  setInspectedNoteId: (id: string | null) => void
+
   clear: () => void
 
   /** Resets everything that references *this project's* ids (selected
@@ -126,6 +131,9 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   inspectedCodeId: null,
   setInspectedCodeId: (id) => set({ inspectedCodeId: id }),
 
+  inspectedNoteId: null,
+  setInspectedNoteId: (id) => set({ inspectedNoteId: id }),
+
   clear: () => set({ activeSpan: null }),
 
   resetForProjectSwitch: () =>
@@ -137,6 +145,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
       activeSidebarTab: 'codes',
       activeSpan: null,
       suggestedCodeName: null,
-      inspectedCodeId: null
+      inspectedCodeId: null,
+      inspectedNoteId: null
     })
 }))

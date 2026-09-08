@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Full-bleed square, no pre-rounded corners: macOS applies its own
+       squircle mask to the source PNG, and a pre-rounded square would
+       double up with (or fight) that mask. Windows/Linux use it as-is. -->
+  <rect width="1024" height="1024" fill="#0f172a"/>
+
+  <!-- A cluster boundary, echoing the board's own dashed cluster-frame. -->
+  <circle cx="512" cy="512" r="300" fill="none" stroke="#475569" stroke-width="14" stroke-dasharray="30 24"/>
+
+  <!-- Connections between items, same idea as the board's link lines. -->
+  <g stroke="#94a3b8" stroke-width="11" stroke-opacity="0.55" stroke-linecap="round">
+    <line x1="400" y1="430" x2="620" y2="380"/>
+    <line x1="400" y1="430" x2="560" y2="620"/>
+    <line x1="400" y1="430" x2="380" y2="640"/>
+    <line x1="560" y1="620" x2="680" y2="560"/>
+  </g>
+
+  <!-- Items/codes, in the app's own code-color palette. -->
+  <circle cx="400" cy="430" r="72" fill="#3b82f6"/>
+  <circle cx="620" cy="380" r="56" fill="#ef4444"/>
+  <circle cx="560" cy="620" r="64" fill="#22c55e"/>
+  <circle cx="380" cy="640" r="48" fill="#f97316"/>
+  <circle cx="680" cy="560" r="44" fill="#8b5cf6"/>
+</svg>

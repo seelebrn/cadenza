@@ -1,0 +1,24 @@
+name: CI
+
+# Fast feedback on every push/PR to main: typecheck + the full pure-logic
+# test suite. Deliberately doesn't build/package anything — that's what
+# release.yml is for, and it's much slower (three OSes, full Electron
+# bundling). One OS is enough here since nothing this checks is
+# platform-specific (tsc and vitest, not Electron itself).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

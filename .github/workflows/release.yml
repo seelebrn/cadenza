@@ -1,0 +1,62 @@
+name: Release
+
+# Builds Windows, macOS, and Linux installers, each on its own native
+# runner — the whole reason this runs in CI rather than being built
+# locally: a macOS .dmg genuinely cannot be produced on Windows (Apple's
+# own tooling is required), and Windows installer packaging hit a
+# same-machine limitation of its own (electron-builder's winCodeSign
+# helper archive contains macOS-only symlinked files that fail to extract
+# without elevated Windows permissions — not present here, but GitHub's
+# windows-latest runner doesn't have this restriction). Building on each
+# platform's own runner sidesteps every one of these issues at once,
+# rather than fighting cross-compilation.
+#
+# Triggered by pushing a version tag (`git tag v0.1.0 && git push origin
+# v0.1.0`) — each platform's build is uploaded straight to a GitHub
+# Release for that tag (created automatically if it doesn't exist yet),
+# so getting the app is just "download the file for your OS from the
+# Releases page" for anyone, no build step on their end.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: --win
+          - os: macos-latest
+            platform: --mac
+          - os: ubuntu-latest
+            platform: --linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder ${{ matrix.platform }} --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

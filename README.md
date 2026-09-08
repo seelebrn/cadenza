@@ -46,7 +46,11 @@ npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
   — redefined by the user to drop the original plan's Excel-import-as-cases and .xlsx
   report ideas in favor of a document-report exporter; Excel import (row=case) specifically
   is not built and stays a backlog item if it's ever wanted
-- [ ] Phase 9 — Packaging polish (icons, verified Windows + macOS builds)
+- [x] Phase 9 — Packaging polish (icon, Windows/macOS/Linux builds via CI)
+  — extended by the user to include Linux; local Windows packaging is verified down to the
+  unpacked app (real installer files need CI — see below), macOS/Linux builds themselves
+  are only verifiable in CI (no Mac available locally, and Linux packaging from Windows is
+  unreliable) — pending the first real tag push to confirm end-to-end
 
 ### Methodology reality-check (2026-09-07)
 
@@ -853,3 +857,64 @@ compatibility directly against `LargeProjectTest.qdaproj` and `MultiCaseTest.qda
 genuinely pre-dating this field (confirmed `'definition' in category` was `false` on the
 raw parsed JSON before normalizing) — both load cleanly with `definition` backfilled to
 `''`. Production build clean, boot-tested cleanly.
+
+### Phase 9: packaging (icon, Windows/macOS/Linux via CI) (2026-09-08)
+
+Extended by the user beyond the original plan's Windows+macOS to include Linux too, with
+one constraint stated up front: it has to stay simple for end users — "possibly dozens of
+people" downloading this, not just the developer.
+
+**Icon**: the app had none — every build used Electron's own default icon. Designed one in
+plain SVG (`build/icon-source.svg`, rasterized to `build/icon.png` at 1024×1024 via a
+one-time `sharp` devDependency): a dashed circle — the same cluster-boundary motif the
+board draws around a theme — containing a handful of connected, differently-colored dots in
+the app's own code-color palette, echoing the board's own linked-cards visual. Checked it
+down to a 64×64 render to confirm it still reads clearly at taskbar size, not just at full
+resolution. `electron-builder` auto-generates the platform-specific `.ico`/`.icns` from this
+one PNG — confirmed the `.ico` path works (see below); `.icns` generation itself can only be
+confirmed on the macOS CI runner, not locally.
+
+**Windows packaging hit a real, well-known environmental limitation**: `electron-builder`
+unconditionally downloads and extracts a `winCodeSign` helper archive for *any* Windows
+target (installer or portable, with or without actual code-signing configured), and that
+archive contains macOS-only symlinked files. Extracting them needs either Administrator
+rights or Windows "Developer Mode" enabled — neither available in this sandboxed
+environment — so both `nsis` and `portable` targets fail at that one step. The app itself
+still packages successfully up to that point, though: confirmed `release/win-unpacked/
+Cadenza.exe` builds correctly (icon included) and actually launches as a real packaged app
+(not a dev-mode run) with no errors beyond the usual benign shared-cache warnings. Asked the
+user how to handle the installer step specifically (enable Developer Mode locally, or
+build installers via CI instead) — given the "has to stay simple for many people" framing,
+CI was the clear answer, and it was already going to be needed for macOS anyway (a `.dmg`
+genuinely cannot be produced outside macOS — Apple's own tooling is required, no way around
+it) and produces more reliable Linux output than cross-building from Windows.
+
+**Added GitHub Actions**, two workflows:
+- `.github/workflows/ci.yml` — typecheck + the full test suite on every push/PR to `main`.
+  Fast, one Linux runner, since nothing it checks is platform-specific.
+- `.github/workflows/release.yml` — triggered by pushing a version tag (`git tag v0.1.0 &&
+  git push origin v0.1.0`) or manually. Runs the test suite first (`needs: test`), then
+  builds on a 3-way matrix — `windows-latest`/`macos-latest`/`ubuntu-latest`, each running
+  `electron-builder`'s own platform flag — so every OS builds and packages on its own native
+  platform, sidestepping the winCodeSign issue and the "can't build mac from Windows"
+  limitation at once, rather than fighting cross-compilation. `electron-builder --publish
+  always` (electron-builder's own built-in GitHub-release publishing, configured via a new
+  `publish` block in `package.json`'s `build` config) uploads each platform's output
+  straight to a GitHub Release for that tag, created automatically if it doesn't exist yet
+  — so getting the app, for anyone, is just "download the file for your OS from the
+  Releases page," no build step on their end. `package.json` also gained a `build:linux`
+  script (`nsis`/`dmg`+`zip` already existed for win/mac) and a `linux` block in the build
+  config (`AppImage` — the most portable single Linux format, picked as the safe first
+  target rather than also adding `deb`/`rpm` speculatively before even one Linux build has
+  actually been confirmed to work).
+
+Verified: typecheck clean, full suite still 271/271 (no application code touched — this
+entire phase is build configuration, CI workflows, and one new icon asset), production
+`electron-vite build` clean. Confirmed locally, as far as this environment allows: the
+Windows unpacked app builds correctly with the new icon and boot-tests cleanly as a real
+packaged (non-dev) run; adding the `publish` config didn't change or break the local
+unpacked build (no network publish attempt without an explicit `--publish` flag, confirmed
+by re-running it). Not yet confirmed: an actual installer file for any of the three
+platforms, and the release workflow itself end-to-end — both need a real tag push to
+observe, which is a public action on the user's own repository and wasn't done without
+asking first.

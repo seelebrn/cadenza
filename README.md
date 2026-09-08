@@ -569,3 +569,87 @@ omitted rather than carried as explicit zeros, multiple codes counted independen
 Production build clean. Boot-tested a fresh packaged instance (no other instance was
 running this time, so no shared-user-data-dir warnings either — a clean launch with no
 errors at all), then killed it and confirmed no electron process was left running.
+
+### A large synthetic test project, and what using it surfaced (2026-09-08)
+
+Generated `LargeProjectTest.qdaproj` (untracked, matches the existing `*.qdaproj` gitignore
+rule) to usability-test a big hierarchy: 500 codes, 30 clusters, 5 superordinate clusters,
+nothing else — deliberately minimal so opening the Board immediately exercises the
+auto-layout at that scale. Verified end-to-end through the app's own logic before handing
+it over (unzip -> parse -> `normalizeProjectData` -> `getVisibleBoardClusters`/
+`getVisibleBoardItems`) rather than just asserting it would probably work.
+
+Using it surfaced two real issues, plus two follow-on feature requests once the grid idea
+proved out.
+
+**Ctrl/Cmd+wheel zoom silently did nothing on a freshly opened project.** The wheel
+listener effect had an empty dependency array, attached once to
+`scrollContainerRef.current` on mount. But the scrollable container only exists once
+`currentBoard` resolves to a real board — on a fresh mount `currentBoard` is still `null`
+on the very first render (the effect that fixes a stale/empty `selectedBoardId` hasn't run
+yet), so the listener attached to a still-`null` ref and never got a second chance once the
+container actually appeared. Not specific to a large project at all — reproducible on
+*any* fresh Board-tab mount — just more consistently hit while opening a brand new project
+for the first time, which is exactly what surfaced it. Fixed by depending on `currentBoard`
+instead of `[]`, so the effect re-attaches once the container exists.
+
+**Clusters defaulted to a single column.** `getVisibleBoardClusters`'s root-level
+auto-layout stacked every root category in one column, sized to content — safe (no
+fixed-size grid cell could work when height varies this much with descendant count) but,
+at 5 superordinates each containing a stack of sub-clusters, produced an extremely tall,
+narrow board. Rewrote it as a multi-column masonry pack: `packGridColumnCount` picks a
+near-square column count (`ceil(sqrt(n))`, capped at 6) from however many siblings there
+are, and each next root goes into whichever column currently has the least height used so
+far — same overlap-proof guarantee a single column always had (a column only ever grows
+from its own real content), just spread across the board's width instead of stacked into
+one strip.
+
+Immediately after seeing that, two follow-on requests arrived, both extending the same
+idea further:
+
+- **Sub-clusters inside a superordinate, gridded too** — not just the root level. This
+  needed more than reusing the column-packing loop: since a grid's *width* need depends on
+  its children (unlike a single column, which just took whatever width its parent handed
+  down), sizing had to become genuinely bottom-up. Replaced the old top-down-width/
+  bottom-up-height split (`computeHeight` + `placeCategory`) with `computeSize` (bottom-up,
+  determines a virtual category's width *and* height from a grid of its own children) +
+  `placeCategory` (top-down, now just places using sizes `computeSize` already settled,
+  re-deriving the identical grid assignment deterministically so the two can never
+  disagree). An explicit (frozen) category's own size is still never recomputed, same rule
+  as always — its children still get gridded, just within whatever room the frozen box
+  actually gives them.
+- **Codes/notes inside a cluster, gridded too** — the member cards themselves, not just
+  the cluster shapes containing them. Added `ownMemberGridSize` (only codes/notes factor
+  in; a segment/quote filed directly under a category always keeps its own explicit
+  position, unaffected either way) using the same `packGridColumnCount` heuristic, folded
+  into both `computeSize` (a cluster's own box now widens/shortens to fit a grid of its
+  member cards, not just a grid of its nested children) and `getVisibleBoardItems`'s
+  per-cluster positioning (so cards actually land in the grid the box was sized for, never
+  overflowing it).
+
+One heuristic (`packGridColumnCount`) now drives every grid-packing decision in this file —
+root clusters on the board, a cluster's nested children, and a cluster's own member
+cards — so there's one column-count rule to reason about instead of three.
+
+**"Reset placement" button.** With sizing now driven by three different grids at three
+different levels, a fast way to discard whatever's been dragged/resized and see the
+current auto-layout fresh became worth having on its own, not just as a side effect of a
+membership change. Added `resetBoardLayout` (projectStore.ts) — a thin wrapper around the
+already-existing `resetDefaultBoardClusterLayout`, guarded to only ever act on the actual
+default board (that op doesn't check `board.isDefault` itself; running it against a
+non-default board — which has no auto-layout to fall back to — would just empty it out).
+The button only renders when the current board *is* the default one, and confirms first
+("Any positions you've dragged or resized here will be lost — the underlying codes, notes,
+and clusters themselves are not affected") since it's a real, if easily-avoidable, loss of
+manual arrangement.
+
+Verified: typecheck clean, full suite 250/250 (13 new tests: multi-column root packing
+including a 40-cluster no-overlap sweep and a 100-cluster column cap; a superordinate's
+children gridded and its box widening to fit them; member cards gridded inside a cluster,
+still fully contained, still non-overlapping; a 12-member cluster ending up wider and much
+shorter than 12 stacked rows would need). Re-verified against the actual
+`LargeProjectTest.qdaproj` after each change (not just synthetic fixtures) — confirmed
+sub-clusters actually grid inside their superordinates with zero overlap, and the whole
+500-code/35-cluster layout still computes in ~1ms. Production build clean. Boot-tested a
+fresh packaged instance after every change in this batch, no errors beyond (when another
+instance happened to be running) the expected shared-user-data-dir cache warnings.

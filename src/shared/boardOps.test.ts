@@ -391,6 +391,53 @@ describe('getVisibleBoardClusters', () => {
     expect(rectsOverlap(b, c)).toBe(false)
   })
 
+  it("a superordinate's children are packed into a grid (multiple columns), not a single column", () => {
+    const root = makeCategory('A')
+    const children = Array.from({ length: 6 }, (_, i) => makeCategory(`c${i}`, { parentCategoryId: 'A' }))
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], [root, ...children])
+    const kids = clusters.filter((c) => c.categoryId !== 'A')
+    expect(kids).toHaveLength(6)
+    const distinctX = new Set(kids.map((c) => c.x))
+    // 6 children -> ceil(sqrt(6)) = 3 columns.
+    expect(distinctX.size).toBe(3)
+    // Still all fully inside the parent, still never overlapping each other.
+    const parent = clusters.find((c) => c.categoryId === 'A')!
+    for (const kid of kids) expect(rectContains(parent, kid)).toBe(true)
+    for (let i = 0; i < kids.length; i++) {
+      for (let j = i + 1; j < kids.length; j++) {
+        expect(rectsOverlap(kids[i], kids[j])).toBe(false)
+      }
+    }
+  })
+
+  it("a superordinate's box widens to fit a grid of several children, not just its own single-column width", () => {
+    const root = makeCategory('A')
+    const singleChild = [makeCategory('only', { parentCategoryId: 'A' })]
+    const [aWithOne] = getVisibleBoardClusters(DEFAULT_BOARD, [], [root, ...singleChild])
+
+    const root2 = makeCategory('A')
+    const manyChildren = Array.from({ length: 9 }, (_, i) => makeCategory(`c${i}`, { parentCategoryId: 'A' }))
+    const clusters2 = getVisibleBoardClusters(DEFAULT_BOARD, [], [root2, ...manyChildren])
+    const aWithMany = clusters2.find((c) => c.categoryId === 'A')!
+
+    expect(aWithMany.width).toBeGreaterThan(aWithOne.width)
+  })
+
+  it('a cluster with many members grows shorter/wider (a grid) than the same count stacked in one column would need', () => {
+    const fewCodes = makeCategory('few', { codeIds: ['c1', 'c2'] })
+    const [fewBox] = getVisibleBoardClusters(DEFAULT_BOARD, [], [fewCodes])
+
+    const manyCodeIds = Array.from({ length: 12 }, (_, i) => `c${i}`)
+    const manyCodes = makeCategory('many', { codeIds: manyCodeIds })
+    const [manyBox] = getVisibleBoardClusters(DEFAULT_BOARD, [], [manyCodes])
+
+    // 12 members -> ceil(sqrt(12)) = 4 columns, 3 rows -> much wider than
+    // the default, and nowhere near as tall as 12 stacked rows would be.
+    expect(manyBox.width).toBeGreaterThan(fewBox.width)
+    const singleColumnHeight = 28 + 20 * 2 + 12 * 72 // header + padding*2 + 12 * (card height + gap)
+    expect(manyBox.height).toBeLessThan(singleColumnHeight)
+  })
+
   it('an explicit parent keeps its own stored shape, and a virtual child still anchors to it', () => {
     const parent = makeCategory('A')
     const child = makeCategory('B', { parentCategoryId: 'A' })
@@ -441,6 +488,39 @@ describe('getVisibleBoardClusters', () => {
     const first = clusters.find((c) => c.categoryId === 'n0')!
     const last = clusters.find((c) => c.categoryId === 'n14')!
     expect(rectContains(first, last)).toBe(true)
+  })
+
+  it('root clusters are packed into a multi-column grid, not a single column', () => {
+    const roots = Array.from({ length: 5 }, (_, i) => makeCategory(`r${i}`))
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], roots)
+    const distinctX = new Set(clusters.map((c) => c.x))
+    // 5 roots -> ceil(sqrt(5)) = 3 columns, not one.
+    expect(distinctX.size).toBe(3)
+  })
+
+  it('a large flat set of root clusters still never overlaps, regardless of column packing', () => {
+    const roots = Array.from({ length: 40 }, (_, i) =>
+      makeCategory(`r${i}`, { codeIds: i % 3 === 0 ? ['a', 'b', 'c', 'd'] : [] })
+    )
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], roots)
+    expect(clusters).toHaveLength(40)
+    for (let i = 0; i < clusters.length; i++) {
+      for (let j = i + 1; j < clusters.length; j++) {
+        expect(rectsOverlap(clusters[i], clusters[j])).toBe(false)
+      }
+    }
+  })
+
+  it('root column count is capped, never producing an unreasonably wide grid', () => {
+    const roots = Array.from({ length: 100 }, (_, i) => makeCategory(`r${i}`))
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], roots)
+    const distinctX = new Set(clusters.map((c) => c.x))
+    expect(distinctX.size).toBeLessThanOrEqual(6)
+  })
+
+  it('a single root cluster still gets one column (no pointless empty columns)', () => {
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], [makeCategory('solo')])
+    expect(clusters).toHaveLength(1)
   })
 })
 
@@ -569,6 +649,39 @@ describe('getVisibleBoardItems', () => {
     const [m0, m1] = items
     const overlap = m0.x < m1.x + 180 && m0.x + 180 > m1.x && m0.y < m1.y + 64 && m0.y + 64 > m1.y
     expect(overlap).toBe(false)
+  })
+
+  it('member cards are packed into a grid (multiple columns), not a single column', () => {
+    const codeIds = Array.from({ length: 6 }, (_, i) => `code${i}`)
+    const category = makeCategory('cat1', { codeIds })
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], [category])
+    const items = getVisibleBoardItems(
+      DEFAULT_BOARD,
+      [],
+      codeIds.map((id) => ({ id })),
+      [],
+      [category],
+      clusters
+    )
+    const distinctX = new Set(items.map((i) => i.x))
+    // 6 members -> ceil(sqrt(6)) = 3 columns.
+    expect(distinctX.size).toBe(3)
+    // Still all inside the cluster box, still no two overlapping.
+    const box = clusters[0]
+    for (const item of items) {
+      expect(item.x).toBeGreaterThanOrEqual(box.x)
+      expect(item.x + 180).toBeLessThanOrEqual(box.x + box.width)
+      expect(item.y).toBeGreaterThanOrEqual(box.y)
+      expect(item.y + 64).toBeLessThanOrEqual(box.y + box.height)
+    }
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i]
+        const b = items[j]
+        const overlap = a.x < b.x + 180 && a.x + 180 > b.x && a.y < b.y + 64 && a.y + 64 > b.y
+        expect(overlap).toBe(false)
+      }
+    }
   })
 
   it('a member of a NESTED cluster is positioned inside that nested cluster (transitively inside its ancestor too)', () => {

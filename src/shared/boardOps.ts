@@ -225,15 +225,25 @@ const CLUSTER_HEADER_HEIGHT = 28
 // cluster's dashed border reads as clearly separate from its parent's,
 // rather than a couple of pixels that blur together at normal zoom.
 const CLUSTER_PADDING = 20
-const CLUSTER_MEMBER_ROW_HEIGHT = MEMBER_CARD_HEIGHT + 8
-// A nested cluster's auto-layout width shrinks by one padding's worth at
-// each level so it visually fits inside its parent with a margin. Not
-// floored at some minimum — a floor that stops shrinking but still
-// indents by the same padding would make a deeply-nested child's box
-// wider than the space actually left inside its (also-floored) parent,
-// overflowing it. At any realistic nesting depth (QDA cluster hierarchies
-// aren't 25+ levels deep) this stays comfortably positive; the degenerate
-// case just renders a very (or zero-)width box rather than a crash.
+// Vertical and horizontal gap between member cards auto-arranged inside a
+// cluster's own content area (see ownMemberGridSize below) — the same 8px
+// either direction, just named separately since one folds into a row
+// height and the other into a column width.
+const MEMBER_CARD_GAP = 8
+const CLUSTER_MEMBER_ROW_HEIGHT = MEMBER_CARD_HEIGHT + MEMBER_CARD_GAP
+
+// How many columns the default board's auto-layout packs a set of
+// siblings into — both the root categories directly on the board, and any
+// category's own nested children (see getVisibleBoardClusters below). A
+// near-square count (round up from sqrt of the sibling count) so even a
+// handful of siblings form a sensible grid rather than a single wide row
+// or a single tall column, capped so a large flat set doesn't stretch
+// impossibly wide instead of wrapping into more rows.
+const GRID_MAX_COLUMNS = 6
+
+function packGridColumnCount(siblingCount: number): number {
+  return Math.max(1, Math.min(GRID_MAX_COLUMNS, Math.ceil(Math.sqrt(siblingCount))))
+}
 
 function computeClusterGridPosition(index: number): { x: number; y: number } {
   const column = index % CLUSTER_GRID_COLUMNS
@@ -267,21 +277,30 @@ export function computeClusterSize(memberCount: number): { width: number; height
  * including the default one — so it silently never appears until someone
  * happens to place it.
  *
- * Root clusters (no parentCategoryId) stack in a single column, each sized
- * to fit its own content before the next one is placed below it — this
- * guarantees no two auto-placed root clusters ever overlap, regardless of
- * size, unlike a fixed-size grid cell that only works for the default size.
+ * Both the root categories and any category's own nested children are
+ * packed into a multi-column grid (see packGridColumnCount above), each
+ * sized to fit its own content — a plain fixed-size grid cell doesn't
+ * work here since a category's height (and, now, width too) varies a lot
+ * with descendant count, so each column instead tracks its own running
+ * bottom edge independently, and every next sibling goes into whichever
+ * column is currently shortest. That keeps the same overlap-proof
+ * guarantee a single column always had — a column only ever grows from
+ * its own real content, never a fixed cell size — while actually using
+ * the available width instead of stacking everything into one tall
+ * strip. A superordinate category's own box grows (both wider and
+ * taller) to fit the grid of sub-clusters packed inside it, the same way
+ * it already grew taller to fit a single stacked column before.
  * A nested cluster is placed *inside* its actual parent's box (below the
- * parent's own member cards, indented, narrower by one padding's worth) —
- * genuinely visually integrated, not shown in some disconnected pooled
- * area unrelated to which category is really its parent, so nesting one
- * cluster into another from the Workspace tree (no board drag involved,
- * hence no dropped position to anchor on) looks the same as nesting it by
- * dragging on the board itself. A category's height auto-grows to fit both
- * its own direct members *and* the full stacked height of its nested
- * children — computed bottom-up (deepest first) before anything is
- * positioned top-down, since a parent can't know how tall it needs to be
- * until its children's sizes are known.
+ * parent's own member cards, indented) — genuinely visually integrated,
+ * not shown in some disconnected pooled area unrelated to which category
+ * is really its parent, so nesting one cluster into another from the
+ * Workspace tree (no board drag involved, hence no dropped position to
+ * anchor on) looks the same as nesting it by dragging on the board
+ * itself. Sizing is computed bottom-up (deepest first, via computeSize)
+ * before anything is positioned top-down (via placeCategory), since a
+ * parent can't know how much room it needs for its children's grid until
+ * their own sizes are known — and, unlike a single column, a grid's
+ * *width* requirement depends on its children too, not just height.
  */
 export function getVisibleBoardClusters(
   board: Pick<BoardRecord, 'id' | 'isDefault'>,
@@ -299,44 +318,98 @@ export function getVisibleBoardClusters(
     childrenByParentId.set(category.parentCategoryId, list)
   }
 
-  function memberCountOf(category: CategoryRecord): number {
-    return category.codeIds.length + category.noteIds.length + category.segmentIds.length
+  // Only codes and notes are auto-arranged as member cards inside a
+  // cluster's own content area (see getVisibleBoardItems below) — a
+  // segment/quote filed directly under a category always keeps its own
+  // explicit position instead, so it doesn't factor into how much room a
+  // cluster's own content needs here. Packed into the same near-square
+  // grid as everything else in this file (packGridColumnCount), rather
+  // than one long column, so a cluster with many members reads as a
+  // block instead of a strip.
+  function ownMemberGridSize(category: CategoryRecord): { width: number; height: number } {
+    const memberCount = category.codeIds.length + category.noteIds.length
+    if (memberCount === 0) return { width: 0, height: 0 }
+    const columnCount = packGridColumnCount(memberCount)
+    const rows = Math.ceil(memberCount / columnCount)
+    return {
+      width: columnCount * MEMBER_CARD_WIDTH + (columnCount - 1) * MEMBER_CARD_GAP,
+      height: rows * CLUSTER_MEMBER_ROW_HEIGHT
+    }
   }
 
-  // Bottom-up: the height a virtual category's box needs to fit its own
-  // member cards plus every nested child stacked inside it. An explicit
-  // category keeps its own stored height (never recomputed — the user, or
-  // an earlier auto-layout/resize, already decided it). No cycle guard
-  // needed here: every category has exactly one parentCategoryId, so a
-  // cycle can only exist among categories that are *not* reachable from
-  // any real root in the first place (reparentCategory also prevents ever
-  // creating one) — this only ever recurses along real parent->child
-  // edges starting from an actual root.
-  function computeHeight(category: CategoryRecord, width: number): number {
+  // Every column in a children-grid shares one width, wide enough for the
+  // widest child — simpler than letting each column take its narrowest
+  // occupant's width (which would risk two adjacent columns' children
+  // overlapping once a wider one lands in either), at the cost of some
+  // unused space next to a narrower sibling in the same column. A single
+  // child by itself still just gets its own natural width, no grid needed.
+  function gridColumnWidth(childSizes: Array<{ width: number }>): number {
+    return Math.max(DEFAULT_CLUSTER_WIDTH, ...childSizes.map((s) => s.width))
+  }
+
+  // Bottom-up: the size a virtual category's box needs to fit its own
+  // member cards plus a grid of its nested children packed inside it. An
+  // explicit category keeps its own stored size unconditionally (never
+  // recomputed — the user, or an earlier auto-layout/resize, already
+  // decided it) — placeCategory below still sizes and packs *its*
+  // children within whatever room the frozen box actually gives them,
+  // which may not be enough; the fix is the same as always, resetting the
+  // board's layout. No cycle guard needed here: every category has
+  // exactly one parentCategoryId, so a cycle can only exist among
+  // categories that are *not* reachable from any real root in the first
+  // place (reparentCategory also prevents ever creating one) — this only
+  // ever recurses along real parent->child edges starting from an actual
+  // root.
+  function computeSize(category: CategoryRecord): { width: number; height: number } {
     const existing = explicitByCategory.get(category.id)
-    if (existing) return existing.height
-    const ownContentHeight = CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + memberCountOf(category) * CLUSTER_MEMBER_ROW_HEIGHT
-    const childWidth = width - CLUSTER_PADDING
-    let childrenHeight = 0
-    for (const child of childrenByParentId.get(category.id) ?? []) {
-      childrenHeight += computeHeight(child, childWidth) + CLUSTER_GAP
+    if (existing) return { width: existing.width, height: existing.height }
+
+    const children = childrenByParentId.get(category.id) ?? []
+    const ownGrid = ownMemberGridSize(category)
+    const ownContentHeight = CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + ownGrid.height
+    // + CLUSTER_PADDING once: the same one-sided inset used everywhere else
+    // in this function (see childX/innerX below), not a margin on both sides.
+    const ownContentWidth = ownGrid.width > 0 ? ownGrid.width + CLUSTER_PADDING : 0
+
+    if (children.length === 0) {
+      return {
+        width: Math.max(DEFAULT_CLUSTER_WIDTH, ownContentWidth),
+        height: Math.max(DEFAULT_CLUSTER_HEIGHT, ownContentHeight)
+      }
     }
-    return Math.max(DEFAULT_CLUSTER_HEIGHT, ownContentHeight + childrenHeight)
+
+    const childSizes = children.map((child) => computeSize(child))
+    const columnCount = packGridColumnCount(children.length)
+    const columnWidth = gridColumnWidth(childSizes)
+    const columnHeights = new Array<number>(columnCount).fill(0)
+    for (const size of childSizes) {
+      let column = 0
+      for (let i = 1; i < columnCount; i++) {
+        if (columnHeights[i] < columnHeights[column]) column = i
+      }
+      columnHeights[column] += size.height + CLUSTER_GAP
+    }
+    const childGridWidth = columnCount * columnWidth + (columnCount - 1) * CLUSTER_GAP + CLUSTER_PADDING
+    const childGridHeight = Math.max(...columnHeights) - CLUSTER_GAP // no trailing gap after the last child in the tallest column
+
+    return {
+      width: Math.max(DEFAULT_CLUSTER_WIDTH, ownContentWidth, childGridWidth),
+      height: Math.max(DEFAULT_CLUSTER_HEIGHT, ownContentHeight + childGridHeight)
+    }
   }
 
   const result: BoardCluster[] = []
 
-  // Top-down: place this category's box at (x, y), then recursively place
-  // its nested children inside it, stacked below its own member-card area.
-  // Returns where this category's box actually ended up and how tall it
-  // is, so the caller (a root's own loop, or a parent placing its next
-  // sibling child) knows where to continue.
-  function placeCategory(category: CategoryRecord, x: number, y: number, width: number): { y: number; height: number } {
+  // Top-down: place this category's box at (x, y) using the size already
+  // determined by computeSize, then recursively place its nested children
+  // in the same grid arrangement computeSize assumed — same children, same
+  // sizes, same greedy packing order, so the two can never disagree about
+  // how much room was actually needed vs. how it's actually laid out.
+  function placeCategory(category: CategoryRecord, x: number, y: number): { y: number; height: number } {
     const existing = explicitByCategory.get(category.id)
+    const size = existing ?? computeSize(category)
     const actualX = existing ? existing.x : x
     const actualY = existing ? existing.y : y
-    const actualWidth = existing ? existing.width : width
-    const height = existing ? existing.height : computeHeight(category, width)
 
     result.push(
       existing ?? {
@@ -345,28 +418,51 @@ export function getVisibleBoardClusters(
         categoryId: category.id,
         x: actualX,
         y: actualY,
-        width: actualWidth,
-        height,
+        width: size.width,
+        height: size.height,
         createdAt: ''
       }
     )
 
     const children = childrenByParentId.get(category.id) ?? []
-    const childX = actualX + CLUSTER_PADDING
-    const childWidth = actualWidth - CLUSTER_PADDING
-    let childY = actualY + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + memberCountOf(category) * CLUSTER_MEMBER_ROW_HEIGHT
-    for (const child of children) {
-      const placed = placeCategory(child, childX, childY, childWidth)
-      childY = placed.y + placed.height + CLUSTER_GAP
+    if (children.length > 0) {
+      const childSizes = children.map((child) => computeSize(child))
+      const columnCount = packGridColumnCount(children.length)
+      const columnWidth = gridColumnWidth(childSizes)
+      const innerX = actualX + CLUSTER_PADDING
+      const innerY = actualY + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + ownMemberGridSize(category).height
+      const columnBottoms = new Array<number>(columnCount).fill(innerY)
+      for (const child of children) {
+        let column = 0
+        for (let i = 1; i < columnCount; i++) {
+          if (columnBottoms[i] < columnBottoms[column]) column = i
+        }
+        const childX = innerX + column * (columnWidth + CLUSTER_GAP)
+        const placed = placeCategory(child, childX, columnBottoms[column])
+        columnBottoms[column] = placed.y + placed.height + CLUSTER_GAP
+      }
     }
 
-    return { y: actualY, height }
+    return { y: actualY, height: size.height }
   }
 
-  let rootY = GRID_ORIGIN_Y
-  for (const category of categories.filter((c) => !c.parentCategoryId)) {
-    const placed = placeCategory(category, GRID_ORIGIN_X, rootY, DEFAULT_CLUSTER_WIDTH)
-    rootY = Math.max(rootY, placed.y + placed.height + CLUSTER_GAP)
+  const roots = categories.filter((c) => !c.parentCategoryId)
+  const rootSizes = roots.map((r) => computeSize(r))
+  const rootColumnCount = packGridColumnCount(roots.length)
+  const rootColumnWidth = gridColumnWidth(rootSizes)
+  const columnBottoms = new Array<number>(rootColumnCount).fill(GRID_ORIGIN_Y)
+  for (const category of roots) {
+    // Shortest-column-first: a simple masonry pack, not a fixed row/column
+    // assignment, so a handful of very tall roots don't lock in a lopsided
+    // grid — the next one always goes wherever there's actually the least
+    // height used so far.
+    let column = 0
+    for (let i = 1; i < rootColumnCount; i++) {
+      if (columnBottoms[i] < columnBottoms[column]) column = i
+    }
+    const x = GRID_ORIGIN_X + column * (rootColumnWidth + CLUSTER_GAP)
+    const placed = placeCategory(category, x, columnBottoms[column])
+    columnBottoms[column] = placed.y + placed.height + CLUSTER_GAP
   }
 
   return result
@@ -449,6 +545,13 @@ export function getVisibleBoardItems(
   const clusterByCategoryId = new Map(clusters.map((c) => [c.categoryId, c]))
 
   const homeClusterByRef = new Map<string, BoardCluster>()
+  // Same near-square grid every other auto-layout in this file uses
+  // (packGridColumnCount) — how many columns THIS cluster's own member
+  // cards pack into, keyed by cluster id so nextPositionInCluster below
+  // doesn't need the category again. Matches exactly what
+  // getVisibleBoardClusters' ownMemberGridSize assumed when it sized the
+  // cluster's box, so cards never overflow it.
+  const memberColumnCountByCluster = new Map<string, number>()
   for (const category of categories) {
     const cluster = clusterByCategoryId.get(category.id)
     if (!cluster) continue
@@ -460,15 +563,20 @@ export function getVisibleBoardItems(
       const key = `note:${noteId}`
       if (!homeClusterByRef.has(key)) homeClusterByRef.set(key, cluster)
     }
+    const memberCount = category.codeIds.length + category.noteIds.length
+    if (memberCount > 0) memberColumnCountByCluster.set(cluster.id, packGridColumnCount(memberCount))
   }
 
   const memberIndexByCluster = new Map<string, number>()
   function nextPositionInCluster(cluster: BoardCluster): { x: number; y: number } {
     const index = memberIndexByCluster.get(cluster.id) ?? 0
     memberIndexByCluster.set(cluster.id, index + 1)
+    const columnCount = memberColumnCountByCluster.get(cluster.id) ?? 1
+    const row = Math.floor(index / columnCount)
+    const column = index % columnCount
     return {
-      x: cluster.x + CLUSTER_PADDING,
-      y: cluster.y + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + index * CLUSTER_MEMBER_ROW_HEIGHT
+      x: cluster.x + CLUSTER_PADDING + column * (MEMBER_CARD_WIDTH + MEMBER_CARD_GAP),
+      y: cluster.y + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + row * CLUSTER_MEMBER_ROW_HEIGHT
     }
   }
 

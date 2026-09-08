@@ -67,6 +67,7 @@ function BoardView(): JSX.Element {
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
   const linkItemsAction = useProjectStore((s) => s.linkItems)
   const unlinkItemsAction = useProjectStore((s) => s.unlinkItems)
+  const resetBoardLayout = useProjectStore((s) => s.resetBoardLayout)
   const withBatch = useProjectStore((s) => s.withBatch)
 
   const selectedBoardId = useWorkspaceUiStore((s) => s.selectedBoardId)
@@ -185,7 +186,17 @@ function BoardView(): JSX.Element {
 
     container.addEventListener('wheel', handleWheel, { passive: false })
     return () => container.removeEventListener('wheel', handleWheel)
-  }, [])
+    // currentBoard, not []: the scrollable container only exists in the DOM
+    // once currentBoard is non-null (see the `!currentBoard ? ... : <div
+    // ref={scrollContainerRef}>` branch below), and on a fresh mount
+    // currentBoard is still null on the very first render (the effect a
+    // few lines up that resolves a valid selectedBoardId hasn't run yet).
+    // With an empty dependency array this effect fired once against a
+    // still-null ref and never got a second chance — Ctrl/Cmd+wheel zoom
+    // would silently do nothing until something else happened to remount
+    // this component. Depending on currentBoard re-attaches once the
+    // container actually exists.
+  }, [currentBoard])
 
   // After zoom changes and the new transform has painted, correct the
   // scroll position so the point that was under the cursor stays there.
@@ -705,6 +716,23 @@ function BoardView(): JSX.Element {
         )}
 
         <div className="ml-auto flex items-center gap-1 text-xs text-slate-500">
+          {currentBoard?.isDefault && (
+            <button
+              className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
+              title="Drop every dragged/resized position on this board and recompute the default grid layout from scratch"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    'Reset every cluster and item on this board back to its automatic default layout? Any positions you\'ve dragged or resized here will be lost — the underlying codes, notes, and clusters themselves are not affected.'
+                  )
+                ) {
+                  resetBoardLayout(currentBoard.id)
+                }
+              }}
+            >
+              Reset placement
+            </button>
+          )}
           <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
           <button
             className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"

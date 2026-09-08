@@ -234,6 +234,14 @@ interface ProjectState {
   addAllClustersToBoard: (boardId: string) => void
   linkItems: (boardId: string, itemAId: string, itemBId: string) => void
   unlinkItems: (linkId: string) => void
+  /** Drops every explicit cluster shape and clustered item position on this
+   * board, so it recomputes fresh from the current category structure —
+   * the "Reset placement" button. Deliberately a no-op on any board that
+   * isn't the default one: resetDefaultBoardClusterLayout doesn't itself
+   * check board.isDefault (it just drops explicit shapes for whatever id
+   * it's given), and a non-default board has no auto-layout fallback to
+   * recompute *to* — running it there would just empty the board out. */
+  resetBoardLayout: (boardId: string) => void
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -681,5 +689,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   linkItems: (boardId, itemAId, itemBId) =>
     get().updateProject((data) => linkItemsOp(data, boardId, itemAId, itemBId)),
 
-  unlinkItems: (linkId) => get().updateProject((data) => unlinkItemsOp(data, linkId))
+  unlinkItems: (linkId) => get().updateProject((data) => unlinkItemsOp(data, linkId)),
+
+  resetBoardLayout: (boardId) => {
+    const board = get().data?.boards.find((b) => b.id === boardId)
+    if (!board?.isDefault) return
+    get().updateProject((data) => resetDefaultBoardClusterLayoutOp(data, boardId))
+  }
 }))

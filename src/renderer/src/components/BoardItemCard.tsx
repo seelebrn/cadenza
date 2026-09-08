@@ -49,6 +49,14 @@ function BoardItemCard({
       } ${isDragging ? 'shadow-md' : ''}`}
       style={{ left: x, top: y, width: CARD_WIDTH, minHeight: CARD_HEIGHT }}
       onMouseDown={(e) => {
+        // Left button only. onMouseDown fires for every button by
+        // default — without this check, a right-click (meant only to open
+        // the info window below) would *also* start this same drag
+        // gesture, which is exactly how right-click could still trigger
+        // an accidental link/move: it's not enough for the info window to
+        // move to onContextMenu if onMouseDown keeps reacting to every
+        // button underneath it.
+        if (e.button !== 0) return
         // A virtual (not-yet-persisted) item materializes into a real
         // BoardItem the moment it's touched, so the drag has something
         // real to move.
@@ -67,8 +75,9 @@ function BoardItemCard({
       // distance), the first click of an attempted double-click can itself
       // register as a completed drag that lands within snap range of a
       // neighboring card and links the two, before the second click ever
-      // arrives. Right-click never enters that mousedown/drag/snap path at
-      // all, so it can't conflict with it.
+      // arrives. Right-click, now that onMouseDown ignores it (above),
+      // never enters that mousedown/drag/snap path at all, so it can't
+      // conflict with it.
       onContextMenu={(e) => {
         e.preventDefault()
         if (item.refType === 'code') setInspectedCodeId(item.refId)

@@ -766,3 +766,23 @@ describe a mixed double-click/right-click convention instead of double-click eve
 
 Verified: typecheck clean, full suite still 269/269 (no shared/pure logic touched — this
 is purely a DOM event binding change), production build clean, boot-tested cleanly.
+
+### Right-click was still leaking into the left-click drag/link/move (2026-09-08)
+
+The right-click fix above moved the info-window *trigger* to `onContextMenu`, but the user
+caught what that fix left standing: `onMouseDown` fires for every mouse button by default,
+not just the left one — so a right-click was *still* starting the same drag-and-possibly-
+snap gesture underneath it. Moving the info window off `onDoubleClick` stopped a double-
+click's first click from linking two cards; it did nothing to stop a bare right-click from
+doing the same thing, since that mousedown was never checking which button was pressed
+either.
+
+Added `if (e.button !== 0) return` to every mousedown handler that starts a board drag —
+`BoardItemCard.tsx`'s item drag, and `ClusterFrame.tsx`'s both cluster-move (the header) and
+cluster-resize (the corner handle). Only left-button mousedowns start a drag/link/move now;
+a right-click reaches only `onContextMenu`. Also corrected `BoardItemCard.tsx`'s own comment,
+which had claimed right-click "never enters that mousedown/drag/snap path at all" — true
+only once this second fix was in, not before it.
+
+Verified: typecheck clean, full suite still 269/269 (again a pure DOM event binding change),
+production build clean, boot-tested cleanly.

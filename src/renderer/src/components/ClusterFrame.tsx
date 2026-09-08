@@ -133,7 +133,14 @@ function ClusterFrame({
       <div
         className="flex cursor-move select-none items-center gap-1 rounded-t-md px-2 py-1 text-xs text-white"
         style={{ backgroundColor: category.color }}
-        onMouseDown={onStartMove}
+        onMouseDown={(e) => {
+          // Left button only — a right-click here shouldn't also start a
+          // move (right-click has no cluster-level action yet, but a
+          // stray move/resize is exactly the kind of left-click-leaking-
+          // through-a-right-click bug already fixed once for board item
+          // cards; guarding it here too keeps the whole board consistent).
+          if (e.button === 0) onStartMove(e)
+        }}
         // The name/emoji in here are plain text, so a mousedown-then-move
         // gesture starting on top of them can be interpreted as a native
         // "drag this selected text" instead of (or racing) our own
@@ -193,6 +200,7 @@ function ClusterFrame({
         className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
         style={{ backgroundColor: category.color }}
         onMouseDown={(e) => {
+          if (e.button !== 0) return // left button only, same reasoning as the header's move handler above
           e.stopPropagation()
           onStartResize(e)
         }}

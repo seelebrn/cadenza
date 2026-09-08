@@ -942,3 +942,27 @@ created *after* it.
 
 Verified: package.json still valid JSON, typecheck clean — this is a one-line publish
 config change, no application code or workflow logic touched.
+
+### Documented, not fixed: macOS/Windows flag the unsigned build (2026-09-08)
+
+The user reported the v0.1.0 macOS build getting flagged as malware by Gatekeeper. Expected,
+not a real detection: since macOS Catalina, any app distributed outside the App Store without
+both an Apple Developer ID signature *and* Apple notarization gets exactly this "may be
+malware" treatment, regardless of what the app does — Windows SmartScreen does a milder
+version of the same thing for unsigned `.exe`s. Actually fixing it needs enrolling in the
+Apple Developer Program ($99/year, tied to a personal Apple ID) and wiring real code-signing
++ notarization into the release workflow, storing the certificate and an app-specific
+password as GitHub secrets. Asked the user which way to go rather than assuming either the
+cost or the workaround was acceptable — chose to stay free and document the bypass instead,
+which is the normal state of affairs for small unsigned software.
+
+Added a "Before you tell anyone to download it" section to the release runbook (the page
+published for the "how do I publish a build" tutorial): what each OS's warning actually says,
+the exact click-through to open it anyway (right-click → Open on macOS, or `xattr -cr` in
+Terminal; "More info" → "Run anyway" on Windows SmartScreen), and a ready-to-copy blurb sized
+for pasting straight into a GitHub release description, so people seeing the warning read an
+explanation *before* they worry rather than after.
+
+Verified: visual review of the new section's markup and styling (reuses the runbook's
+existing token system and copy-button mechanism, generalized to also cover the new
+non-terminal "paste this into your release notes" block, not just shell commands).

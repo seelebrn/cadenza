@@ -1,7 +1,7 @@
 {
   "name": "cadenza",
   "productName": "Cadenza",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cadenza — a local qualitative data analysis desktop app",
   "main": "./out/main/index.js",
   "author": "seelebrn@gmail.com",
@@ -65,6 +65,7 @@
       ],
       "category": "public.app-category.education"
     },
+    "afterPack": "build/afterPack.cjs",
     "linux": {
       "target": [
         "AppImage"

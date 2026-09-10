@@ -966,3 +966,54 @@ explanation *before* they worry rather than after.
 Verified: visual review of the new section's markup and styling (reuses the runbook's
 existing token system and copy-button mechanism, generalized to also cover the new
 non-terminal "paste this into your release notes" block, not just shell commands).
+
+### macOS wasn't just warning, it was auto-trashing the app — root-caused via `log show` (2026-09-10)
+
+The user reported something worse than a Gatekeeper warning: right-click → Open didn't help,
+the app got deleted from disk outright. A clean VirusTotal scan (0/70 engines) ruled out a
+real malware-signature match. Rather than guess, asked the user to run
+
+```
+log show --last 2h --predicate 'eventMessage CONTAINS[c] "Cadenza"'
+```
+
+on their Mac, which gave a definitive answer instead of a hypothesis. Two lines told the whole
+story:
+
+```
+syspolicyd: [com.apple.syspolicy.exec:default] Attempting to move malware to trash:
+  PST: ... (team: (null)), (id: Electron), (bundle_id: com.seelebrn.cadenza)
+kernel: (AppleMobileFileIntegrity) AMFI: '.../Cadenza' has no CMS blob?
+```
+
+`syspolicyd`'s exec-time policy check (not XProtect, not a real scan) was killing and trashing
+the *running process*, ~38 seconds after launch — which is why right-click → Open (a Finder-
+level override) didn't help: the app had already been allowed to open, then got shot down at
+the OS level regardless.
+
+The `(id: Electron)` field was the interesting part. Without a paid signing identity,
+electron-builder doesn't re-sign the packaged app, so it keeps whatever ad-hoc signature the
+*prebuilt* Electron binary already shipped with — an identity literally called `"Electron"`,
+generic to every unsigned Electron app, unrelated to Cadenza's own bundle id. The user pushed
+back with a real counter-example (QualCoder, a comparable unsigned open-source QDA tool, whose
+own docs describe only the older "click Open Anyway" flow, not active deletion) — confirmed via
+its official install docs that it's genuinely unsigned too, but built with py2app, not Electron,
+so it never carries that shared "Electron" identity. Working theory: Apple's Gatekeeper policy
+data treats that specific generic identity with more suspicion, plausibly because it's the one
+carried by a lot of real unsigned-Electron malware in the wild — consistent with the clean
+VirusTotal result (it's an identity-reputation policy decision, not a signature match on
+Cadenza's actual file).
+
+Fix attempted (before reaching for paid notarization): added `build/afterPack.cjs`, an
+electron-builder `afterPack` hook that runs `codesign --force --deep --sign -` on the packed
+`.app` on macOS only, after electron-builder assembles it but before it's wrapped into a
+`.dmg`/`.zip`. This recomputes the ad-hoc signature against the app's actual, current
+`CFBundleIdentifier` (`com.seelebrn.cadenza`), replacing the stale generic `"Electron"` identity
+with one specific to Cadenza. Still not a trusted signature — Gatekeeper will still call it
+unidentified — but it stops the bundle from sharing an identity with every other unsigned
+Electron app. Bumped to v0.1.1 and re-released to test on the user's Mac; not yet confirmed
+whether this actually changes syspolicyd's behavior.
+
+Verified so far: local `npm test`/`typecheck` unaffected (hook only touches the macOS CI build
+step); can't verify the actual Gatekeeper behavior change from this sandbox — that requires the
+user testing the v0.1.1 macOS build on their Mac.

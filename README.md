@@ -1017,3 +1017,15 @@ whether this actually changes syspolicyd's behavior.
 Verified so far: local `npm test`/`typecheck` unaffected (hook only touches the macOS CI build
 step); can't verify the actual Gatekeeper behavior change from this sandbox — that requires the
 user testing the v0.1.1 macOS build on their Mac.
+
+**Confirmed fixed** (user tested v0.1.1 on their Mac, same day): the re-signed build is no
+longer auto-trashed. It now shows the ordinary "Apple could not verify… may contain malware"
+warning and refuses to launch by default, resolved with the standard one-time System Settings →
+Privacy & Security → "Open Anyway" — exactly the flow QualCoder's own docs describe, not the
+active-deletion behavior seen on v0.1.0. Confirms the `(id: Electron)` shared-identity theory
+was the actual root cause, not a red herring. Updated the release runbook's macOS section to
+match: it previously suggested right-click → Open / `xattr -cr` (the old-style bypass, no longer
+the reliable path on current macOS); now leads with System Settings → Privacy & Security, which
+is what actually works. Landed at the same place QualCoder and comparable unsigned open-source
+tools sit — a normal, well-documented, one-time warning — without spending anything on Apple
+Developer Program enrollment.

@@ -1335,3 +1335,55 @@ delta — the reported scenario directly; items on a different board or unrelate
 untouched; a cluster that didn't move leaves its members alone too; `addAllClustersToBoard`
 with `includeMembers: false` places only frames, still correctly sized). Full suite green
 (316/316), typecheck clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### Radial was flattening nested clusters into its ring — real export caught it (2026-09-11)
+
+Reported with an actual exported PDF: "Add all clusters" (frames only) → Radial → export, on
+the 500-code/35-category test project (5 superordinates, 30 clusters). The result was a
+crown of massively overlapping, oddly stretched bars — not remotely the intended thematic-map
+layout.
+
+Root cause, visible directly in the image: `computeRadialLayout` treated *every* cluster on the
+board — nested ones included — as an independent point on one flat ring around a single focus.
+A superordinate's nested children got scattered into the same ring as the superordinates
+themselves, discarding the nesting entirely (their `↰` label still showed correctly — the
+underlying data was never wrong, only the layout). Worse, superordinate boxes are often very
+wide (sized by `computeCategoryLayout` to fit their own nested-children grid), and the ring
+spacing only ever accounted for the *focus*'s size, not each satellite's — so wide boxes
+landing near each other in the ring overlapped heavily on top of being in the wrong place at
+all.
+
+Fixed in two parts:
+- `computeRadialLayout` now takes `categories` (matching `computeTreeLayout`'s existing
+  signature) and only ever arranges *root* clusters in the ring — a category whose parent isn't
+  also on this board, same root definition Tree already uses. Nested clusters are left out of
+  the returned positions entirely.
+- `applyClusterLayoutWithMembers` now cascades a moved root's delta down its *whole* descendant
+  subtree — not just member codes/notes as before, but nested `BoardCluster` shapes too — so a
+  sub-cluster (and everything filed under it) moves rigidly together with its ancestor,
+  preserving whatever containment it already had rather than trying to recompute it. A category
+  not directly in `positions` (true for every nested one under Radial; never true under Tree,
+  which still positions all of them individually — a genuine branching-tree diagram is supposed
+  to, unlike hub-and-spoke) inherits its nearest positioned ancestor's delta, resolved
+  recursively through however many nesting levels sit in between.
+
+Getting the ring's radius genuinely overlap-free took two attempts. The first fix (radius
+accounting for the single largest satellite) still left 2 overlapping pairs on the real project
+— because equal *angular* spacing doesn't guarantee equal *physical* spacing once satellite
+sizes vary a lot: two large satellites can still land at adjacent angles. The actual fix solves
+for the chord length between two *adjacent* ring points (`2r·sin(π/N)`) against the two largest
+satellites' combined half-widths, the genuine worst case regardless of where in the ring they
+end up — confirmed by re-running the same real-project check after each attempt rather than
+assuming the first, more intuitive fix was sufficient.
+
+Verified: 4 new `computeRadialLayout` tests (a nested cluster excluded from the ring entirely —
+the reported bug directly; a category whose parent isn't on the board treated as its own root,
+matching `computeTreeLayout`; the ring radius clearing a single large satellite; existing tests
+updated to pass `categories`) plus 2 new `applyClusterLayoutWithMembers` tests (cascading a
+root's delta to a nested cluster not itself in `positions`; cascading transitively through
+multiple nesting levels). Re-verified end-to-end against the real `LargeProjectTest.qdaproj`
+after each attempt, via a standalone bundled script (deleted after): the exact reported
+workflow (`addAllClustersToBoard` frames-only → `computeRadialLayout` → `applyClusterLayoutWithMembers`)
+now produces zero genuine root-vs-root overlaps, zero broken parent-child containment, and no
+negative coordinates. Full suite green (321/321), typecheck clean, production build clean,
+boot-tested (no errors, cleanly killed).

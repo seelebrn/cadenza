@@ -1142,6 +1142,42 @@ describe('applyClusterLayoutWithMembers', () => {
     const next = applyClusterLayoutWithMembers(data, 'b1', [{ id: 'c1', x: 0, y: 0 }])
     expect(next.boardItems.find((i) => i.id === 'i1')).toMatchObject({ x: 20, y: 40 })
   })
+
+  it('cascades a moved root\'s delta down to a nested cluster not itself in `positions` — the Radial fix', () => {
+    // Radial only ever computes positions for roots (see computeRadialLayout);
+    // this is what keeps a nested cluster (and its own members) moving
+    // together with its ancestor instead of being left behind.
+    const root = makeCategory('root')
+    const nested = makeCategory('nested', { parentCategoryId: 'root', codeIds: ['code1'] })
+    const data = makeData({
+      categories: [root, nested],
+      boardClusters: [
+        { id: 'rootCluster', boardId: 'b1', categoryId: 'root', x: 0, y: 0, width: 280, height: 400, createdAt: '0' },
+        { id: 'nestedCluster', boardId: 'b1', categoryId: 'nested', x: 20, y: 60, width: 200, height: 100, createdAt: '0' }
+      ],
+      boardItems: [{ id: 'i1', boardId: 'b1', refType: 'code', refId: 'code1', x: 40, y: 100 }]
+    })
+    // Only the root is in `positions` — moved by (+500, +300).
+    const next = applyClusterLayoutWithMembers(data, 'b1', [{ id: 'rootCluster', x: 500, y: 300 }])
+    expect(next.boardClusters.find((c) => c.id === 'nestedCluster')).toMatchObject({ x: 520, y: 360 })
+    expect(next.boardItems.find((i) => i.id === 'i1')).toMatchObject({ x: 540, y: 400 })
+  })
+
+  it('cascades transitively through multiple nesting levels', () => {
+    const root = makeCategory('root')
+    const child = makeCategory('child', { parentCategoryId: 'root' })
+    const grandchild = makeCategory('grandchild', { parentCategoryId: 'child' })
+    const data = makeData({
+      categories: [root, child, grandchild],
+      boardClusters: [
+        { id: 'rootC', boardId: 'b1', categoryId: 'root', x: 0, y: 0, width: 280, height: 600, createdAt: '0' },
+        { id: 'childC', boardId: 'b1', categoryId: 'child', x: 20, y: 60, width: 240, height: 300, createdAt: '0' },
+        { id: 'grandchildC', boardId: 'b1', categoryId: 'grandchild', x: 40, y: 120, width: 200, height: 100, createdAt: '0' }
+      ]
+    })
+    const next = applyClusterLayoutWithMembers(data, 'b1', [{ id: 'rootC', x: 1000, y: 1000 }])
+    expect(next.boardClusters.find((c) => c.id === 'grandchildC')).toMatchObject({ x: 1040, y: 1120 })
+  })
 })
 
 describe('computeTreeLayout', () => {
@@ -1193,16 +1229,22 @@ describe('computeTreeLayout', () => {
 })
 
 describe('computeRadialLayout', () => {
-  function cluster(id: string, categoryId: string, x = 0, y = 0): BoardCluster {
-    return { id, boardId: 'b1', categoryId, x, y, width: 100, height: 100, createdAt: '0' }
+  function cluster(id: string, categoryId: string, x = 0, y = 0, width = 100, height = 100): BoardCluster {
+    return { id, boardId: 'b1', categoryId, x, y, width, height, createdAt: '0' }
+  }
+  // All-root categories, matching each cluster's categoryId — most tests
+  // here aren't about nesting, so this keeps every category a root by
+  // default (see the dedicated nesting-awareness tests below for the rest).
+  function flatCategories(categoryIds: string[]): CategoryRecord[] {
+    return categoryIds.map((id) => makeCategory(id))
   }
 
   it('returns nothing for an empty board', () => {
-    expect(computeRadialLayout([], null)).toEqual([])
+    expect(computeRadialLayout([], [], null)).toEqual([])
   })
 
   it('a single cluster stays exactly where it is', () => {
-    const positions = computeRadialLayout([cluster('only', 'A', 50, 60)], null)
+    const positions = computeRadialLayout([cluster('only', 'A', 50, 60)], flatCategories(['A']), null)
     expect(positions).toEqual([{ id: 'only', x: 50, y: 60 }])
   })
 
@@ -1213,7 +1255,7 @@ describe('computeRadialLayout', () => {
     // itself.
     const focus = cluster('focus', 'A', 500, 500)
     const others = [cluster('b', 'B'), cluster('c', 'C'), cluster('d', 'D')]
-    const positions = computeRadialLayout([focus, ...others], 'A')
+    const positions = computeRadialLayout([focus, ...others], flatCategories(['A', 'B', 'C', 'D']), 'A')
     const byId = new Map(positions.map((p) => [p.id, p]))
     expect(byId.get('focus')).toEqual({ id: 'focus', x: 500, y: 500 })
 
@@ -1233,7 +1275,11 @@ describe('computeRadialLayout', () => {
   it('falls back to the first cluster as focus when focusCategoryId matches nothing on the board', () => {
     // Well clear of the origin, same reasoning as above — this test is
     // only about which cluster becomes the focus, not the safety net.
-    const positions = computeRadialLayout([cluster('only', 'A', 500, 500), cluster('other', 'B')], 'missing')
+    const positions = computeRadialLayout(
+      [cluster('only', 'A', 500, 500), cluster('other', 'B')],
+      flatCategories(['A', 'B']),
+      'missing'
+    )
     expect(positions.find((p) => p.id === 'only')).toEqual({ id: 'only', x: 500, y: 500 })
   })
 
@@ -1245,11 +1291,53 @@ describe('computeRadialLayout', () => {
     // overflowing the positive edge, which is always reachable).
     const focus = cluster('focus', 'A', 10, 10)
     const others = [cluster('b', 'B'), cluster('c', 'C'), cluster('d', 'D'), cluster('e', 'E')]
-    const positions = computeRadialLayout([focus, ...others], 'A')
+    const positions = computeRadialLayout([focus, ...others], flatCategories(['A', 'B', 'C', 'D', 'E']), 'A')
     for (const p of positions) {
       expect(p.x).toBeGreaterThanOrEqual(0)
       expect(p.y).toBeGreaterThanOrEqual(0)
     }
+  })
+
+  it('only arranges root clusters in the ring — a nested cluster is excluded entirely, the exact reported bug', () => {
+    // Real-world report: applying Radial to a board with superordinate
+    // clusters scattered every one of their nested sub-clusters into the
+    // same ring as the roots, discarding the nesting entirely.
+    const categories: CategoryRecord[] = [
+      makeCategory('root1'),
+      makeCategory('root2'),
+      makeCategory('nested', { parentCategoryId: 'root1' })
+    ]
+    const clusters = [cluster('root1', 'root1', 500, 500), cluster('root2', 'root2'), cluster('nested', 'nested', 520, 520)]
+    const positions = computeRadialLayout(clusters, categories, 'root1')
+    expect(positions.map((p) => p.id).sort()).toEqual(['root1', 'root2'])
+  })
+
+  it('treats a category whose parent has no cluster on this board as its own root, same as computeTreeLayout', () => {
+    const categories: CategoryRecord[] = [makeCategory('A', { parentCategoryId: 'not-on-board' })]
+    const positions = computeRadialLayout([cluster('only', 'A', 50, 60)], categories, null)
+    expect(positions).toEqual([{ id: 'only', x: 50, y: 60 }])
+  })
+
+  it("sizes the ring's radius to clear the largest satellite, not just the focus", () => {
+    // Far enough from the origin in every direction that keepPositionsOnBoard's
+    // safety net never has to shift anything — otherwise the *positioned*
+    // focus would no longer match this local `focus` variable's own x/y.
+    const focus = cluster('focus', 'A', 1000, 1000, 100, 100)
+    const bigOther = cluster('big', 'B', 0, 0, 900, 700) // a superordinate-sized box
+    const positions = computeRadialLayout(
+      [focus, bigOther, cluster('c', 'C')],
+      flatCategories(['A', 'B', 'C']),
+      'A'
+    )
+    const bigPos = positions.find((p) => p.id === 'big')!
+    const centerX = focus.x + focus.width / 2
+    const centerY = focus.y + focus.height / 2
+    const bigCx = bigPos.x + bigOther.width / 2
+    const bigCy = bigPos.y + bigOther.height / 2
+    const dist = Math.hypot(bigCx - centerX, bigCy - centerY)
+    // The ring has to clear half the big satellite's own largest dimension
+    // (900/2 = 450) on top of the base step, or it would overlap the focus.
+    expect(dist).toBeGreaterThan(450)
   })
 })
 

@@ -752,7 +752,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const board = data?.boards.find((b) => b.id === boardId)
     if (!data || !board || board.isDefault) return
     const clusters = data.boardClusters.filter((c) => c.boardId === boardId)
-    const positions = computeRadialLayout(clusters, focusCategoryId)
+    const positions = computeRadialLayout(clusters, data.categories, focusCategoryId)
     get().updateProject((current) => applyClusterLayoutWithMembersOp(current, boardId, positions))
   }
 }))

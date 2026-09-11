@@ -936,39 +936,59 @@ export function applyClusterPositions(data: ProjectData, positions: ClusterPosit
 
 /**
  * Same as applyClusterPositions, but also carries each repositioned
- * cluster's member codes/notes/segments along with it by the same delta —
- * the one-click Tree/Radial layouts' equivalent of what a manual cluster
- * drag already does (see BoardView's cluster-move handling, which moves
- * `getClusterMemberItems` alongside the frame). Without this, applying a
- * layout moves every cluster's *frame* but leaves its member cards sitting
- * at their old position, reading as if they'd been unlinked from their
- * cluster even though the underlying category membership never changed.
+ * cluster's member codes/notes/segments *and any nested cluster not itself
+ * in `positions`* along with it, by the same delta — the one-click Tree/
+ * Radial layouts' equivalent of what a manual cluster drag already does
+ * (see BoardView's cluster-move handling, which moves `getClusterMemberItems`
+ * alongside the frame). Without this, applying a layout moves a cluster's
+ * *frame* but leaves its member cards — and, for Radial specifically,
+ * every nested sub-cluster too, since that one only ever repositions roots
+ * — sitting at their old position, reading as unlinked even though the
+ * underlying membership/nesting never changed.
  *
- * Computes one delta per *category* (not per cluster id) since that's what
- * a member actually belongs to; a ref that's a member of more than one
- * category moving in this pass homes on the first one, in `data.categories`
- * order — the same "first membership wins" rule used everywhere else a
- * board can only give a ref one position (see getVisibleBoardItems).
+ * A category not directly in `positions` (true for every nested category
+ * under Radial; never true under Tree, which positions all of them)
+ * inherits its nearest positioned ancestor's delta, cascading down through
+ * however many nesting levels sit in between — the whole subtree moves
+ * rigidly together, preserving whatever containment it already had rather
+ * than trying to recompute it. A ref (or nested cluster) that's a member
+ * of more than one moving category homes on the first one, in
+ * `data.categories` order — the same "first membership wins" rule used
+ * everywhere else a board can only give a ref one position (see
+ * getVisibleBoardItems).
  */
 export function applyClusterLayoutWithMembers(
   data: ProjectData,
   boardId: string,
   positions: ClusterPosition[]
 ): ProjectData {
-  const clusterById = new Map(data.boardClusters.filter((c) => c.boardId === boardId).map((c) => [c.id, c]))
+  const clustersOnBoard = data.boardClusters.filter((c) => c.boardId === boardId)
+  const clusterById = new Map(clustersOnBoard.map((c) => [c.id, c]))
+  const categoryById = new Map(data.categories.map((c) => [c.id, c]))
 
-  const deltaByCategoryId = new Map<string, { dx: number; dy: number }>()
+  const directDeltaByCategoryId = new Map<string, { dx: number; dy: number }>()
   for (const pos of positions) {
     const cluster = clusterById.get(pos.id)
     if (!cluster) continue
     const dx = pos.x - cluster.x
     const dy = pos.y - cluster.y
-    if (dx !== 0 || dy !== 0) deltaByCategoryId.set(cluster.categoryId, { dx, dy })
+    if (dx !== 0 || dy !== 0) directDeltaByCategoryId.set(cluster.categoryId, { dx, dy })
+  }
+
+  const resolvedCache = new Map<string, { dx: number; dy: number } | null>()
+  function resolveDelta(categoryId: string): { dx: number; dy: number } | null {
+    if (resolvedCache.has(categoryId)) return resolvedCache.get(categoryId)!
+    resolvedCache.set(categoryId, null) // cycle guard while resolving — see getCategoryDepth's own note on this
+    const direct = directDeltaByCategoryId.get(categoryId) ?? null
+    const parentId = categoryById.get(categoryId)?.parentCategoryId ?? null
+    const resolved = direct ?? (parentId ? resolveDelta(parentId) : null)
+    resolvedCache.set(categoryId, resolved)
+    return resolved
   }
 
   const deltaByRefKey = new Map<string, { dx: number; dy: number }>()
   for (const category of data.categories) {
-    const delta = deltaByCategoryId.get(category.id)
+    const delta = resolveDelta(category.id)
     if (!delta) continue
     for (const codeId of category.codeIds) {
       const key = `code:${codeId}`
@@ -985,14 +1005,20 @@ export function applyClusterLayoutWithMembers(
   }
 
   const withPositions = applyClusterPositions(data, positions)
-  return {
-    ...withPositions,
-    boardItems: withPositions.boardItems.map((item) => {
-      if (item.boardId !== boardId) return item
-      const delta = deltaByRefKey.get(`${item.refType}:${item.refId}`)
-      return delta ? { ...item, x: item.x + delta.dx, y: item.y + delta.dy } : item
-    })
-  }
+
+  const boardClusters = withPositions.boardClusters.map((c) => {
+    if (c.boardId !== boardId || directDeltaByCategoryId.has(c.categoryId)) return c
+    const delta = resolveDelta(c.categoryId)
+    return delta ? { ...c, x: c.x + delta.dx, y: c.y + delta.dy } : c
+  })
+
+  const boardItems = withPositions.boardItems.map((item) => {
+    if (item.boardId !== boardId) return item
+    const delta = deltaByRefKey.get(`${item.refType}:${item.refId}`)
+    return delta ? { ...item, x: item.x + delta.dx, y: item.y + delta.dy } : item
+  })
+
+  return { ...withPositions, boardClusters, boardItems }
 }
 
 /**
@@ -1087,22 +1113,65 @@ export function computeTreeLayout(clusters: BoardCluster[], categories: Category
 const RADIAL_RADIUS_STEP = 260
 
 /**
- * A radial (hub-and-spoke) arrangement: one focus cluster stays put at its
- * current position, every other cluster on the board is spread around it
- * in a single ring at equal angular spacing. `focusCategoryId` picks the
- * hub; if it's not one of `clusters` (or omitted), the first cluster is
- * used instead so this never errors on a mismatched id. Same
- * pure-geometry/apply-separately contract as computeTreeLayout above.
+ * A radial (hub-and-spoke) arrangement: one focus *root* cluster stays put
+ * at its current position, every other *root* on the board spreads around
+ * it in a single ring at equal angular spacing. `focusCategoryId` picks the
+ * hub; if it's not one of `clusters` (or omitted), the first root is used
+ * instead so this never errors on a mismatched id. Same pure-geometry/
+ * apply-separately contract as computeTreeLayout above — and, like that
+ * one, only ever computes positions for roots (a cluster whose parent
+ * category isn't also on this board): a nested cluster stays out of the
+ * ring entirely, moving only because its ancestor does (see
+ * applyClusterLayoutWithMembers, which cascades a root's delta down its
+ * whole descendant subtree — clusters and member items alike). Treating
+ * nested clusters as independent ring points was the original bug this
+ * guards against: it scattered sub-themes into the same ring as their own
+ * superordinate, discarding the containment entirely.
+ *
+ * The ring's radius accounts for satellite size two ways, taking whichever
+ * is larger: enough to clear the single *largest* satellite from the focus
+ * (so one big satellite — e.g. a superordinate with its own wide nested-
+ * children grid — can't overlap the hub), and separately enough that the
+ * two largest satellites specifically couldn't overlap *each other* even
+ * if equal angular spacing happened to land them right next to each other
+ * — the worst case, checked directly via the chord-length between two
+ * adjacent ring points, rather than assumed away by equal spacing (equal
+ * *angle* doesn't imply equal *physical* spacing once sizes vary a lot).
  */
-export function computeRadialLayout(clusters: BoardCluster[], focusCategoryId: string | null): ClusterPosition[] {
-  if (clusters.length === 0) return []
-  const focus = clusters.find((c) => c.categoryId === focusCategoryId) ?? clusters[0]
-  const others = clusters.filter((c) => c.id !== focus.id)
+export function computeRadialLayout(
+  clusters: BoardCluster[],
+  categories: CategoryRecord[],
+  focusCategoryId: string | null
+): ClusterPosition[] {
+  const categoryById = new Map(categories.map((c) => [c.id, c]))
+  const categoryIdsOnBoard = new Set(clusters.map((c) => c.categoryId))
+  const roots = clusters.filter((c) => {
+    const parentCategoryId = categoryById.get(c.categoryId)?.parentCategoryId ?? null
+    return !parentCategoryId || !categoryIdsOnBoard.has(parentCategoryId)
+  })
+  if (roots.length === 0) return []
+
+  const focus = roots.find((c) => c.categoryId === focusCategoryId) ?? roots[0]
+  const others = roots.filter((c) => c.id !== focus.id)
   if (others.length === 0) return [{ id: focus.id, x: focus.x, y: focus.y }]
 
   const centerX = focus.x + focus.width / 2
   const centerY = focus.y + focus.height / 2
-  const radius = RADIAL_RADIUS_STEP + Math.max(focus.width, focus.height) / 2
+  const otherDimensions = others.map((o) => Math.max(o.width, o.height)).sort((a, b) => b - a)
+  const radiusClearingLargest = RADIAL_RADIUS_STEP + Math.max(focus.width, focus.height) / 2 + otherDimensions[0] / 2
+
+  // Chord length between two *adjacent* ring points, at angle 2π/N apart,
+  // is 2r·sin(π/N) — solved for r so that distance is at least enough to
+  // clear the two largest satellites' combined half-widths (+ a gap),
+  // covering the worst case where equal spacing happens to seat them right
+  // next to each other. Undefined (and unneeded) with only one satellite.
+  const angleBetweenAdjacent = others.length >= 2 ? Math.PI / others.length : null
+  const radiusClearingAdjacentPair =
+    angleBetweenAdjacent && otherDimensions.length >= 2
+      ? ((otherDimensions[0] + otherDimensions[1]) / 2 + CLUSTER_GAP) / (2 * Math.sin(angleBetweenAdjacent))
+      : 0
+
+  const radius = Math.max(radiusClearingLargest, radiusClearingAdjacentPair)
 
   const result: ClusterPosition[] = [{ id: focus.id, x: focus.x, y: focus.y }]
   others.forEach((cluster, i) => {

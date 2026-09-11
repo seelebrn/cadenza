@@ -1199,3 +1199,42 @@ findDistributionSnap: exact-midpoint snapping, the row/column band correctly exc
 unrelated pair, a too-far-to-snap case, x and y handled independently without cross-
 contamination). Full suite green (306/306), typecheck clean, production build clean.
 Boot-tested a packaged instance (no errors, confirmed via `tasklist` and cleanly killed).
+
+### v0.2.0 released; a delete-button bug on the default board reported right after (2026-09-11)
+
+Bumped to v0.2.0 and tagged — all three platform builds published cleanly (results-draft
+export, cluster links + tree/radial layouts, and smart guides are the headline additions
+since v0.1.1).
+
+Reported immediately after: a cluster's × ("remove from board") button does nothing on the
+default board, though it works fine on any other board. Root cause is the default board's own
+core design (`getVisibleBoardClusters`): *every* category always shows there automatically,
+whether or not it has an explicit `BoardCluster` shape yet — a category never individually
+moved/resized is drawn from a synthesized "virtual" fallback with an id like
+`virtual:cluster:<categoryId>`, which doesn't exist in `data.boardClusters` for `deleteCluster`
+to find and remove. Worse, even a cluster that *is* materialized can't be meaningfully removed
+from the default board either way: deleting its `BoardCluster` row just makes it fall back to
+the same virtual auto-shown state, not disappear — the default board has no concept of "hidden"
+category, by design. So the button was never going to work there, virtual or not.
+
+Fixed by disabling the button on the default board instead of leaving it silently broken —
+`ClusterFrame` takes a new `canDelete` prop (`!currentBoard.isDefault`), disabled state shown
+with an explanatory tooltip pointing at the actual ways to reduce clutter there (curate a
+different board, or delete the cluster/category itself from the Workspace/Analysis tab).
+
+Also added, requested in the same report: a confirmation dialog (`window.confirm`, not
+`window.prompt` — see the earlier fix in this log for why that distinction matters in
+Electron) before removing a cluster from a board where it's actually possible, naming the
+cluster and reiterating that only the board shape is removed, not the cluster/category itself.
+
+Separately asked what happens deleting a *superordinate* cluster (one with nested children) —
+already handled correctly and already tested: `deleteCategory` promotes its direct children to
+its own parent (or to root, if it had none) rather than deleting them — nesting collapses one
+level, every child keeps its own codes/notes/quotes intact. Also cleans up anything that would
+otherwise point at the deleted category: notes attached directly to it fall back to a
+project-level attachment, its `BoardCluster` shape on every board is removed, and (new since
+the cluster-links work above) any `ClusterLink` naming it as either endpoint is removed too.
+
+Verified: no shared/pure logic changed (this is a UI prop + a confirm dialog), typecheck
+clean, full suite still 306/306, production build clean, boot-tested (no errors, cleanly
+killed).

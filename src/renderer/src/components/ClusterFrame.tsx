@@ -54,6 +54,14 @@ interface ClusterFrameProps {
    * being drawn — highlighted so it's clear which one a second click will
    * connect to. */
   isLinkPicked: boolean
+  /** False on the default board, where every category always shows as a
+   * cluster frame automatically (see getVisibleBoardClusters) — there's no
+   * "remove from this board" to do there: deleting the underlying
+   * BoardCluster shape would just make it reappear at its computed
+   * fallback position, not disappear, so the delete button is disabled
+   * rather than offered and silently doing nothing (or something
+   * confusing) when clicked. */
+  canDelete: boolean
   onStartMove: (e: React.MouseEvent) => void
   onStartResize: (e: React.MouseEvent) => void
   onPick: () => void
@@ -70,6 +78,7 @@ function ClusterFrame({
   isEnclosedByResize,
   isLinkMode,
   isLinkPicked,
+  canDelete,
   onStartMove,
   onStartResize,
   onPick
@@ -219,10 +228,19 @@ function ClusterFrame({
           </button>
         )}
         <button
-          className="flex-shrink-0 text-white/80 hover:text-white"
-          title="Remove from this board (the cluster itself is kept)"
+          className={canDelete ? 'flex-shrink-0 text-white/80 hover:text-white' : 'flex-shrink-0 text-white/40'}
+          disabled={!canDelete}
+          title={
+            canDelete
+              ? 'Remove from this board (the cluster itself is kept)'
+              : 'Every cluster always shows on the default board — use a different board to curate a subset, or delete the cluster itself from the Workspace/Analysis tab'
+          }
           onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => deleteCluster(cluster.id)}
+          onClick={() => {
+            if (window.confirm(`Remove "${category.name}" from this board? The cluster itself — and its codes, notes, and quotes — will be kept; this only removes it from this board's layout.`)) {
+              deleteCluster(cluster.id)
+            }
+          }}
         >
           ×
         </button>

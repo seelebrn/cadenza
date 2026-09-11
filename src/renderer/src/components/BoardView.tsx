@@ -1222,6 +1222,7 @@ function BoardView(): JSX.Element {
                   isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}
                   isLinkMode={linkMode}
                   isLinkPicked={linkFromCategoryId === category.id}
+                  canDelete={!currentBoard.isDefault}
                   onPick={() => handlePickClusterForLink(category.id)}
                   onStartMove={(e) => {
                     const descendantCategoryIds = getDescendantCategoryIds(data.categories, category.id)

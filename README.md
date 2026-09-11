@@ -1133,3 +1133,69 @@ file already uses for naming a new board/cluster, rather than a browser dialog A
 never going to work in this runtime. Re-verified: typecheck, full suite (296/296), and
 production build all still clean; boot-tested again the same way (8 electron.exe processes,
 no new errors), confirmed cleanly killed afterward.
+
+### Radial layout could push a cluster off the negative edge of the canvas (2026-09-11)
+
+Reported from real use: after clicking "Radial," one cluster ended up somewhere unreachable
+— couldn't be selected or dragged back, only fixed by undo. Root cause: the board's canvas is
+a fixed-size div inside a scrolling container; overflowing its *positive* edge is harmless
+(the container can always scroll further right/down to reach it), but a cluster placed at a
+*negative* x/y sits somewhere no scroll position can ever reach — invisible and unclickable
+by construction, not a rendering glitch. `computeRadialLayout` had no floor: a focus cluster
+starting near the canvas origin (a common case — it's roughly where a newly placed cluster
+lands) plus the layout's own radius could easily push a sibling's computed position negative.
+
+Fixed with `keepPositionsOnBoard`: after either layout computes its positions, shifts the
+*entire* set uniformly (preserving the relative arrangement exactly) so the minimum x/y is
+never below the canvas's own origin margin. Applied to both `computeTreeLayout` (safe by
+construction today, but guarded defensively against future changes) and
+`computeRadialLayout` (where the bug actually lived).
+
+Verified: 1 new dedicated test reproducing the exact reported scenario (a focus cluster near
+the origin, several others around it, asserting no resulting position goes negative) — it
+failed against the pre-fix code, confirming it actually catches the bug rather than just
+exercising already-correct behavior. Two existing radial tests had to move their fixtures
+further from the origin, since they were incidentally relying on positions the new floor now
+legitimately shifts (not a sign either test's real intent was wrong — the floor is exactly the
+new behavior). Full suite green (297/297), typecheck clean.
+
+### Alignment + distribution smart guides for dragging clusters (2026-09-11)
+
+Requested as a quality-of-life follow-up to the thematic-map work: PowerPoint/Figma-style
+guides while dragging a cluster — snapping into alignment with another cluster's edge/center,
+and highlighting when the gap to two others on either side is equal.
+
+Two independent, single-axis mechanisms in boardOps.ts, since they answer different questions
+and a drag can want either, both, or neither:
+- **`findAlignmentSnap`** — snaps a tentative position to the nearest edge/center match
+  (left/center/right on x, top/center/bottom on y) with any other cluster on the board,
+  independently per axis, the same idea as `findSnapTarget`'s existing card-to-card snapping
+  just against a box's edges/centers instead of whole-card proximity. Reports every guide
+  actually worth drawing (re-checked against the already-snapped position), not just whichever
+  one happened to win — several clusters sharing the same alignment all get a guide line.
+- **`findDistributionSnap`** — for a pair of other clusters that already roughly straddle the
+  dragged one on an axis, snaps its center to the exact midpoint (equal spacing on both sides).
+  Only considers a pair "the same row/column" when both sit within a generous band of the
+  dragged cluster's center on the *other* axis — otherwise two unrelated clusters elsewhere on
+  the board could suggest a spacing relationship that doesn't visually read as one.
+
+Combined in `computeClusterMoveSnap` (BoardView.tsx): alignment runs first, distribution only
+fills in whichever axis alignment didn't already claim. A plain function, not a hook, so it
+can be called identically from the live-drag preview (fed the in-progress delta) and from
+`handleMouseUp` (fed the final delta) — the same "recompute fresh at drop time against the
+same logic that drove the live highlight" pattern already used for nest-targets and
+resize-enclosure elsewhere in this file, so a snap shown mid-drag is never subtly different
+from where the cluster (and everything nested/clustered under it) actually ends up. Every
+place that already tracked a moving cluster's live delta (member items, cluster-link lines,
+`ClusterFrame` itself) now reads this snapped delta instead of the raw mouse delta, so nothing
+visually detaches from its frame during a snap adjustment. Rendered as dashed guide lines
+(full-canvas-spanning for alignment, matching Figma/PowerPoint convention) plus tick marks at
+each of the three centers for a distribution match, in a dedicated accent color distinct from
+every other highlight already used on the board (nest-target, enclosed-by-resize).
+
+Verified: 9 new tests (findAlignmentSnap: edge and center matches, independent per-axis
+snapping, no-match case, multiple clusters sharing one alignment each getting their own guide;
+findDistributionSnap: exact-midpoint snapping, the row/column band correctly excluding an
+unrelated pair, a too-far-to-snap case, x and y handled independently without cross-
+contamination). Full suite green (306/306), typecheck clean, production build clean.
+Boot-tested a packaged instance (no errors, confirmed via `tasklist` and cleanly killed).

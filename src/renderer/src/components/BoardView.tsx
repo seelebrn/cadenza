@@ -4,8 +4,10 @@ import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import {
   computeAccommodatingSize,
   computeGridPosition,
+  findAlignmentSnap,
   findClusterAtPoint,
   findClustersEnclosedBy,
+  findDistributionSnap,
   findSnapTarget,
   getClusterMemberItems,
   getDefaultBoardId,
@@ -16,6 +18,7 @@ import {
   MEMBER_CARD_HEIGHT,
   MEMBER_CARD_WIDTH
 } from '@shared/boardOps'
+import type { AlignmentGuide, DistributionGuide } from '@shared/boardOps'
 import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
 import type { BoardCluster, BoardItem, CategoryKind } from '@shared/types'
 import BoardItemCard from './BoardItemCard'
@@ -46,9 +49,70 @@ const FIT_VIEW_PADDING = 60
 // already-linked pair must be dragged apart to sever automatically.
 const SNAP_DISTANCE = 70
 const UNLINK_DISTANCE = 200
+// Smart-guide accent — deliberately not any cluster's own color (which
+// already means something else, e.g. a nest-target highlight) and not the
+// enclosed-by-resize blue, so an alignment/distribution guide always reads
+// the same regardless of which clusters happen to be involved.
+const GUIDE_COLOR = '#ec4899'
 
 function nextColor(count: number): string {
   return PALETTE[count % PALETTE.length]
+}
+
+interface ClusterMoveSnap {
+  dx: number
+  dy: number
+  alignmentGuides: AlignmentGuide[]
+  distributionGuides: DistributionGuide[]
+}
+
+/**
+ * PowerPoint/Figma-style smart guides for dragging a cluster: snaps the
+ * tentative (dx, dy) to line up with another cluster's edge/center first
+ * (findAlignmentSnap), then — only for whichever axis alignment didn't
+ * already claim — to sit exactly midway between two others that already
+ * roughly straddle it (findDistributionSnap). A plain function rather than
+ * a hook so it can be called identically from the live-drag preview
+ * (fed the in-progress liveDelta) and from handleMouseUp (fed the final
+ * delta) — the same "recompute fresh at drop time against the same logic
+ * that drove the live highlight" pattern already used for nest-targets and
+ * resize-enclosure elsewhere in this file, so what you see while dragging
+ * is exactly what you get on release.
+ */
+function computeClusterMoveSnap(
+  state: { startX: number; startY: number; startWidth: number; startHeight: number; groupClusterIds: string[] },
+  dx: number,
+  dy: number,
+  allClusters: BoardCluster[]
+): ClusterMoveSnap {
+  const size = { width: state.startWidth, height: state.startHeight }
+  const others = allClusters.filter((c) => !state.groupClusterIds.includes(c.id))
+  const aligned = findAlignmentSnap(state.startX + dx, state.startY + dy, size, others)
+  let x = aligned.x
+  let y = aligned.y
+  const hasX = aligned.guides.some((g) => g.axis === 'x')
+  const hasY = aligned.guides.some((g) => g.axis === 'y')
+
+  const distributionGuides: DistributionGuide[] = []
+  if (!hasX || !hasY) {
+    const distributed = findDistributionSnap(x, y, size, others)
+    if (!hasX) {
+      const xGuide = distributed.guides.find((g) => g.axis === 'x')
+      if (xGuide) {
+        x = distributed.x
+        distributionGuides.push(xGuide)
+      }
+    }
+    if (!hasY) {
+      const yGuide = distributed.guides.find((g) => g.axis === 'y')
+      if (yGuide) {
+        y = distributed.y
+        distributionGuides.push(yGuide)
+      }
+    }
+  }
+
+  return { dx: x - state.startX, dy: y - state.startY, alignmentGuides: aligned.guides, distributionGuides }
 }
 
 function BoardView(): JSX.Element {
@@ -413,17 +477,24 @@ function BoardView(): JSX.Element {
             if (dist > UNLINK_DISTANCE) unlinkItemsAction(link.id)
           }
         } else if (state.kind === 'cluster-move') {
-          const finalX = state.startX + dx
-          const finalY = state.startY + dy
+          // Recomputed fresh against the final delta — same "what the live
+          // preview showed is exactly what commits" pattern already used
+          // for the nest-target/resize-enclosure highlights below, so a
+          // smart-guide snap shown mid-drag is never subtly different from
+          // where the cluster (and everything nested/clustered under it)
+          // actually ends up.
+          const snap = computeClusterMoveSnap(state, dx, dy, clusters)
+          const finalX = state.startX + snap.dx
+          const finalY = state.startY + snap.dy
           moveCluster(state.id, finalX, finalY)
           for (const clusterId of state.groupClusterIds) {
             if (clusterId === state.id) continue
             const start = state.clusterStartPositions[clusterId]
-            if (start) moveCluster(clusterId, start.x + dx, start.y + dy)
+            if (start) moveCluster(clusterId, start.x + snap.dx, start.y + snap.dy)
           }
           for (const itemId of state.memberItemIds) {
             const start = state.memberStartPositions[itemId]
-            if (start) moveItem(itemId, start.x + dx, start.y + dy)
+            if (start) moveItem(itemId, start.x + snap.dx, start.y + snap.dy)
           }
 
           // Re-evaluate (or explicitly break, if shift) this cluster's parent.
@@ -493,6 +564,18 @@ function BoardView(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragState, clusters, items, links, zoom, selectedBoardId, data])
 
+  // Smart-guide snap for the cluster currently being dragged (null unless
+  // dragState.kind === 'cluster-move') — see computeClusterMoveSnap's own
+  // comment. clusterMoveDelta is what every cluster-move-driven position
+  // below should actually move by: the snapped delta while a snap applies,
+  // the raw liveDelta otherwise (including for item drags and cluster
+  // resize, which this feature doesn't touch).
+  const clusterMoveSnap = useMemo<ClusterMoveSnap | null>(() => {
+    if (dragState?.kind !== 'cluster-move') return null
+    return computeClusterMoveSnap(dragState, liveDelta.dx, liveDelta.dy, clusters)
+  }, [dragState, liveDelta, clusters])
+  const clusterMoveDelta = clusterMoveSnap ?? liveDelta
+
   // Live position (and snap-preview) for every item, shared by the cards
   // themselves and the link lines so both agree on where things are mid-drag.
   const displayPositions = useMemo(() => {
@@ -532,7 +615,7 @@ function BoardView(): JSX.Element {
         map.set(
           item.id,
           start
-            ? { x: start.x + liveDelta.dx, y: start.y + liveDelta.dy, isSnapping: false }
+            ? { x: start.x + clusterMoveDelta.dx, y: start.y + clusterMoveDelta.dy, isSnapping: false }
             : { x: item.x, y: item.y, isSnapping: false }
         )
       }
@@ -543,7 +626,7 @@ function BoardView(): JSX.Element {
     }
 
     return map
-  }, [items, dragState, liveDelta])
+  }, [items, dragState, liveDelta, clusterMoveDelta])
 
   // While dragging a cluster over another one it would nest into on drop,
   // identifies that destination so ClusterFrame can highlight it clearly
@@ -631,14 +714,14 @@ function BoardView(): JSX.Element {
         if (!a || !b) return null
         const aMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(a.id)
         const bMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(b.id)
-        const ax = a.x + (aMoving ? liveDelta.dx : 0) + a.width / 2
-        const ay = a.y + (aMoving ? liveDelta.dy : 0) + a.height / 2
-        const bx = b.x + (bMoving ? liveDelta.dx : 0) + b.width / 2
-        const by = b.y + (bMoving ? liveDelta.dy : 0) + b.height / 2
+        const ax = a.x + (aMoving ? clusterMoveDelta.dx : 0) + a.width / 2
+        const ay = a.y + (aMoving ? clusterMoveDelta.dy : 0) + a.height / 2
+        const bx = b.x + (bMoving ? clusterMoveDelta.dx : 0) + b.width / 2
+        const by = b.y + (bMoving ? clusterMoveDelta.dy : 0) + b.height / 2
         return { link, ax, ay, bx, by, midX: (ax + bx) / 2, midY: (ay + by) / 2 }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)
-  }, [data, clusters, dragState, liveDelta])
+  }, [data, clusters, dragState, clusterMoveDelta])
 
   if (!data) return <></>
 
@@ -1047,6 +1130,80 @@ function BoardView(): JSX.Element {
                   )}
                 </g>
               ))}
+
+              {/* Smart guides — only while actually dragging a cluster (see
+                  clusterMoveSnap). Alignment guides span the full canvas on
+                  their axis, PowerPoint/Figma-style; distribution guides
+                  draw the two equal gaps plus a tick at each of the three
+                  centers involved. */}
+              {dragState?.kind === 'cluster-move' &&
+                clusterMoveSnap?.alignmentGuides.map((guide, i) =>
+                  guide.axis === 'x' ? (
+                    <line
+                      key={`align-${i}`}
+                      x1={guide.position}
+                      y1={0}
+                      x2={guide.position}
+                      y2={CANVAS_HEIGHT}
+                      stroke={GUIDE_COLOR}
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                    />
+                  ) : (
+                    <line
+                      key={`align-${i}`}
+                      x1={0}
+                      y1={guide.position}
+                      x2={CANVAS_WIDTH}
+                      y2={guide.position}
+                      stroke={GUIDE_COLOR}
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                    />
+                  )
+                )}
+              {dragState?.kind === 'cluster-move' &&
+                clusterMoveSnap?.distributionGuides.map((guide, i) => {
+                  // The dragged cluster's own current center on the axis
+                  // perpendicular to the guide — where to draw it across.
+                  const crossCenter =
+                    guide.axis === 'x'
+                      ? dragState.startY + clusterMoveSnap.dy + dragState.startHeight / 2
+                      : dragState.startX + clusterMoveSnap.dx + dragState.startWidth / 2
+                  const ticks = [guide.beforeCenter, guide.selfCenter, guide.afterCenter]
+                  return (
+                    <g key={`dist-${i}`}>
+                      {guide.axis === 'x' ? (
+                        <line
+                          x1={guide.beforeCenter}
+                          y1={crossCenter}
+                          x2={guide.afterCenter}
+                          y2={crossCenter}
+                          stroke={GUIDE_COLOR}
+                          strokeWidth={1}
+                          strokeDasharray="2 3"
+                        />
+                      ) : (
+                        <line
+                          x1={crossCenter}
+                          y1={guide.beforeCenter}
+                          x2={crossCenter}
+                          y2={guide.afterCenter}
+                          stroke={GUIDE_COLOR}
+                          strokeWidth={1}
+                          strokeDasharray="2 3"
+                        />
+                      )}
+                      {ticks.map((t, j) =>
+                        guide.axis === 'x' ? (
+                          <line key={j} x1={t} y1={crossCenter - 5} x2={t} y2={crossCenter + 5} stroke={GUIDE_COLOR} strokeWidth={1.5} />
+                        ) : (
+                          <line key={j} x1={crossCenter - 5} y1={t} x2={crossCenter + 5} y2={t} stroke={GUIDE_COLOR} strokeWidth={1.5} />
+                        )
+                      )}
+                    </g>
+                  )
+                })}
             </svg>
 
             {clusters.map((cluster) => {
@@ -1059,7 +1216,7 @@ function BoardView(): JSX.Element {
                   category={category}
                   depth={getCategoryDepth(data.categories, category.id)}
                   dragState={dragState}
-                  liveDelta={liveDelta}
+                  liveDelta={clusterMoveDelta}
                   resizePreview={dragNestTarget?.targetClusterId === cluster.id ? dragNestTarget.growSize : null}
                   isNestTarget={dragNestTarget?.targetClusterId === cluster.id}
                   isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}

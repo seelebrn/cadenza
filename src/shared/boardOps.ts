@@ -889,6 +889,28 @@ export function applyClusterPositions(data: ProjectData, positions: ClusterPosit
   }
 }
 
+/**
+ * Shifts a whole set of computed positions uniformly — preserving their
+ * relative arrangement exactly — so none sits at a negative or too-close-
+ * to-zero coordinate. Overflowing the canvas's *positive* edge is harmless
+ * (the board's scroll container can always scroll further right/down to
+ * reach it); overflowing the *negative* edge is not — there's no scroll
+ * position that reaches it, so a cluster placed there becomes invisible
+ * and unreachable until the user resorts to undo. computeRadialLayout in
+ * particular can push a cluster past the negative edge if its focus
+ * cluster happened to start near the canvas origin (a very common case —
+ * it's roughly where a newly placed cluster lands by default).
+ */
+function keepPositionsOnBoard(positions: ClusterPosition[]): ClusterPosition[] {
+  if (positions.length === 0) return positions
+  const minX = Math.min(...positions.map((p) => p.x))
+  const minY = Math.min(...positions.map((p) => p.y))
+  const shiftX = minX < GRID_ORIGIN_X ? GRID_ORIGIN_X - minX : 0
+  const shiftY = minY < GRID_ORIGIN_Y ? GRID_ORIGIN_Y - minY : 0
+  if (shiftX === 0 && shiftY === 0) return positions
+  return positions.map((p) => ({ ...p, x: p.x + shiftX, y: p.y + shiftY }))
+}
+
 const TREE_LEVEL_HEIGHT = 220
 const TREE_NODE_GAP = 40
 
@@ -953,7 +975,7 @@ export function computeTreeLayout(clusters: BoardCluster[], categories: Category
     rootLeft += subtreeWidth(root) + TREE_NODE_GAP
   }
 
-  return result
+  return keepPositionsOnBoard(result)
 }
 
 const RADIAL_RADIUS_STEP = 260
@@ -983,7 +1005,209 @@ export function computeRadialLayout(clusters: BoardCluster[], focusCategoryId: s
     const cy = centerY + radius * Math.sin(angle)
     result.push({ id: cluster.id, x: cx - cluster.width / 2, y: cy - cluster.height / 2 })
   })
-  return result
+  return keepPositionsOnBoard(result)
+}
+
+// --- Alignment / distribution guides (dragging a cluster) ---
+//
+// PowerPoint/Figma-style "smart guides": while dragging a cluster, snap it
+// to line up with another cluster's edge/center, or to sit exactly midway
+// between two others that already roughly straddle it — and report which
+// guide(s) matched so the renderer can draw them. Two independent, single-
+// axis mechanisms (findAlignmentSnap for lining up, findDistributionSnap
+// for equal spacing) rather than one combined pass, since they answer
+// different questions and a drag can want either, both, or neither.
+
+export type GuideAxis = 'x' | 'y'
+
+/** One matched edge/center alignment, in canvas coordinates — the shared
+ * position along `axis` that the dragged rect now lines up on (its own
+ * left/center/right on the x axis, or top/center/bottom on y). */
+export interface AlignmentGuide {
+  axis: GuideAxis
+  position: number
+}
+
+export interface AlignmentSnapResult {
+  /** The rect's x/y after snapping — unchanged on an axis with no match. */
+  x: number
+  y: number
+  guides: AlignmentGuide[]
+}
+
+const ALIGNMENT_TOLERANCE = 6
+
+function edgesOf(start: number, size: number): [number, number, number] {
+  return [start, start + size / 2, start + size]
+}
+
+/** Every edge/center alignment between a rect at (x, y) and any of
+ * `others`, within `tolerance`, on both axes — used both to compute the
+ * snap adjustment above and (called again against the already-snapped
+ * position) to find every guide line actually worth drawing, so a cluster
+ * aligned with several others at once shows a guide for each rather than
+ * just whichever one happened to win the snap. */
+function findAlignmentGuides(x: number, y: number, size: { width: number; height: number }, others: Rect[], tolerance: number): AlignmentGuide[] {
+  const selfX = edgesOf(x, size.width)
+  const selfY = edgesOf(y, size.height)
+  const guides: AlignmentGuide[] = []
+  for (const other of others) {
+    for (const otherEdge of edgesOf(other.x, other.width)) {
+      for (const selfEdge of selfX) {
+        if (Math.abs(selfEdge - otherEdge) <= tolerance) guides.push({ axis: 'x', position: otherEdge })
+      }
+    }
+    for (const otherEdge of edgesOf(other.y, other.height)) {
+      for (const selfEdge of selfY) {
+        if (Math.abs(selfEdge - otherEdge) <= tolerance) guides.push({ axis: 'y', position: otherEdge })
+      }
+    }
+  }
+  const seen = new Set<string>()
+  return guides.filter((g) => {
+    const key = `${g.axis}:${g.position}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/**
+ * Snaps a tentative (x, y) to the nearest edge/center alignment with any of
+ * `others`, independently per axis (an x-snap and a y-snap can both apply
+ * at once, from different clusters) — the cluster-frame equivalent of
+ * findSnapTarget's card-to-card snapping above, just against edges/centers
+ * of a box instead of whole-card proximity. No match on an axis leaves
+ * that coordinate untouched.
+ */
+export function findAlignmentSnap(
+  x: number,
+  y: number,
+  size: { width: number; height: number },
+  others: Rect[],
+  tolerance: number = ALIGNMENT_TOLERANCE
+): AlignmentSnapResult {
+  const selfX = edgesOf(x, size.width)
+  const selfY = edgesOf(y, size.height)
+
+  let bestXDelta: number | null = null
+  let bestYDelta: number | null = null
+  for (const other of others) {
+    for (const otherEdge of edgesOf(other.x, other.width)) {
+      for (const selfEdge of selfX) {
+        const delta = otherEdge - selfEdge
+        if (Math.abs(delta) <= tolerance && (bestXDelta === null || Math.abs(delta) < Math.abs(bestXDelta))) {
+          bestXDelta = delta
+        }
+      }
+    }
+    for (const otherEdge of edgesOf(other.y, other.height)) {
+      for (const selfEdge of selfY) {
+        const delta = otherEdge - selfEdge
+        if (Math.abs(delta) <= tolerance && (bestYDelta === null || Math.abs(delta) < Math.abs(bestYDelta))) {
+          bestYDelta = delta
+        }
+      }
+    }
+  }
+
+  const snappedX = x + (bestXDelta ?? 0)
+  const snappedY = y + (bestYDelta ?? 0)
+  return { x: snappedX, y: snappedY, guides: findAlignmentGuides(snappedX, snappedY, size, others, tolerance) }
+}
+
+/** One matched "equal gap" opportunity: the dragged rect's center sits (or
+ * now sits, after snapping) exactly midway between `before` and `after`'s
+ * centers along `axis` — rendered as two tick marks, one per gap. */
+export interface DistributionGuide {
+  axis: GuideAxis
+  beforeCenter: number
+  selfCenter: number
+  afterCenter: number
+}
+
+export interface DistributionSnapResult {
+  x: number
+  y: number
+  guides: DistributionGuide[]
+}
+
+const DISTRIBUTION_TOLERANCE = 6
+// How far apart (on the cross axis) two candidates can be from the dragged
+// rect's own cross-axis center and still count as "the same row/column" for
+// distribution purposes — generous enough for a normal loose arrangement,
+// not so generous that unrelated clusters elsewhere on the board start
+// suggesting a spacing relationship that doesn't visually read as one.
+const DISTRIBUTION_ROW_BAND = 80
+
+/**
+ * Snaps a tentative (x, y) so the dragged rect's center sits exactly midway
+ * between the closest pair of `others` that already roughly straddle it on
+ * each axis (PowerPoint/Figma's "equal spacing" guide) — independently per
+ * axis, same as findAlignmentSnap. Only considers a pair "the same
+ * row/column" when both are within DISTRIBUTION_ROW_BAND of the dragged
+ * rect's center on the *other* axis, so a distribution guide only ever
+ * suggests a relationship that already looks like one.
+ */
+export function findDistributionSnap(
+  x: number,
+  y: number,
+  size: { width: number; height: number },
+  others: Rect[],
+  tolerance: number = DISTRIBUTION_TOLERANCE
+): DistributionSnapResult {
+  const selfCenterX = x + size.width / 2
+  const selfCenterY = y + size.height / 2
+
+  function bestGuide(
+    selfCenter: number,
+    crossSelfCenter: number,
+    centerOf: (r: Rect) => number,
+    crossCenterOf: (r: Rect) => number
+  ): { adjust: number; guide: DistributionGuide } | null {
+    let best: { adjust: number; guide: DistributionGuide } | null = null
+    for (const a of others) {
+      if (Math.abs(crossCenterOf(a) - crossSelfCenter) > DISTRIBUTION_ROW_BAND) continue
+      for (const b of others) {
+        if (a === b) continue
+        if (Math.abs(crossCenterOf(b) - crossSelfCenter) > DISTRIBUTION_ROW_BAND) continue
+        const ca = centerOf(a)
+        const cb = centerOf(b)
+        if (!(ca < selfCenter && selfCenter < cb)) continue // a, self, b in order along the axis
+        const midpoint = (ca + cb) / 2
+        const adjust = midpoint - selfCenter
+        if (Math.abs(adjust) > tolerance) continue
+        if (!best || Math.abs(adjust) < Math.abs(best.adjust)) {
+          best = { adjust, guide: { axis: 'x', beforeCenter: ca, selfCenter: midpoint, afterCenter: cb } }
+        }
+      }
+    }
+    return best
+  }
+
+  const xGuide = bestGuide(
+    selfCenterX,
+    selfCenterY,
+    (r) => r.x + r.width / 2,
+    (r) => r.y + r.height / 2
+  )
+  const yGuideRaw = bestGuide(
+    selfCenterY,
+    selfCenterX,
+    (r) => r.y + r.height / 2,
+    (r) => r.x + r.width / 2
+  )
+  const yGuide = yGuideRaw ? { adjust: yGuideRaw.adjust, guide: { ...yGuideRaw.guide, axis: 'y' as const } } : null
+
+  const guides: DistributionGuide[] = []
+  if (xGuide) guides.push(xGuide.guide)
+  if (yGuide) guides.push(yGuide.guide)
+
+  return {
+    x: x + (xGuide?.adjust ?? 0),
+    y: y + (yGuide?.adjust ?? 0),
+    guides
+  }
 }
 
 export interface PositionedItem {

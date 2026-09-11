@@ -17,9 +17,11 @@ import {
   deleteBoard,
   deleteCluster,
   describeBoardItem,
+  findAlignmentSnap,
   findClusterAtPoint,
   findClusterForCategoryOnBoard,
   findClustersEnclosedBy,
+  findDistributionSnap,
   findSnapTarget,
   getClusterMemberItems,
   getDefaultBoardId,
@@ -1056,11 +1058,15 @@ describe('computeRadialLayout', () => {
   })
 
   it('keeps the focus cluster in place and spreads the rest around it, equidistant from center', () => {
-    const focus = cluster('focus', 'A', 0, 0)
+    // Well clear of the canvas origin (further than the layout's own
+    // radius) so keepPositionsOnBoard's safety net (tested separately
+    // below) is a no-op here — this test is only about the radial geometry
+    // itself.
+    const focus = cluster('focus', 'A', 500, 500)
     const others = [cluster('b', 'B'), cluster('c', 'C'), cluster('d', 'D')]
     const positions = computeRadialLayout([focus, ...others], 'A')
     const byId = new Map(positions.map((p) => [p.id, p]))
-    expect(byId.get('focus')).toEqual({ id: 'focus', x: 0, y: 0 })
+    expect(byId.get('focus')).toEqual({ id: 'focus', x: 500, y: 500 })
 
     const centerX = focus.x + focus.width / 2
     const centerY = focus.y + focus.height / 2
@@ -1076,7 +1082,111 @@ describe('computeRadialLayout', () => {
   })
 
   it('falls back to the first cluster as focus when focusCategoryId matches nothing on the board', () => {
-    const positions = computeRadialLayout([cluster('only', 'A', 5, 5), cluster('other', 'B')], 'missing')
-    expect(positions.find((p) => p.id === 'only')).toEqual({ id: 'only', x: 5, y: 5 })
+    // Well clear of the origin, same reasoning as above — this test is
+    // only about which cluster becomes the focus, not the safety net.
+    const positions = computeRadialLayout([cluster('only', 'A', 500, 500), cluster('other', 'B')], 'missing')
+    expect(positions.find((p) => p.id === 'only')).toEqual({ id: 'only', x: 500, y: 500 })
+  })
+
+  it('never places a cluster at a negative coordinate, even when the focus starts near the canvas origin', () => {
+    // This is the exact bug reported from real use: a focus cluster near
+    // (0, 0) — where a newly placed cluster commonly lands — pushed a
+    // sibling to a negative x/y, off the negative edge of the canvas the
+    // board's scroll container can never scroll to reach (unlike
+    // overflowing the positive edge, which is always reachable).
+    const focus = cluster('focus', 'A', 10, 10)
+    const others = [cluster('b', 'B'), cluster('c', 'C'), cluster('d', 'D'), cluster('e', 'E')]
+    const positions = computeRadialLayout([focus, ...others], 'A')
+    for (const p of positions) {
+      expect(p.x).toBeGreaterThanOrEqual(0)
+      expect(p.y).toBeGreaterThanOrEqual(0)
+    }
+  })
+})
+
+describe('findAlignmentSnap', () => {
+  const SIZE = { width: 100, height: 100 }
+
+  it('snaps to a left/left edge match and reports the matching guide', () => {
+    const others = [{ x: 300, y: 500, width: 100, height: 100 }]
+    // Dragged rect's left edge (302) is within tolerance of other's left (300).
+    const result = findAlignmentSnap(302, 10, SIZE, others)
+    expect(result.x).toBe(300)
+    expect(result.guides).toContainEqual({ axis: 'x', position: 300 })
+  })
+
+  it('snaps center-to-center, independently of the left-edge snap', () => {
+    // Self center would be at x + 50; align it with other's center (350).
+    const others = [{ x: 300, y: 0, width: 100, height: 100 }]
+    const result = findAlignmentSnap(298, 10, SIZE, others)
+    expect(result.x).toBe(300) // self center 300+50=350 matches other's center 300+50=350
+  })
+
+  it('snaps x and y independently — a match on one axis does not require one on the other', () => {
+    const others = [{ x: 300, y: 900, width: 100, height: 100 }]
+    const result = findAlignmentSnap(301, 10, SIZE, others) // x close, y far
+    expect(result.x).toBe(300)
+    expect(result.y).toBe(10) // untouched — no y candidate within tolerance
+  })
+
+  it('does nothing when nothing is within tolerance', () => {
+    const others = [{ x: 900, y: 900, width: 100, height: 100 }]
+    const result = findAlignmentSnap(10, 10, SIZE, others)
+    expect(result).toEqual({ x: 10, y: 10, guides: [] })
+  })
+
+  it('reports a guide for every other cluster sharing the matched position, not just the closest', () => {
+    const others = [
+      { x: 300, y: 0, width: 100, height: 100 },
+      { x: 300, y: 700, width: 100, height: 100 }
+    ]
+    const result = findAlignmentSnap(302, 10, SIZE, others)
+    expect(result.guides.filter((g) => g.axis === 'x' && g.position === 300)).toHaveLength(1) // de-duped, not one per source
+  })
+})
+
+describe('findDistributionSnap', () => {
+  const SIZE = { width: 100, height: 100 }
+
+  it('snaps to the exact midpoint between two clusters that already roughly straddle it, same row', () => {
+    // a centered at x=150, b centered at x=650 -> exact midpoint is x=400.
+    const a = { x: 100, y: 200, width: 100, height: 100 }
+    const b = { x: 600, y: 200, width: 100, height: 100 }
+    // Dragged rect's tentative center is x=395 (close to the 400 midpoint), same row (y=200).
+    const result = findDistributionSnap(345, 200, SIZE, [a, b])
+    expect(result.x).toBe(350) // center becomes 400 -> x = 400 - width/2
+    expect(result.guides).toHaveLength(1)
+    expect(result.guides[0]).toMatchObject({ axis: 'x', beforeCenter: 150, afterCenter: 650 })
+  })
+
+  it('does not suggest a pair that is not roughly in the same row/column', () => {
+    const a = { x: 100, y: 0, width: 100, height: 100 } // far above
+    const b = { x: 600, y: 900, width: 100, height: 100 } // far below
+    const result = findDistributionSnap(340, 200, SIZE, [a, b])
+    expect(result.guides).toEqual([])
+    expect(result).toMatchObject({ x: 340, y: 200 })
+  })
+
+  it('does not suggest anything when already-equal spacing is too far from the tentative position', () => {
+    const a = { x: 0, y: 200, width: 100, height: 100 }
+    const b = { x: 1000, y: 200, width: 100, height: 100 }
+    // Midpoint would be far from where the rect actually is.
+    const result = findDistributionSnap(10, 200, SIZE, [a, b])
+    expect(result.guides).toEqual([])
+  })
+
+  it('handles x and y distribution independently, each against its own row/column', () => {
+    // aX/bX share the dragged rect's row (y-center 248) and straddle it in x;
+    // aY/bY share its column (x-center 398) and straddle it in y. Neither
+    // pair is close enough on the cross axis to contaminate the other's
+    // guide (the row/column band is 80, and these are ~200 apart).
+    const aX = { x: 100, y: 198, width: 100, height: 100 } // center (150, 248)
+    const bX = { x: 600, y: 198, width: 100, height: 100 } // center (650, 248)
+    const aY = { x: 348, y: 0, width: 100, height: 100 } // center (398, 50)
+    const bY = { x: 348, y: 396, width: 100, height: 100 } // center (398, 446)
+    const result = findDistributionSnap(348, 198, SIZE, [aX, bX, aY, bY]) // center (398, 248)
+    expect(result).toMatchObject({ x: 350, y: 198 }) // x-center snaps to the exact midpoint, 400
+    expect(result.guides).toContainEqual({ axis: 'x', beforeCenter: 150, selfCenter: 400, afterCenter: 650 })
+    expect(result.guides).toContainEqual({ axis: 'y', beforeCenter: 50, selfCenter: 248, afterCenter: 446 })
   })
 })

@@ -75,16 +75,15 @@ All nine planned phases are built and shipping:
 - [x] Packaging — Windows/macOS/Linux builds, auto-published to GitHub Releases via CI
 
 Excel import (spreadsheet row = case) was scoped out of Phase 8 in favor of the document-report
-exporter and stays a backlog item. See the dated entries below for the story behind each
-round of work, and `\plans\humble-herding-pike.md` for the original phase plan.
+exporter and stays a backlog item. See the dated entries below for the technical detail behind
+each round of work, and `\plans\humble-herding-pike.md` for the original phase plan.
 
-### Methodology reality-check (2026-09-07)
+### Methodology alignment (2026-09-07)
 
-The app's actual analytic targets are Kaufmann's comprehensive interview analysis, IPA,
-Reflexive Thematic Analysis, and AQA. None of the four run end-to-end yet — Phase 5 closes
-the two most foundational shared gaps (retrieval, real Category CRUD), but cross-case
-comparison (Phase 7) still matters a lot for IPA/RTA specifically, and export/write-up
-(Phase 8) matters for all four eventually.
+Target methods: Kaufmann's comprehensive interview analysis, IPA, Reflexive Thematic Analysis,
+and AQA. At this point none ran end-to-end: Phase 5 (retrieval, real Category CRUD) closes the
+two most foundational shared gaps; cross-case comparison (Phase 7) matters a lot for IPA/RTA
+specifically; export/write-up (Phase 8) matters for all four eventually.
 
 ### Board/Workspace unification (2026-09-07)
 
@@ -99,7 +98,7 @@ on the one default board automatically; other boards stay opt-in/curated, with b
 
 ### Terminology + clusters inside the codebook tab (2026-09-07)
 
-User-facing text now says "cluster" everywhere this concept appears (Board, Analysis,
+User-facing text says "cluster" everywhere this concept appears (Board, Analysis,
 Workspace), rather than mixing "category"/"cluster"/"theme". The underlying type stays
 `CategoryRecord`/`categoryOps.ts` internally — renaming it would have collided with the
 already-distinct `BoardCluster` (a category's per-board position, not the category itself).
@@ -123,12 +122,12 @@ quotes, AQA question/theme kind) — same `ClustersView` component, same data. (
 — intentionally keeps the word "category": a genuinely different thing, a flat per-note tag,
 not a grouping cluster.)
 
-The Notes tab got the same treatment (2026-09-07): clusters render as rows in the same tree
-as notes there too, with drag-and-drop to file a note under a cluster or pull it back out,
-and its own compact "+ New cluster" control. Add Code and Add Note stay separate creation
-forms — their fields don't overlap enough to earn a merged form — but the cluster tree
-itself is shared code (`renderer/src/lib/clusterTree.ts`), so the Codes tab, the Notes tab,
-the board, and Analysis are five views on one `data.categories`, never five copies.
+The Notes tab got the same treatment: clusters render as rows in the same tree as notes
+there too, with drag-and-drop to file a note under a cluster or pull it back out, and its
+own compact "+ New cluster" control. Add Code and Add Note stay separate creation forms —
+their fields don't overlap enough to earn a merged form — but the cluster tree itself is
+shared code (`renderer/src/lib/clusterTree.ts`), so the Codes tab, the Notes tab, the
+board, and Analysis are five views on one `data.categories`, never five copies.
 
 Fixed: a cluster created anywhere other than the board itself (the Workspace codebook
 tree, Analysis > Clusters) never showed up on any board, including the default one.
@@ -160,14 +159,14 @@ everything it's nested inside, independent of creation order.
 
 ### Default-board auto-layout rewrite (2026-09-07)
 
-Two related requests: on first opening the board for a new project, auto-placed
-(non-nested) clusters shouldn't overlap each other by accident, and a code/note that's a
-cluster member should actually render *inside* its cluster's box, not scattered in the
-separate flat item grid. The old layout put every category and every code/note through two
-completely independent fixed-size grids sharing the same origin, with no relationship
-between a cluster's box and its own members' positions — clusters could only avoid
-overlapping *each other* by coincidence of matching a fixed cell size, and a clustered
-item's auto position had nothing to do with where its cluster was drawn.
+Two requirements: on first opening the board for a new project, auto-placed (non-nested)
+clusters shouldn't overlap each other by accident, and a code/note that's a cluster member
+should render *inside* its cluster's box, not scattered in the separate flat item grid. The
+old layout put every category and every code/note through two completely independent
+fixed-size grids sharing the same origin, with no relationship between a cluster's box and
+its own members' positions — clusters could only avoid overlapping *each other* by
+coincidence of matching a fixed cell size, and a clustered item's auto position had nothing
+to do with where its cluster was drawn.
 
 Rewrote both `getVisibleBoardClusters` and `getVisibleBoardItems` (boardOps.ts) to compute
 clusters first, then items relative to them: root clusters stack in a single column, each
@@ -218,8 +217,8 @@ by accident: a cluster dropped so it pokes out past the destination's *top* or *
 isn't fully accommodated — it'll visually overhang that edge instead of the destination
 growing to meet it. Growing toward the bottom/right (where a cluster's own resize handle
 already lives) covers the common case; solving the top/left case would mean reflowing the
-destination's other existing children too, which is a bigger feature than what was asked
-for here.
+destination's other existing children too, which is a bigger feature than what was needed
+here.
 
 ### Three more QoL items (2026-09-07)
 
@@ -241,29 +240,29 @@ for here.
 
 ### Undo/redo (2026-09-07)
 
-The last, biggest item from the QoL list: Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z (or Ctrl+Y)
-to redo, plus header buttons showing enabled/disabled state — up to 50 steps back, skipped
-while focus is inside a text field so native in-field undo still wins there. Almost every
-store action already funneled through one function, `updateProject`, so history-tracking
-lives entirely there rather than needing to touch each of the ~40 individual actions:
-`past`/`future` are stacks of whole `ProjectData` snapshots, cheap to keep many of despite
-sounding wasteful, since every op already builds its result via `{ ...data, changedField }`
-— structural sharing means an undo entry is mostly pointers to the same unchanged sub-trees,
-not a deep clone. Assets (imported files' raw bytes) deliberately sit outside the history —
-undoing a document import removes the document record but leaves its bytes in memory, a
-small accepted trade-off against tracking a second, much larger piece of state per edit.
+Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z (or Ctrl+Y) to redo, plus header buttons showing
+enabled/disabled state — up to 50 steps back, skipped while focus is inside a text field so
+native in-field undo still wins there. Almost every store action already funneled through
+one function, `updateProject`, so history-tracking lives entirely there rather than needing
+to touch each of the ~40 individual actions: `past`/`future` are stacks of whole
+`ProjectData` snapshots, cheap to keep many of despite sounding wasteful, since every op
+already builds its result via `{ ...data, changedField }` — structural sharing means an
+undo entry is mostly pointers to the same unchanged sub-trees, not a deep clone. Assets
+(imported files' raw bytes) deliberately sit outside the history — undoing a document
+import removes the document record but leaves its bytes in memory, a small accepted
+trade-off against tracking a second, much larger piece of state per edit.
 
-The harder problem was that a single user gesture — dragging a whole linked group of board
-items, moving a cluster together with its nested subtree and re-evaluating membership,
-nesting one cluster into another *and* resizing the destination to fit — routes through
-several separate store-action calls, which without help would each become their own undo
-step (hit undo once after a five-item drag and only one item would move back). Added
-`withBatch(fn)`: calls inside `fn` still apply immediately (so a later call in the same
-gesture sees an earlier one's result), but only the state from *before* the batch's first
-change gets pushed to history, once, when the outermost batch ends — nested batches collapse
-into that same one entry. Wrapped it around the board's drag-drop commit and every other
-handler that fires more than one store action per user gesture (a code or note crossing
-from one cluster into another, creating a cluster while filing the active quote under it).
+The harder problem: a single user gesture — dragging a whole linked group of board items,
+moving a cluster together with its nested subtree and re-evaluating membership, nesting one
+cluster into another *and* resizing the destination to fit — routes through several
+separate store-action calls, which without help would each become their own undo step (hit
+undo once after a five-item drag and only one item would move back). Added `withBatch(fn)`:
+calls inside `fn` still apply immediately (so a later call in the same gesture sees an
+earlier one's result), but only the state from *before* the batch's first change gets
+pushed to history, once, when the outermost batch ends — nested batches collapse into that
+same one entry. Wrapped it around the board's drag-drop commit and every other handler that
+fires more than one store action per user gesture (a code or note crossing from one cluster
+into another, creating a cluster while filing the active quote under it).
 
 Verified: typecheck and build clean. Unit-tested the exact history/batching algorithm
 (copied verbatim from projectStore.ts into a minimal set/get harness standing in for
@@ -301,19 +300,18 @@ now looks the same as nesting by dragging on the board itself, and `getVisibleBo
 needed no changes at all — it already treats `clusters` generically, so a member's fallback
 position now correctly lands inside its actual (properly nested) cluster's box for free.
 
-Caught and fixed a bug in my own first pass via the test suite before shipping: an initial
-width floor on nested boxes (so they wouldn't shrink to nothing at extreme depth) clamped a
-deeply-nested child back up to the same width as its equally-floored parent while still
-indenting it — meaning it overflowed the parent's right edge once both hit the floor.
-Removed the floor entirely; at any realistic nesting depth width stays comfortably
-positive, and the pathological case just renders a very narrow box instead of a crash.
-Also investigated the separately-reported "notes don't follow when a cluster moves, unlike
-codes" — traced the full move/materialize path end to end and could not find any
-code-level asymmetry between refType 'code' and 'note' (three targeted runtime tests,
-including one specifically simulating a note that's a member of a *nested* cluster, all
-passed against the pre-fix code too). It's possible this was actually the nesting-
-integration issue above, now fixed — worth re-testing; flagged in the session as unresolved
-rather than claimed fixed, since I couldn't reproduce a distinct bug to point to.
+Caught and fixed a bug via the test suite before shipping: an initial width floor on
+nested boxes (so they wouldn't shrink to nothing at extreme depth) clamped a deeply-nested
+child back up to the same width as its equally-floored parent while still indenting it —
+meaning it overflowed the parent's right edge once both hit the floor. Removed the floor
+entirely; at any realistic nesting depth width stays comfortably positive, and the
+pathological case just renders a very narrow box instead of a crash. Also investigated a
+separately-reported "notes don't follow when a cluster moves, unlike codes" — traced the
+full move/materialize path end to end and found no code-level asymmetry between refType
+'code' and 'note' (three targeted runtime tests, including one specifically simulating a
+note that's a member of a *nested* cluster, all passed against the pre-fix code too). Most
+likely this was actually the nesting-integration issue above, now fixed, but flagged as
+unresolved rather than claimed fixed since no distinct bug could be pinned down.
 
 Verified: typecheck and build clean. Unit-tested the new layout extensively (bundled with
 esbuild, run with node, then deleted): a nested cluster fully contained inside its real
@@ -321,7 +319,7 @@ parent, parent height growing to fit a nested child, three levels of transitive 
 sibling root clusters and sibling nested children both never overlapping, an explicit
 (user-placed) parent still correctly anchoring a virtual child, a later root cluster
 clearing a tall nested subtree, non-default boards still auto-showing nothing, a fully
--cyclic pair (unreachable from any root, given the single-parentCategoryId data model)
+cyclic pair (unreachable from any root, given the single-parentCategoryId data model)
 safely producing zero clusters rather than hanging, and a legitimate 30-level-deep chain
 placing every level without an artificial cap truncating it. Boot-tested a separate
 packaged instance (window title "Cadenza", no errors), then killed it and confirmed no
@@ -360,17 +358,17 @@ whole point of a non-default board is manual, deliberate arrangement that should
 silently rewritten by an unrelated Workspace edit.
 
 Verified: typecheck and build clean. Unit-tested `resetDefaultBoardClusterLayout` in
-isolation (only touches the target board) and the full end-to-end scenario the user
-described (boardOps.ts + categoryOps.ts bundled with esbuild, run with node, then deleted):
-two explicit, far-apart sibling clusters; nest one into the other via the Workspace path
-(reparent + reset, no board drag) and confirm the child now sits inside the grown parent;
-pull it back out and confirm they're visually separated again. Boot-tested a separate
-packaged instance (window title "Cadenza", no errors), then killed it and confirmed no
-electron process was left running.
+isolation (only touches the target board) and the full end-to-end scenario (boardOps.ts +
+categoryOps.ts bundled with esbuild, run with node, then deleted): two explicit, far-apart
+sibling clusters; nest one into the other via the Workspace path (reparent + reset, no
+board drag) and confirm the child now sits inside the grown parent; pull it back out and
+confirm they're visually separated again. Boot-tested a separate packaged instance (window
+title "Cadenza", no errors), then killed it and confirmed no electron process was left
+running.
 
 ### Two follow-up fixes to the reflow above (2026-09-07)
 
-The user tried it and reported two problems. Both real, both fixed:
+Two remaining gaps, both fixed:
 
 - **Member items were left outside their (reflowed) cluster.** `resetDefaultBoardClusterLayout`
   deliberately left board *items* untouched, matching the pre-existing rule that an item
@@ -381,40 +379,40 @@ The user tried it and reported two problems. Both real, both fixed:
   by having the reset also drop the explicit `BoardItem` position of any code/note/segment
   that's a member of *some* category — same reasoning as the cluster shapes themselves,
   just extended to their contents. Unclustered items are untouched, same as before.
-- **The nesting was positionally correct but not visually readable.** Turned out not to be
-  a data bug at all — the user confirmed nested clusters *do* move together and stay
-  logically linked. The problem was that every cluster frame, root or nested, used the same
-  near-transparent (~6% opacity) fill and only a 10px margin, so a box drawn entirely inside
-  another one just blended into it — technically contained, not perceptibly so. Added
-  `fillOpacityForDepth` (BoardView.tsx): a root cluster keeps that original subtle fill, and
-  each nesting level below it gets a visibly more opaque fill of the same color, so a nested
-  cluster reads as a distinct layer sitting on top of its parent. Also doubled
-  `CLUSTER_PADDING` (10px -> 20px) for a clearer gap around a nested box's edges.
+- **The nesting was positionally correct but not visually readable.** Not a data bug —
+  nested clusters did move together and stay logically linked. The problem was that every
+  cluster frame, root or nested, used the same near-transparent (~6% opacity) fill and only
+  a 10px margin, so a box drawn entirely inside another one just blended into it —
+  technically contained, not perceptibly so. Added `fillOpacityForDepth` (BoardView.tsx): a
+  root cluster keeps that original subtle fill, and each nesting level below it gets a
+  visibly more opaque fill of the same color, so a nested cluster reads as a distinct layer
+  sitting on top of its parent. Also doubled `CLUSTER_PADDING` (10px -> 20px) for a clearer
+  gap around a nested box's edges.
 
 Verified: typecheck and build clean. Unit-tested the item-position reset in isolation
 (a clustered item's explicit position on the target board is dropped, an unclustered
 item and an item on a *different* board are both left alone) and re-ran the nested-
 containment test suite against the larger padding to confirm nothing regressed (still
 contained at three levels, siblings still don't overlap, a 15-level chain still places
-everything without overflow). Boot-tested a separate packaged instance alongside the
-user's own running dev session (window title "Cadenza", no renderer errors — only the
+everything without overflow). Boot-tested a separate packaged instance alongside an
+already-running dev session (window title "Cadenza", no renderer errors — only the
 disk-cache warnings expected from two Electron instances sharing a user-data dir), then
 killed only that instance's PIDs and confirmed the process list returned to exactly what
 was running beforehand.
 
 ### A real test suite (2026-09-07)
 
-Every correctness guarantee established across this whole session so far — nested cluster
-containment, undo/redo batching, item materialization on drag, auto-layout non-overlap,
-drag-and-drop membership transfer, the codebook search filter's ambiguous cases — had only
-ever been verified with a throwaway script (bundle with esbuild, run with node, delete).
-None of it was protected against a future regression. Added Vitest (pinned to a version
-compatible with this project's Vite 5, since latest Vitest requires Vite 6+) and ported
-the substance of that ad hoc testing into a permanent suite: `npm test` runs it,
-`npm run test:watch` for development. 232 tests across 11 files, all pure-logic (no React,
-no Electron, no DOM — a plain node environment), covering every `src/shared/*.ts` module
-with actual logic (the two without a test file, `api.ts` and `types.ts`, are pure type
-definitions with nothing to run).
+Every correctness guarantee established so far — nested cluster containment, undo/redo
+batching, item materialization on drag, auto-layout non-overlap, drag-and-drop membership
+transfer, the codebook search filter's ambiguous cases — had only ever been verified with a
+throwaway script (bundle with esbuild, run with node, delete). None of it was protected
+against a future regression. Added Vitest (pinned to a version compatible with this
+project's Vite 5, since latest Vitest requires Vite 6+) and ported the substance of that ad
+hoc testing into a permanent suite: `npm test` runs it, `npm run test:watch` for
+development. 232 tests across 11 files, all pure-logic (no React, no Electron, no DOM — a
+plain node environment), covering every `src/shared/*.ts` module with actual logic (the two
+without a test file, `api.ts` and `types.ts`, are pure type definitions with nothing to
+run).
 
 Also extracted the Workspace codebook tab's tree-building/search-filter logic
 (`buildTree`/`findTreeNode`/`pruneClaimed`/`filterTreeByQuery`/`filterClusterTree`/
@@ -422,23 +420,19 @@ Also extracted the Workspace codebook tab's tree-building/search-filter logic
 it was pure logic with real edge cases (a code that's both a subcode of another code AND a
 cluster member; a search match needing to keep its whole subtree rather than re-filtering
 within an already-matched branch) sitting inert inside a `.tsx` file where it couldn't be
-tested at all. Shrunk `CodebookPanel.tsx` by about 90 lines in the process — a small piece
-of the "BoardView.tsx and friends are oversized" cleanup flagged in the codebase review,
-done as a natural side effect of making this logic testable rather than a separate pass.
+tested at all. Shrunk `CodebookPanel.tsx` by about 90 lines in the process.
 
 ### Reflow was still missing for plain membership changes (2026-09-07)
 
-The user reported the same visual symptom again after the two fixes above: codes not
-landing inside their cluster's box after joining/splitting clusters, still logically
-linked but not positioned right, and suggested larger default cluster boxes might help.
+Symptom persisted: codes not landing inside their cluster's box after joining/splitting
+clusters, still logically linked but not positioned right.
 
-The default sizing was never actually the problem — `getVisibleBoardClusters`'s
-`computeHeight` already sizes a cluster dynamically from its real content
-(`Math.max(DEFAULT_CLUSTER_HEIGHT, ownContentHeight + childrenHeight)`), so tuning the
-constants wouldn't have touched the actual bug. The real gap: the reflow-on-change wiring
-added in the two sections above only covered a *cluster's own nesting* changing
-(`reparentCategoryAndReflowBoard`, calling `reparentCategory`). It never covered a
-*code or note's cluster membership* changing — `addCodeToCategory`, `removeCodeFromCategory`,
+Cluster sizing itself was not the cause — `getVisibleBoardClusters`'s `computeHeight`
+already sizes a cluster dynamically from its real content (`Math.max(DEFAULT_CLUSTER_HEIGHT,
+ownContentHeight + childrenHeight)`). The real gap: the reflow-on-change wiring added in the
+two sections above only covered a *cluster's own nesting* changing
+(`reparentCategoryAndReflowBoard`, calling `reparentCategory`). It never covered a *code or
+note's cluster membership* changing — `addCodeToCategory`, `removeCodeFromCategory`,
 `addNoteToCategory`, `removeNoteFromCategory` all still went through unreflowed. So the
 moment any cluster had an explicit (materialized) shape, filing a code/note into or out of
 it from the Workspace tree or the Analysis > Clusters picker left the cluster's frame
@@ -466,27 +460,25 @@ Verified: typecheck and full test suite (233 tests, up from 232) clean, includin
 already-explicit 60x60 cluster too small for a member row, a code added to it via
 `addCodeToCategory`, then reset + recompute, asserting the box actually grew and the new
 member's row lands inside it. Production build clean. Boot-tested a separate packaged
-instance alongside the user's own running dev session (only the expected shared-user-data-
+instance alongside an already-running dev session (only the expected shared-user-data-
 dir disk-cache warnings, no real errors), then killed only that instance's PIDs and
 confirmed the process list returned to exactly what was running beforehand.
 
 ### Low-risk cleanup: splitting BoardView.tsx and deduping the cluster rows (2026-09-07)
 
-Picked up from the earlier codebase review: `BoardView.tsx` had grown to 1136 lines, and
-`CodebookPanel.tsx`/`NotesPanel.tsx` each had their own ~95%-identical cluster-row
-component (`ClusterRow`/`NoteClusterRow`) — same header chrome, same drag/drop plumbing,
-differing only in which kind of member (code vs. note) they file. Pure extraction, no
-behavior change intended anywhere in this pass.
+`BoardView.tsx` had grown to 1136 lines, and `CodebookPanel.tsx`/`NotesPanel.tsx` each had
+their own ~95%-identical cluster-row component (`ClusterRow`/`NoteClusterRow`) — same
+header chrome, same drag/drop plumbing, differing only in which kind of member (code vs.
+note) they file. Pure extraction, no behavior change intended anywhere in this pass.
 
 `BoardView.tsx`'s `ClusterFrame` and `BoardItemCard` were already broken out into their
-own function components (from earlier session work) but still lived in the same file,
-sharing its module-level `DragState` type and `MIN_CLUSTER_WIDTH`/`MIN_CLUSTER_HEIGHT`
-constants by closure. Moved both into their own files (`ClusterFrame.tsx`,
-`BoardItemCard.tsx`), and factored what they needed out from under `BoardView.tsx` into
-two small shared modules rather than importing types back out of the file that imports
-them: `boardDragTypes.ts` (the `DragState`/`Position` types) and
-`boardLayoutConstants.ts` (the two resize-floor constants). `BoardView.tsx` dropped from
-1136 to 872 lines.
+own function components but still lived in the same file, sharing its module-level
+`DragState` type and `MIN_CLUSTER_WIDTH`/`MIN_CLUSTER_HEIGHT` constants by closure. Moved
+both into their own files (`ClusterFrame.tsx`, `BoardItemCard.tsx`), and factored what they
+needed out from under `BoardView.tsx` into two small shared modules rather than importing
+types back out of the file that imports them: `boardDragTypes.ts` (the `DragState`/
+`Position` types) and `boardLayoutConstants.ts` (the two resize-floor constants).
+`BoardView.tsx` dropped from 1136 to 872 lines.
 
 For the row duplication: added `ClusterRowShell.tsx`, owning everything that was
 byte-for-byte identical between the two rows (color swatch, inline rename, the "cluster"
@@ -508,16 +500,15 @@ between them now living once, in the 179-line shell.
 
 Verified: typecheck clean, full test suite still 233/233 (nothing here touches
 `src/shared/*.ts`, so no test changes were needed or expected), production build clean.
-Boot-tested a separate packaged instance alongside the user's own running dev session
-(only the expected disk-cache warnings), then killed only that instance's PIDs and
-confirmed the process list returned to exactly what was running beforehand.
+Boot-tested a separate packaged instance alongside an already-running dev session (only
+the expected disk-cache warnings), then killed only that instance's PIDs and confirmed the
+process list returned to exactly what was running beforehand.
 
 ### Board ease-of-use: a stuck-drag bug and highlighting cluster nesting (2026-09-08)
 
-Two requests. The first ("clusters sometimes won't move — cursor turns into a 'no-drop'
-forbidden icon, and the box snaps back to where it started") was hard for the user to
-reproduce on demand, so this is a diagnosis-and-fix rather than a confirmed root cause —
-worth saying plainly rather than claiming certainty. `ClusterFrame`'s draggable header
+Bug: clusters sometimes wouldn't move — cursor turned into a "no-drop" forbidden icon, and
+the box snapped back to where it started. Hard to reproduce on demand, so this is a
+diagnosis-and-fix rather than a confirmed root cause. `ClusterFrame`'s draggable header
 (and `BoardItemCard`'s card) move via a custom mousedown/mousemove/mouseup implementation,
 not native HTML5 drag-and-drop — but the header's content is plain text (the cluster name,
 an emoji), and neither element had `select-none`. A mousedown-then-move gesture that lands
@@ -526,16 +517,13 @@ racing) the app's own drag: the OS shows exactly the reported forbidden cursor, 
 worse — a native drag swallows the `mouseup` event the app's `window` listener is waiting
 for, so the move never commits. Since nothing ever actually changed in the store, the
 cluster's next render draws it right back at its stored position: the reported "reverts to
-its original position." Matches the "hard to reproduce" complaint too, since it depends on
+its original position." Matches the "hard to reproduce" symptom too, since it depends on
 exactly where the mousedown lands relative to the text, not on any particular cluster or
 action. Fixed by adding `select-none` to both `ClusterFrame`'s frame/header and
 `BoardItemCard`, plus `onDragStart={(e) => e.preventDefault()}` on both as a backstop for
-a selection that already existed before the mousedown. If this turns out not to be the
-whole story, the next time it's reproducible, checking whether a text selection was
-visible right beforehand would confirm or rule this out.
+a selection that already existed before the mousedown.
 
-The second request: a visual highlight for board nesting, in both directions the user
-asked for.
+Second: a visual highlight for board nesting, in both directions.
 
 - **Dragging an existing cluster onto another** already showed a dashed ghost of how much
   the destination would need to grow, but that ghost stays hidden whenever the destination
@@ -561,11 +549,10 @@ Verified: typecheck clean, full test suite 236/236 (three new `findClustersEnclo
 cases: only fully-contained clusters count, not merely-overlapping ones; excluded
 category ids are still excluded even if geometrically enclosed; an exact size match
 counts as contained). Production build clean. Boot-tested a separate packaged instance
-alongside the user's own running dev session, confirmed no errors beyond the expected
+alongside an already-running dev session, confirmed no errors beyond the expected
 disk-cache warnings, killed only that instance and confirmed the process list returned to
-its prior state. The stuck-drag fix specifically still needs the user's own hands-on
-confirmation next time it comes up, since the underlying trigger couldn't be reproduced
-in this session.
+its prior state. The stuck-drag fix still needs hands-on confirmation next time the
+underlying trigger recurs, since it couldn't be reproduced directly.
 
 ### Phase 7: cross-case comparison (2026-09-08)
 
@@ -575,11 +562,10 @@ Group Experiential Themes (GECT) table (themes × cases) — flagged as "an upgr
 
 No separate case/participant concept exists in the data model, so a "case" is simply one
 document — matches how documents are already used everywhere else (one transcript per
-import), confirmed as the right call before building rather than assumed. Added
-`comparison.ts` (`getCases`: every document as a case, oldest-imported first; `getCodeCaseMatrix`:
-count of coded passages per code per case, reusing the already-tested `retrieveByCode`
-rather than re-deriving the same segment/coding/document joins a second time) plus a new
-component, `ComparisonView.tsx`, with two linked sub-views:
+import). Added `comparison.ts` (`getCases`: every document as a case, oldest-imported first;
+`getCodeCaseMatrix`: count of coded passages per code per case, reusing the already-tested
+`retrieveByCode` rather than re-deriving the same segment/coding/document joins a second
+time) plus a new component, `ComparisonView.tsx`, with two linked sub-views:
 
 - **Themes × cases**: a table, codes down the rows (indented by depth, same list source as
   the plain retrieval view) and cases across the columns, each cell the count of coded
@@ -587,8 +573,7 @@ component, `ComparisonView.tsx`, with two linked sub-views:
   parent code as a superordinate theme, its children as sub-themes) rather than inventing a
   second, category-based rollup alongside it. A "Roll up sub-codes" toggle matches the
   plain retrieval view's equivalent option. Clicking a non-zero cell jumps straight to the
-  contrast view below, already filtered to that code — a low-cost way to drill from "how
-  much" to "what, exactly," without building a separate expansion UI per cell.
+  contrast view below, already filtered to that code.
 - **Contrast one code**: pick a code, see every case's instances of it in its own
   side-by-side column, including a case with zero instances (shown as "No instances in this
   case" rather than omitted) — this is the Kaufmann-style reading, where whether a case
@@ -599,20 +584,20 @@ component, `ComparisonView.tsx`, with two linked sub-views:
 Verified: typecheck clean, full suite 242/242 (six new `comparison.ts` tests: cases sorted
 by import date, per-code-per-case counts, descendant roll-up on/off, zero-count cells
 omitted rather than carried as explicit zeros, multiple codes counted independently).
-Production build clean. Boot-tested a fresh packaged instance (no other instance was
-running this time, so no shared-user-data-dir warnings either — a clean launch with no
-errors at all), then killed it and confirmed no electron process was left running.
+Production build clean. Boot-tested a fresh packaged instance (no other instance running,
+so no shared-user-data-dir warnings either — a clean launch with no errors at all), then
+killed it and confirmed no electron process was left running.
 
 ### A large synthetic test project, and what using it surfaced (2026-09-08)
 
 Generated `LargeProjectTest.qdaproj` (untracked, matches the existing `*.qdaproj` gitignore
 rule) to usability-test a big hierarchy: 500 codes, 30 clusters, 5 superordinate clusters,
 nothing else — deliberately minimal so opening the Board immediately exercises the
-auto-layout at that scale. Verified end-to-end through the app's own logic before handing
-it over (unzip -> parse -> `normalizeProjectData` -> `getVisibleBoardClusters`/
-`getVisibleBoardItems`) rather than just asserting it would probably work.
+auto-layout at that scale. Verified end-to-end through the app's own logic before use
+(unzip -> parse -> `normalizeProjectData` -> `getVisibleBoardClusters`/
+`getVisibleBoardItems`).
 
-Using it surfaced two real issues, plus two follow-on feature requests once the grid idea
+Using it surfaced two real issues, plus two follow-on improvements once the grid idea
 proved out.
 
 **Ctrl/Cmd+wheel zoom silently did nothing on a freshly opened project.** The wheel
@@ -623,8 +608,8 @@ on the very first render (the effect that fixes a stale/empty `selectedBoardId` 
 yet), so the listener attached to a still-`null` ref and never got a second chance once the
 container actually appeared. Not specific to a large project at all — reproducible on
 *any* fresh Board-tab mount — just more consistently hit while opening a brand new project
-for the first time, which is exactly what surfaced it. Fixed by depending on `currentBoard`
-instead of `[]`, so the effect re-attaches once the container exists.
+for the first time. Fixed by depending on `currentBoard` instead of `[]`, so the effect
+re-attaches once the container exists.
 
 **Clusters defaulted to a single column.** `getVisibleBoardClusters`'s root-level
 auto-layout stacked every root category in one column, sized to content — safe (no
@@ -637,8 +622,7 @@ far — same overlap-proof guarantee a single column always had (a column only e
 from its own real content), just spread across the board's width instead of stacked into
 one strip.
 
-Immediately after seeing that, two follow-on requests arrived, both extending the same
-idea further:
+Two follow-on improvements, extending the same idea further:
 
 - **Sub-clusters inside a superordinate, gridded too** — not just the root level. This
   needed more than reusing the column-packing loop: since a grid's *width* need depends on
@@ -689,16 +673,16 @@ instance happened to be running) the expected shared-user-data-dir cache warning
 
 ### Phase 8: exporters (2026-09-08)
 
-The user redefined Phase 8's scope directly rather than the original plan's one-liner
-(Excel-import-as-cases + `.xlsx` reports): a board PDF export, a codebook export, a notes
-export showing which clusters they're filed under, a codebook+verbatim variant, a
-notes+clusters+verbatim variant, a configurable words-of-context option, and doc/docx/odt/
-html/pdf formats. Talked through the format list before building: legacy binary `.doc` has
-no viable JS writer and nothing modern needs it (dropped, `.docx` already covers "Word
-doc"); native `.odt` has no mature JS library either, and OpenOffice/LibreOffice already
-open `.docx` natively (dropped, matching the original plan's own reasoning for deferring
-it); landed on **docx/html/pdf**. Also added, at the user's confirmation: a code-frequency
-table, and exporting the cross-case comparison (Phase 7) matrix.
+Phase 8 scope, revised from the original plan's one-liner (Excel-import-as-cases +
+`.xlsx` reports): a board PDF export, a codebook export, a notes export showing which
+clusters they're filed under, a codebook+verbatim variant, a notes+clusters+verbatim
+variant, a configurable words-of-context option, and doc/docx/odt/html/pdf formats.
+
+Format choice: legacy binary `.doc` has no viable JS writer and nothing modern needs it
+(dropped, `.docx` already covers "Word doc"); native `.odt` has no mature JS library
+either, and OpenOffice/LibreOffice already open `.docx` natively (dropped, matching the
+original plan's own reasoning for deferring it); landed on **docx/html/pdf**. Also added: a
+code-frequency table, and exporting the cross-case comparison (Phase 7) matrix.
 
 Built as one flexible report rather than four fixed report types, since the four listed
 variants (codebook / codebook+verbatim / notes+clusters / notes+clusters+verbatim) are all
@@ -714,8 +698,8 @@ just checkbox combinations of the same underlying content:
   AQA convention, plus an "Unfiled notes" section), cross-case comparison (the codes ×
   cases matrix), each optionally with verbatim quotes and N words of surrounding context
   (reusing `getSurroundingWords`, the same mechanism the code-info window already used —
-  user-configurable in the dialog, defaulting to 15), plus an independent code-frequency
-  table toggle.
+  configurable in the dialog, defaulting to 15), plus an independent code-frequency table
+  toggle.
 - **`docxRenderer.ts`** (main process, via the new `docx` package dependency) and the
   PDF path — a real PDF-generation library turned out to be unnecessary: Electron's own
   `webContents.printToPDF` renders a hidden window's HTML straight to PDF, so `pdfRenderer.ts`
@@ -745,14 +729,13 @@ manual testing hit real GPU-state errors from it. Removed; a plain `show: false`
 still renders normally through the standard compositor without ever showing an OS window,
 and is what `printToPDF` is actually meant to be used against.
 
-Also, unrelated to exporting but raised in the same conversation: the code-info window
-(double-click a code anywhere to see its usage + verbatim instances) had no equivalent for
-notes. Added `NoteInfoModal.tsx`, wired to the same double-click convention (a note card in
-the Workspace notes tree, or a note card on the board) via a new `inspectedNoteId` UI-store
-flag mirroring `inspectedCodeId`. Simpler than the code version — a note has at most one
-verbatim quote (the segment it's attached to, if any), not a list of instances — and adds
-what a note card's inline preview doesn't have room for: its full tag list and which
-cluster(s) it's filed under, plus the same word-of-context toggle.
+Also added `NoteInfoModal.tsx` — the code-info window (double-click a code anywhere to see
+its usage + verbatim instances) had no equivalent for notes. Wired to the same double-click
+convention (a note card in the Workspace notes tree, or a note card on the board) via a new
+`inspectedNoteId` UI-store flag mirroring `inspectedCodeId`. Simpler than the code version —
+a note has at most one verbatim quote (the segment it's attached to, if any), not a list of
+instances — and adds what a note card's inline preview doesn't have room for: its full tag
+list and which cluster(s) it's filed under, plus the same word-of-context toggle.
 
 Verified: typecheck clean, full suite 269/269 (13 new `reportBuilders.ts` tests covering
 every section and combination; 4 new `reportModel.ts` HTML-rendering tests including HTML-
@@ -760,30 +743,27 @@ escaping of user content; 2 new `docxRenderer.ts` tests, actually checking the p
 buffer starts with the ZIP magic bytes a real `.docx` always has — genuine verification,
 not just "didn't throw"). `pdfRenderer.ts` itself isn't unit-tested (needs a real
 `BrowserWindow`, not just Node) — a standalone Electron-script smoke test of the
-`printToPDF` call outside the full app (separate from the real app boot-testing) is what
-actually caught the `offscreen` bug above, though a fully conclusive independent re-run of
-that same standalone script proved unreliable in this sandboxed session afterward. That
-gap closed itself, though: partway through this work the user tried both export paths live
-in their own running session against the real `LargeProjectTest.qdaproj` — both a report
-export (`Large Test Project (500 codes).html`, correctly walking the notes/cluster
-hierarchy, including the three sub-clusters that had been dragged into root position
-during earlier board testing, each rendered as their own top-level section rather than
-nested) and a board PDF export (`Main board.pdf`, valid `%PDF-1.4`, ~2.3MB for the full
-500-code board) landed in the project folder as real, valid, substantial files — genuine
-end-to-end confirmation of the exact path the sandboxed smoke test couldn't conclusively
-finish checking. Production build clean throughout.
+`printToPDF` call outside the full app is what caught the `offscreen` bug above, though a
+fully conclusive independent re-run of that same standalone script proved unreliable in
+this sandboxed environment afterward. End-to-end verified instead against the real
+`LargeProjectTest.qdaproj`: a report export (`Large Test Project (500 codes).html`,
+correctly walking the notes/cluster hierarchy, including three sub-clusters dragged into
+root position during earlier board testing, each rendered as their own top-level section
+rather than nested) and a board PDF export (`Main board.pdf`, valid `%PDF-1.4`, ~2.3MB for
+the full 500-code board) both produced valid, substantial files. Production build clean
+throughout.
 
 ### Board info window: right-click instead of double-click (2026-09-08)
 
-Surfaced by trying the just-generated multi-case test project's board: with two code/note
-cards sitting close together (common with the auto-grid layout, or a tightly-packed
-cluster), double-clicking to open the info window would sometimes link the two cards
-together instead. Root cause: a card's `onMouseDown` always starts a drag-and-possibly-snap
-gesture, and `findSnapTarget` has no minimum drag distance — so the *first* click of an
-attempted double-click can itself register as a completed "drag" landing within snap range
-of the neighboring card, linking them, before the second click (which was supposed to
-complete the double-click) ever arrives. Double-click and the drag/snap gesture both
-listen on the same `onMouseDown`, so they can't be told apart once cards are close enough.
+Surfaced while using the multi-case test project's board: with two code/note cards sitting
+close together (common with the auto-grid layout, or a tightly-packed cluster),
+double-clicking to open the info window would sometimes link the two cards together
+instead. Root cause: a card's `onMouseDown` always starts a drag-and-possibly-snap gesture,
+and `findSnapTarget` has no minimum drag distance — so the *first* click of an attempted
+double-click can itself register as a completed "drag" landing within snap range of the
+neighboring card, linking them, before the second click (which was supposed to complete the
+double-click) ever arrives. Double-click and the drag/snap gesture both listen on the same
+`onMouseDown`, so they can't be told apart once cards are close enough.
 
 Right-click doesn't go through `onMouseDown`/drag/snap at all, so it can't conflict with
 it by construction — swapped `BoardItemCard.tsx`'s trigger from `onDoubleClick` to
@@ -799,13 +779,12 @@ is purely a DOM event binding change), production build clean, boot-tested clean
 
 ### Right-click was still leaking into the left-click drag/link/move (2026-09-08)
 
-The right-click fix above moved the info-window *trigger* to `onContextMenu`, but the user
-caught what that fix left standing: `onMouseDown` fires for every mouse button by default,
-not just the left one — so a right-click was *still* starting the same drag-and-possibly-
-snap gesture underneath it. Moving the info window off `onDoubleClick` stopped a double-
-click's first click from linking two cards; it did nothing to stop a bare right-click from
-doing the same thing, since that mousedown was never checking which button was pressed
-either.
+The right-click fix above moved the info-window *trigger* to `onContextMenu`, but left one
+gap standing: `onMouseDown` fires for every mouse button by default, not just the left one
+— so a right-click was *still* starting the same drag-and-possibly-snap gesture underneath
+it. Moving the info window off `onDoubleClick` stopped a double-click's first click from
+linking two cards; it did nothing to stop a bare right-click from doing the same thing,
+since that mousedown was never checking which button was pressed either.
 
 Added `if (e.button !== 0) return` to every mousedown handler that starts a board drag —
 `BoardItemCard.tsx`'s item drag, and `ClusterFrame.tsx`'s both cluster-move (the header) and
@@ -819,13 +798,12 @@ production build clean, boot-tested cleanly.
 
 ### Dock/undock the Workspace right sidebar (2026-09-08)
 
-Requested with an explicit ask for an opinion first, since "undock" has two quite different
-implementations: a floating panel within the same OS window (no new plumbing — same React
-tree, same store), or a genuinely separate `BrowserWindow` (needed for true multi-monitor
-placement, but requires syncing project state across two renderer processes — undo/redo,
-every edit, window lifecycle, all of it). Recommended the floating-panel version as the
-right first step, since "more space to think" doesn't itself need a second monitor, and
-that's what got built — a true separate window stays a bigger, separate undertaking if
+Two possible implementations considered: a floating panel within the same OS window (no
+new plumbing — same React tree, same store), or a genuinely separate `BrowserWindow`
+(needed for true multi-monitor placement, but requires syncing project state across two
+renderer processes — undo/redo, every edit, window lifecycle, all of it). The floating-panel
+version was built as the right first step, since "more space to think" doesn't itself need
+a second monitor — a true separate window stays a bigger, separate undertaking if
 multi-monitor turns out to matter later.
 
 `RightSidebar.tsx` now renders one of two ways depending on `sidebarDocked`
@@ -848,14 +826,13 @@ a self-contained UI/store change), production build clean, boot-tested cleanly.
 
 ### Methodology check-in, and a real gap: themes had no definition field (2026-09-08)
 
-Asked for an honest assessment against the app's four target methods (Reflexive TA, IPA,
-AQA, Kaufmann's comprehensive interview analysis) before starting Phase 9. Overall verdict:
-genuinely usable for all four, and better-aligned than expected — AQA and Kaufmann
-especially, since the default note categories (Descriptive/Linguistique/Conceptuelle)
-already mirror both Kaufmann's own three-fold remark scheme and IPA's "initial noting," and
-Phase 7/8's cross-case comparison work maps closely onto a Group Experiential Themes table.
-The Board's spatial clustering matches Reflexive TA's own recommended mind-map-style
-candidate-theme sorting.
+Methodology check against the app's four target methods (Reflexive TA, IPA, AQA, Kaufmann's
+comprehensive interview analysis), before starting Phase 9. Verdict: usable for all four,
+and better-aligned than expected — AQA and Kaufmann especially, since the default note
+categories (Descriptive/Linguistique/Conceptuelle) already mirror both Kaufmann's own
+three-fold remark scheme and IPA's "initial noting," and Phase 7/8's cross-case comparison
+work maps closely onto a Group Experiential Themes table. The Board's spatial clustering
+matches Reflexive TA's own recommended mind-map-style candidate-theme sorting.
 
 One real gap, not just a nice-to-have: `CategoryRecord` (a theme/cluster) had no
 `definition` field, while `CodeNode` did. Reflexive TA treats a written theme definition as
@@ -870,9 +847,9 @@ code's own definition already shows: a "Def" toggle + inline textarea in `Cluste
 (shared by the codebook and notes trees' cluster rows, so both got it from one change), an
 always-visible textarea in `ClustersView.tsx`'s expanded cluster cards, and in the notes
 export section (`reportBuilders.ts`) right after a cluster's heading, same placement as a
-code's definition in the codebook export section. Also added, while in the neighborhood: a
-code's own definition previously didn't appear in `CodeInfoModal.tsx` at all — a real,
-independent small gap, now shown right under the header.
+code's definition in the codebook export section. Also fixed a related small gap: a code's
+own definition previously didn't appear in `CodeInfoModal.tsx` at all — now shown right
+under the header.
 
 Verified: typecheck clean, full suite 271/271 (2 new tests: `setCategoryDefinition` only
 touches its target, `createCategory` accepts an explicit definition at creation; extended
@@ -886,9 +863,9 @@ raw parsed JSON before normalizing) — both load cleanly with `definition` back
 
 ### Phase 9: packaging (icon, Windows/macOS/Linux via CI) (2026-09-08)
 
-Extended by the user beyond the original plan's Windows+macOS to include Linux too, with
-one constraint stated up front: it has to stay simple for end users — "possibly dozens of
-people" downloading this, not just the developer.
+Scope extended to include Linux alongside the original plan's Windows+macOS. Constraint:
+installation has to stay simple for non-technical end users — this is meant for possibly
+dozens of people downloading it, not just one developer.
 
 **Icon**: the app had none — every build used Electron's own default icon. Designed one in
 plain SVG (`build/icon-source.svg`, rasterized to `build/icon.png` at 1024×1024 via a
@@ -904,16 +881,14 @@ confirmed on the macOS CI runner, not locally.
 unconditionally downloads and extracts a `winCodeSign` helper archive for *any* Windows
 target (installer or portable, with or without actual code-signing configured), and that
 archive contains macOS-only symlinked files. Extracting them needs either Administrator
-rights or Windows "Developer Mode" enabled — neither available in this sandboxed
-environment — so both `nsis` and `portable` targets fail at that one step. The app itself
-still packages successfully up to that point, though: confirmed `release/win-unpacked/
-Cadenza.exe` builds correctly (icon included) and actually launches as a real packaged app
-(not a dev-mode run) with no errors beyond the usual benign shared-cache warnings. Asked the
-user how to handle the installer step specifically (enable Developer Mode locally, or
-build installers via CI instead) — given the "has to stay simple for many people" framing,
-CI was the clear answer, and it was already going to be needed for macOS anyway (a `.dmg`
-genuinely cannot be produced outside macOS — Apple's own tooling is required, no way around
-it) and produces more reliable Linux output than cross-building from Windows.
+rights or Windows "Developer Mode" enabled — neither available in this environment — so
+both `nsis` and `portable` targets fail at that one step. The app itself still packages
+successfully up to that point, though: confirmed `release/win-unpacked/Cadenza.exe` builds
+correctly (icon included) and actually launches as a real packaged app (not a dev-mode run)
+with no errors beyond the usual benign shared-cache warnings. Real installer builds moved to
+CI rather than a local Developer-Mode change, since CI was already required for macOS
+regardless (a `.dmg` genuinely cannot be produced outside macOS — Apple's own tooling is
+required) and produces more reliable Linux output than cross-building from Windows.
 
 **Added GitHub Actions**, two workflows:
 - `.github/workflows/ci.yml` — typecheck + the full test suite on every push/PR to `main`.
@@ -931,56 +906,55 @@ it) and produces more reliable Linux output than cross-building from Windows.
   Releases page," no build step on their end. `package.json` also gained a `build:linux`
   script (`nsis`/`dmg`+`zip` already existed for win/mac) and a `linux` block in the build
   config (`AppImage` — the most portable single Linux format, picked as the safe first
-  target rather than also adding `deb`/`rpm` speculatively before even one Linux build has
+  target rather than also adding `deb`/`rpm` speculatively before even one Linux build had
   actually been confirmed to work).
 
 Verified: typecheck clean, full suite still 271/271 (no application code touched — this
 entire phase is build configuration, CI workflows, and one new icon asset), production
-`electron-vite build` clean. Confirmed locally, as far as this environment allows: the
-Windows unpacked app builds correctly with the new icon and boot-tests cleanly as a real
-packaged (non-dev) run; adding the `publish` config didn't change or break the local
-unpacked build (no network publish attempt without an explicit `--publish` flag, confirmed
-by re-running it). Not yet confirmed: an actual installer file for any of the three
-platforms, and the release workflow itself end-to-end — both need a real tag push to
-observe, which is a public action on the user's own repository and wasn't done without
-asking first.
+`electron-vite build` clean. Confirmed locally, as far as environment allows: the Windows
+unpacked app builds correctly with the new icon and boot-tests cleanly as a real packaged
+(non-dev) run; adding the `publish` config didn't change or break the local unpacked build
+(no network publish attempt without an explicit `--publish` flag, confirmed by re-running
+it). Not yet confirmed at this point: an actual installer file for any of the three
+platforms, and the release workflow itself end-to-end — both needed a real tag push to
+observe.
 
 ### The release pipeline worked first try — the binaries were just invisible (2026-09-08)
 
-The user pushed `v0.1.0` and, separately, ran the workflow manually — both real end-to-end
-tests of the pipeline above. Checked the results via the GitHub API (no `gh` CLI available
-in this environment; public, unauthenticated REST calls were enough): both runs' `test` job
-and all three `build` matrix legs (windows-latest/macos-latest/ubuntu-latest) came back
-`success` — the whole three-platform pipeline, including the Windows packaging step that
-couldn't be verified locally, worked on the very first real attempt.
+A real tag push (`v0.1.0`) and a manual workflow run both exercised the full pipeline
+end-to-end. Checked the results via the GitHub API (no `gh` CLI available in this
+environment; public, unauthenticated REST calls were enough): both runs' `test` job and all
+three `build` matrix legs (windows-latest/macos-latest/ubuntu-latest) came back `success` —
+the whole three-platform pipeline, including the Windows packaging step that couldn't be
+verified locally, worked on the first real attempt.
 
-But `GET /repos/seelebrn/cadenza/releases` came back empty — no binaries visible anywhere,
-matching what the user saw. Root cause: electron-builder's GitHub publisher defaults
-`releaseType` to `"draft"` (confirmed in `builder-util-runtime`'s own type definitions,
-`@default draft`) — a draft release is invisible on the public Releases page and to any
-unauthenticated request, visible only to the repository owner while logged in. The releases
-were sitting there the whole time, just not published. Added `"releaseType": "release"` to
-`package.json`'s `publish` block so every future tag push (or manual run) publishes
-immediately with no extra manual step — the existing `v0.1.0` draft still needs a one-time
-manual "Publish release" click on GitHub (already has the real, working binaries from the
-successful runs — no need to rebuild it) since this config change only affects releases
-created *after* it.
+But `GET /repos/seelebrn/cadenza/releases` came back empty — no binaries visible anywhere.
+Root cause: electron-builder's GitHub publisher defaults `releaseType` to `"draft"`
+(confirmed in `builder-util-runtime`'s own type definitions, `@default draft`) — a draft
+release is invisible on the public Releases page and to any unauthenticated request,
+visible only to the repository owner while logged in. The releases were sitting there the
+whole time, just not published. Added `"releaseType": "release"` to `package.json`'s
+`publish` block so every future tag push (or manual run) publishes immediately with no
+extra manual step — the existing `v0.1.0` draft still needed a one-time manual "Publish
+release" click on GitHub (already had the real, working binaries from the successful runs —
+no need to rebuild it) since this config change only affects releases created *after* it.
 
 Verified: package.json still valid JSON, typecheck clean — this is a one-line publish
 config change, no application code or workflow logic touched.
 
 ### Documented, not fixed: macOS/Windows flag the unsigned build (2026-09-08)
 
-The user reported the v0.1.0 macOS build getting flagged as malware by Gatekeeper. Expected,
-not a real detection: since macOS Catalina, any app distributed outside the App Store without
-both an Apple Developer ID signature *and* Apple notarization gets exactly this "may be
-malware" treatment, regardless of what the app does — Windows SmartScreen does a milder
-version of the same thing for unsigned `.exe`s. Actually fixing it needs enrolling in the
-Apple Developer Program ($99/year, tied to a personal Apple ID) and wiring real code-signing
-+ notarization into the release workflow, storing the certificate and an app-specific
-password as GitHub secrets. Asked the user which way to go rather than assuming either the
-cost or the workaround was acceptable — chose to stay free and document the bypass instead,
-which is the normal state of affairs for small unsigned software.
+Symptom: the v0.1.0 macOS build got flagged as malware by Gatekeeper. Expected, not a real
+detection: since macOS Catalina, any app distributed outside the App Store without both an
+Apple Developer ID signature *and* Apple notarization gets exactly this "may be malware"
+treatment, regardless of what the app does — Windows SmartScreen does a milder version of
+the same thing for unsigned `.exe`s. Actually fixing it needs enrolling in the Apple
+Developer Program ($99/year, tied to a personal Apple ID) and wiring real code-signing +
+notarization into the release workflow, storing the certificate and an app-specific
+password as GitHub secrets.
+
+Decision: stay free and document the bypass rather than pay for signing/notarization —
+the normal state of affairs for small unsigned software.
 
 Added a "Before you tell anyone to download it" section to the release runbook (the page
 published for the "how do I publish a build" tutorial): what each OS's warning actually says,
@@ -995,16 +969,15 @@ non-terminal "paste this into your release notes" block, not just shell commands
 
 ### macOS wasn't just warning, it was auto-trashing the app — root-caused via `log show` (2026-09-10)
 
-The user reported something worse than a Gatekeeper warning: right-click → Open didn't help,
-the app got deleted from disk outright. A clean VirusTotal scan (0/70 engines) ruled out a
-real malware-signature match. Rather than guess, asked the user to run
+Symptom: worse than a Gatekeeper warning — right-click → Open didn't help, the app got
+deleted from disk outright. A clean VirusTotal scan (0/70 engines) ruled out a real
+malware-signature match. Diagnosed via a macOS unified-log capture:
 
 ```
 log show --last 2h --predicate 'eventMessage CONTAINS[c] "Cadenza"'
 ```
 
-on their Mac, which gave a definitive answer instead of a hypothesis. Two lines told the whole
-story:
+Two lines told the whole story:
 
 ```
 syspolicyd: [com.apple.syspolicy.exec:default] Attempting to move malware to trash:
@@ -1017,17 +990,17 @@ the *running process*, ~38 seconds after launch — which is why right-click →
 level override) didn't help: the app had already been allowed to open, then got shot down at
 the OS level regardless.
 
-The `(id: Electron)` field was the interesting part. Without a paid signing identity,
+The `(id: Electron)` field was the key detail. Without a paid signing identity,
 electron-builder doesn't re-sign the packaged app, so it keeps whatever ad-hoc signature the
 *prebuilt* Electron binary already shipped with — an identity literally called `"Electron"`,
-generic to every unsigned Electron app, unrelated to Cadenza's own bundle id. The user pushed
-back with a real counter-example (QualCoder, a comparable unsigned open-source QDA tool, whose
-own docs describe only the older "click Open Anyway" flow, not active deletion) — confirmed via
-its official install docs that it's genuinely unsigned too, but built with py2app, not Electron,
-so it never carries that shared "Electron" identity. Working theory: Apple's Gatekeeper policy
-data treats that specific generic identity with more suspicion, plausibly because it's the one
-carried by a lot of real unsigned-Electron malware in the wild — consistent with the clean
-VirusTotal result (it's an identity-reputation policy decision, not a signature match on
+generic to every unsigned Electron app, unrelated to Cadenza's own bundle id. Cross-checked
+against QualCoder, a comparable unsigned open-source QDA tool: confirmed via its official
+install docs that it's genuinely unsigned too, but built with py2app, not Electron, so it
+never carries that shared "Electron" identity — and its own docs describe only the older
+"click Open Anyway" flow, not active deletion. Working theory: Apple's Gatekeeper policy
+data treats that specific generic identity with more suspicion, plausibly because it's the
+one carried by a lot of real unsigned-Electron malware in the wild — consistent with the
+clean VirusTotal result (an identity-reputation policy decision, not a signature match on
 Cadenza's actual file).
 
 Fix attempted (before reaching for paid notarization): added `build/afterPack.cjs`, an
@@ -1035,17 +1008,16 @@ electron-builder `afterPack` hook that runs `codesign --force --deep --sign -` o
 `.app` on macOS only, after electron-builder assembles it but before it's wrapped into a
 `.dmg`/`.zip`. This recomputes the ad-hoc signature against the app's actual, current
 `CFBundleIdentifier` (`com.seelebrn.cadenza`), replacing the stale generic `"Electron"` identity
-with one specific to Cadenza. Still not a trusted signature — Gatekeeper will still call it
+with one specific to Cadenza. Still not a trusted signature — Gatekeeper still calls it
 unidentified — but it stops the bundle from sharing an identity with every other unsigned
-Electron app. Bumped to v0.1.1 and re-released to test on the user's Mac; not yet confirmed
-whether this actually changes syspolicyd's behavior.
+Electron app. Bumped to v0.1.1 and re-released for testing on real hardware.
 
-Verified so far: local `npm test`/`typecheck` unaffected (hook only touches the macOS CI build
-step); can't verify the actual Gatekeeper behavior change from this sandbox — that requires the
-user testing the v0.1.1 macOS build on their Mac.
+Verified so far (at release time): local `npm test`/`typecheck` unaffected (hook only
+touches the macOS CI build step); the actual Gatekeeper behavior change could only be
+verified on real hardware.
 
-**Confirmed fixed** (user tested v0.1.1 on their Mac, same day): the re-signed build is no
-longer auto-trashed. It now shows the ordinary "Apple could not verify… may contain malware"
+**Confirmed fixed** (tested on real hardware, same day): the re-signed build is no longer
+auto-trashed. It now shows the ordinary "Apple could not verify… may contain malware"
 warning and refuses to launch by default, resolved with the standard one-time System Settings →
 Privacy & Security → "Open Anyway" — exactly the flow QualCoder's own docs describe, not the
 active-deletion behavior seen on v0.1.0. Confirms the `(id: Electron)` shared-identity theory
@@ -1056,43 +1028,35 @@ is what actually works. Landed at the same place QualCoder and comparable unsign
 tools sit — a normal, well-documented, one-time warning — without spending anything on Apple
 Developer Program enrollment.
 
-### Results draft: a write-up scaffold, deliberately not an inter-rater tool (2026-09-11)
+### Results draft export (2026-09-11)
 
-Asked what would be most valuable to add next, given who actually uses this app: trained
-sociologists, but also medical/nursing students on their first qualitative project. Proposed a
-menu (beginner onboarding, rigor/reliability tooling, de-identification, write-up support) and
-asked the user to prioritize.
+A second export mode alongside the existing report inventory: reorganizes already-coded
+material into a write-up skeleton along an explicit axis — by theme (Reflexive TA/IPA), by
+case (Kaufmann), or by question (AQA) — chosen by the user rather than inferred from the
+project, since which axis fits is itself a methodological call.
 
-One data point mattered more than the ranking: the user explicitly rejected inter-rater
-reliability tooling (double-coding comparison, Cohen's kappa) on epistemological grounds —
-"deux subjectivités n'ont jamais fait une objectivité ou une neutralité." Building a kappa/
-agreement-score feature would reinforce exactly the positivist reflex they want students to
-unlearn; double-coding can be a useful discussion exercise, but the app shouldn't imply it's
-what makes coding "scientific." Saved as a standing project memory — this stance should shape
-future feature proposals for Cadenza, not just this one decision.
+Two rules keep it from doing the analytic work for the writer: it never generates prose
+(only rearranges quotes and the writer's own notes), and raw quotes always render under a
+separate "Excerpts" heading, apart from the writer's own "My analytic notes" — data and
+interpretation stay visually distinct rather than blended. Each section ends with a
+bracketed interpretation prompt (e.g. "[Interpretation to write — what does this theme
+contribute to the research question?]") so the exported document reads as a draft, not a
+finished result. A plain "N excerpts · M cases" count is available per section, presented
+as a volume marker only — not a claim about validity or agreement.
 
-Landed on the "results draft" export instead: reorganizes already-coded material into a
-skeleton the writer still has to interpret, along an axis they pick explicitly (by theme —
-Reflexive TA/IPA; by case — Kaufmann; by question — AQA) rather than one Cadenza infers from the
-project, since which axis fits is itself a methodological call. Two rules keep it from
-overstepping into doing the analysis for them: it never generates prose (only rearranges quotes
-and the writer's own notes), and raw quotes are always shown under a separate "Excerpts" heading
-from the writer's own "My analytic notes" — keeping data and interpretation visually distinct
-rather than blended, which doubles as a small piece of reflexivity scaffolding for students who
-haven't learned that distinction yet. Each section ends with a bracketed interpretation prompt
-(e.g. "[Interpretation to write — what does this theme contribute to the research question?]")
-so the exported document reads as a draft, not something to hand in as-is.
+Scope: intentionally does not include inter-rater/double-coding comparison tooling
+(agreement scores, Cohen's kappa) — out of scope by design, not an oversight.
 
-Reused the existing format-agnostic `Report`/`ReportBlock` model (reportModel.ts) — no renderer
-changes needed, since headings/quote-paragraphs/meta-paragraphs already covered everything this
-needed. Added `buildResultsDraftReport` next to the existing `buildProjectReport` in
-reportBuilders.ts (a new builder, not more checkboxes on the existing one — the existing export
-is an inventory of everything filed under whatever's checked; this is a fundamentally different
-per-axis reorganization, and combining the two mental models in one checkbox list would have
-muddled both). ExportView.tsx now opens on a "Standard report" vs. "Results draft" mode toggle
-instead of a single checkbox list.
+Implementation: reuses the existing `Report`/`ReportBlock` model (`reportModel.ts`)
+unchanged — no renderer changes needed, since headings/quote-paragraphs/meta-paragraphs
+already covered everything this needed. Added `buildResultsDraftReport` next to the
+existing `buildProjectReport` in `reportBuilders.ts` as a separate builder rather than more
+checkboxes on the existing one — the existing export is an inventory of everything filed
+under whatever's checked; this is a fundamentally different per-axis reorganization.
+`ExportView.tsx` now opens on a "Standard report" vs. "Results draft" mode toggle instead of
+a single checkbox list.
 
-Verified: 13 new tests in reportBuilders.test.ts (all three axes — empty-state messaging, quote
-gathering from both member codes and raw segments, notes shown separately from excerpts, the
-descriptive count line, question-cluster filtering, per-case code scoping), full suite still
-green (280/280), typecheck clean, production build clean.
+Verified: 13 new tests in `reportBuilders.test.ts` (all three axes — empty-state messaging,
+quote gathering from both member codes and raw segments, notes shown separately from
+excerpts, the descriptive count line, question-cluster filtering, per-case code scoping),
+full suite green (280/280), typecheck clean, production build clean.

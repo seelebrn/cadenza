@@ -16,8 +16,32 @@ keep in sync. Every code and note appears on the default board automatically, an
 can nest into superordinate groups (drag one into another; shift+drag to pull one back out).
 Import/export with Word (.docx), OpenOffice (.odt), and Excel (.xlsx/.xls) rounds it out.
 
-Runs on Windows and macOS. See `\plans\humble-herding-pike.md` for the
+Runs on Windows, macOS, and Linux. See `\plans\humble-herding-pike.md` for the
 full design/phase plan.
+
+## Download & install
+
+Grab the latest build from the **[Releases page](https://github.com/seelebrn/cadenza/releases/latest)** — no account, no build step, just download and run.
+
+| OS | File to download | How to run it |
+|---|---|---|
+| **Windows** | `Cadenza-Setup-<version>.exe` | Run it, follow the installer. (Or `Cadenza-<version>.exe` — same app, portable, no install.) |
+| **macOS** (Apple Silicon) | `Cadenza-<version>-arm64.dmg` | Open the `.dmg`, drag Cadenza into Applications. |
+| **Linux** | `Cadenza-<version>.AppImage` | Make it executable (`chmod +x Cadenza-*.AppImage`), then double-click or run it — no install step. |
+
+Cadenza isn't signed by Apple or Microsoft — that costs money and isn't set up for this
+project — so Windows and macOS both show a one-time security warning the first time you open
+it. This is expected and not a sign anything's wrong; it's the same warning any small
+unsigned app shows (comparable open-source QDA tools like QualCoder hit the exact same thing).
+
+- **Windows** — "Windows protected your PC" (SmartScreen): click **More info**, then **Run anyway**.
+- **macOS** — "Apple could not verify 'Cadenza' is free of malware…": open **System Settings → Privacy & Security**, scroll down to the line about Cadenza being blocked, and click **Open Anyway**. (On older macOS versions, right-click the app → **Open** → **Open** again works instead.)
+- **Linux** — AppImages typically run without any warning.
+
+Either way, it's a one-time step per computer — Cadenza opens normally after that.
+
+Maintainers publishing a new release: see `release-runbook.html` in this repo for the full
+step-by-step (open it in a browser).
 
 ## Development
 
@@ -30,27 +54,29 @@ npm run test:watch # same, in watch mode
 npm run build      # production build to ./out
 npm run build:win  # build + package a Windows installer/portable exe
 npm run build:mac  # build + package a macOS dmg/zip (run this on a Mac)
+npm run build:linux # build + package a Linux AppImage
 ```
+
+In practice, real installers are built by CI (`.github/workflows/release.yml`), one native
+runner per OS — see the Download & install section above for what end users actually get.
 
 ## Status
 
-- [x] Phase 0 — Electron + Vite + React + TS scaffold, boots on dev and production build
-- [x] Phase 1 — Project persistence (`.qdaproj` create/open/save, autosave)
-- [x] Phase 2 — Document import (.docx/.odt/.txt) + reader pane
-- [x] Phase 3 — Coding engine (select text → code, codebook hierarchy, merge)
-- [x] Phase 4 — Notes/AQA system (question+answer memos, attach-anywhere, promote-to-code)
-- [x] Phase 5 — Retrieval (by code/note) + Cluster management (AQA question log)
-- [x] Phase 6 — Visual grouping board (drag-and-drop clustering of codes/notes/quotes)
-- [x] Phase 7 — Cross-case comparison (Kaufmann contrastive view, IPA-style GECT table)
-- [x] Phase 8 — Exporters (board PDF, codebook/notes/comparison reports in docx/html/pdf)
-  — redefined by the user to drop the original plan's Excel-import-as-cases and .xlsx
-  report ideas in favor of a document-report exporter; Excel import (row=case) specifically
-  is not built and stays a backlog item if it's ever wanted
-- [x] Phase 9 — Packaging polish (icon, Windows/macOS/Linux builds via CI)
-  — extended by the user to include Linux; local Windows packaging is verified down to the
-  unpacked app (real installer files need CI — see below), macOS/Linux builds themselves
-  are only verifiable in CI (no Mac available locally, and Linux packaging from Windows is
-  unreliable) — pending the first real tag push to confirm end-to-end
+All nine planned phases are built and shipping:
+
+- [x] Persistence — `.qdaproj` create/open/save, autosave
+- [x] Document import — .docx/.odt/.txt, paragraph reader pane
+- [x] Coding — select text → code/item, codebook hierarchy, merge
+- [x] Notes/AQA — question+answer memos, attach-anywhere, promote-to-code
+- [x] Retrieval + clusters — by-code/by-note browsing, theme/question cluster management
+- [x] Visual board — drag-and-drop clustering of codes, notes, and quotes
+- [x] Cross-case comparison — Kaufmann contrastive view, IPA-style GECT table
+- [x] Exporters — codebook/notes/comparison reports and the results-draft writing aid (docx/html/pdf)
+- [x] Packaging — Windows/macOS/Linux builds, auto-published to GitHub Releases via CI
+
+Excel import (spreadsheet row = case) was scoped out of Phase 8 in favor of the document-report
+exporter and stays a backlog item. See the dated entries below for the story behind each
+round of work, and `\plans\humble-herding-pike.md` for the original phase plan.
 
 ### Methodology reality-check (2026-09-07)
 

@@ -1387,3 +1387,42 @@ workflow (`addAllClustersToBoard` frames-only → `computeRadialLayout` → `app
 now produces zero genuine root-vs-root overlaps, zero broken parent-child containment, and no
 negative coordinates. Full suite green (321/321), typecheck clean, production build clean,
 boot-tested (no errors, cleanly killed).
+
+### Tree had the same "wrong size assumption" bug, found by checking a real project instead of moving on (2026-09-11)
+
+Asked, before any further release, to hold off and look at three real exports side by side
+(Standard / Tree / Radial) from an actual project — 6 root clusters (one, "Thèmes de codes",
+containing 17 themed sub-clusters; another, "Catégories de notes", containing 2 note-type
+sub-clusters with 33 and 35 notes each). Standard and Radial checked out clean against the
+real category structure. Tree didn't: a parent's own child row visibly ran straight through
+the parent's still-large body.
+
+Root cause, found by reproducing the exact numbers from the real project rather than guessing
+from the image: `computeTreeLayout` spaced rows using a *fixed* `TREE_LEVEL_HEIGHT` (220px),
+which assumed every node was roughly leaf-sized. A cluster arriving into Tree mode keeps
+whatever size it already had — for a parent with its own nested children (sized by
+`computeCategoryLayout`/the default board to *contain* them), that can be far taller than
+220px. "Catégories de notes" was 568px tall; its child row landed only 220px below its *top*,
+so the child sat well inside the still-568px-tall parent instead of below it. This never
+surfaced in this file's own unit tests because every one of them used same-size synthetic
+fixtures (100×100) — exactly the case a fixed row height can't distinguish from a real,
+non-uniform, containment-sized one. `computeRadialLayout`'s equivalent real-project check
+(added for the previous fix) is what caught *that* bug; Tree had gone unchecked against real
+data the same way until this report.
+
+Fixed by making each depth's row start dynamic: computed as the previous row's start plus the
+*tallest* node found anywhere at that previous depth (across every branch, not just its own),
+plus a gap — rather than a constant multiplied by depth. `TREE_LEVEL_HEIGHT` is gone, replaced
+by `TREE_ROW_GAP` (the gap between a row and the tallest node above it, not the row height
+itself). Sibling branches of very different shapes still land in the same shared horizontal
+rows, matching the existing (unchanged) side-by-side column placement — only the vertical
+spacing calculation changed.
+
+Verified: 2 new tests reproducing the exact numbers from the real project (a 568px-tall parent
+with a 500px child — asserts the child's row clears the parent's actual bottom edge, not a
+fixed offset from its top) and confirming the shared-row guarantee across branches of very
+different heights. Re-verified end-to-end against *both* real test projects this time (not
+just the one that surfaced the bug) via the same standalone bundled-script approach: zero
+overlaps for Tree and Radial on both. Full suite green (323/323), typecheck clean, production
+build clean, boot-tested (no errors, cleanly killed). Releases paused per instruction until
+this was resolved — not yet re-tagged.

@@ -1226,6 +1226,43 @@ describe('computeTreeLayout', () => {
     // rootD must clear the whole (wide) subtree under rootA, not just rootA's own narrow width.
     expect(byId.get('rootD')!.x).toBeGreaterThanOrEqual(byId.get('childA1')!.x + 300)
   })
+
+  it('a parent much taller than a plain leaf does not let its own child row overlap it — the exact reported bug', () => {
+    // A parent already sized to contain its own children from a prior
+    // Standard/default-board layout (568px tall — real-world dimensions
+    // from the project that surfaced this) chained into Tree mode; a fixed
+    // per-row height (the old bug) put the child row only 220px below the
+    // parent's *top*, well inside its still-tall body.
+    const parent = cluster('parent', 'A', 2340, 568)
+    const child = cluster('child', 'B', 1140, 500)
+    const categories: CategoryRecord[] = [
+      { id: 'A', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
+      { id: 'B', kind: 'theme', name: 'B', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'A', createdAt: '0' }
+    ]
+    const positions = computeTreeLayout([parent, child], categories)
+    const byId = new Map(positions.map((p) => [p.id, p]))
+    const parentBottom = byId.get('parent')!.y + parent.height
+    expect(byId.get('child')!.y).toBeGreaterThanOrEqual(parentBottom)
+  })
+
+  it('a shared row per depth clears the tallest node in any branch, not just its own', () => {
+    const tallRoot = cluster('tallRoot', 'A', 100, 600)
+    const tallChild = cluster('tallChild', 'B', 100, 100)
+    const shortRoot = cluster('shortRoot', 'C', 100, 100)
+    const shortChild = cluster('shortChild', 'D', 100, 100)
+    const categories: CategoryRecord[] = [
+      { id: 'A', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
+      { id: 'B', kind: 'theme', name: 'B', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'A', createdAt: '0' },
+      { id: 'C', kind: 'theme', name: 'C', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
+      { id: 'D', kind: 'theme', name: 'D', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'C', createdAt: '0' }
+    ]
+    const positions = computeTreeLayout([tallRoot, tallChild, shortRoot, shortChild], categories)
+    const byId = new Map(positions.map((p) => [p.id, p]))
+    // Both depth-1 children land on the same shared row...
+    expect(byId.get('tallChild')!.y).toBe(byId.get('shortChild')!.y)
+    // ...and that row clears the tall root's bottom, even for the short branch.
+    expect(byId.get('shortChild')!.y).toBeGreaterThanOrEqual(byId.get('tallRoot')!.y + tallRoot.height)
+  })
 })
 
 describe('computeRadialLayout', () => {

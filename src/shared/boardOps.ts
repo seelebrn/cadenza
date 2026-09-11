@@ -1043,7 +1043,7 @@ function keepPositionsOnBoard(positions: ClusterPosition[]): ClusterPosition[] {
   return positions.map((p) => ({ ...p, x: p.x + shiftX, y: p.y + shiftY }))
 }
 
-const TREE_LEVEL_HEIGHT = 220
+const TREE_ROW_GAP = 40
 const TREE_NODE_GAP = 40
 
 /**
@@ -1055,6 +1055,16 @@ const TREE_NODE_GAP = 40
  * apply with applyClusterPositions. Meant for a curated (non-default)
  * board built specifically as a figure — the default board has its own
  * auto-layout (see getVisibleBoardClusters) and isn't a target for this.
+ *
+ * Each depth's row starts below the *tallest* node anywhere in the row
+ * above it, computed per depth rather than assumed — a cluster arriving
+ * into Tree mode keeps whatever size it already had (this never resizes
+ * one), and a node with its own nested children can already be sized to
+ * contain them (much taller than a plain leaf), inherited from wherever it
+ * was laid out before. A fixed per-row height doesn't know that, and lets
+ * a tall parent's box run straight through its own child row underneath
+ * it — confirmed against real project data with actual nested,
+ * containment-sized parents, not just synthetic same-size fixtures.
  */
 export function computeTreeLayout(clusters: BoardCluster[], categories: CategoryRecord[]): ClusterPosition[] {
   const categoryById = new Map(categories.map((c) => [c.id, c]))
@@ -1071,6 +1081,21 @@ export function computeTreeLayout(clusters: BoardCluster[], categories: Category
     } else {
       roots.push(cluster)
     }
+  }
+
+  // Tallest node at each depth, across every branch — a shared row Y per
+  // depth (not one per branch) keeps sibling subtrees of different shapes
+  // visually aligned into the same horizontal rows, same as before.
+  const maxHeightByDepth: number[] = []
+  function recordHeights(cluster: BoardCluster, depth: number): void {
+    maxHeightByDepth[depth] = Math.max(maxHeightByDepth[depth] ?? 0, cluster.height)
+    for (const child of childrenByParentCategoryId.get(cluster.categoryId) ?? []) recordHeights(child, depth + 1)
+  }
+  for (const root of roots) recordHeights(root, 0)
+
+  const rowY: number[] = [GRID_ORIGIN_Y]
+  for (let depth = 1; depth < maxHeightByDepth.length; depth++) {
+    rowY[depth] = rowY[depth - 1] + maxHeightByDepth[depth - 1] + TREE_ROW_GAP
   }
 
   const result: ClusterPosition[] = []
@@ -1091,7 +1116,7 @@ export function computeTreeLayout(clusters: BoardCluster[], categories: Category
   // left-to-right immediately below, each within its own subtree's span.
   function place(cluster: BoardCluster, left: number, depth: number): void {
     const width = subtreeWidth(cluster)
-    result.push({ id: cluster.id, x: left + (width - cluster.width) / 2, y: GRID_ORIGIN_Y + depth * TREE_LEVEL_HEIGHT })
+    result.push({ id: cluster.id, x: left + (width - cluster.width) / 2, y: rowY[depth] })
 
     const children = childrenByParentCategoryId.get(cluster.categoryId) ?? []
     let childLeft = left

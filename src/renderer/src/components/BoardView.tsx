@@ -95,6 +95,13 @@ function BoardView(): JSX.Element {
   const [linkMode, setLinkMode] = useState(false)
   const [linkDirected, setLinkDirected] = useState(true)
   const [linkFromCategoryId, setLinkFromCategoryId] = useState<string | null>(null)
+  // Both endpoints picked, waiting on a label — a plain inline input rather
+  // than window.prompt(), which Electron's renderer doesn't implement
+  // (unlike alert()/confirm(), which do work): it returns null immediately
+  // with no dialog ever shown, which is why the second click looked like it
+  // did nothing at all.
+  const [linkPendingTarget, setLinkPendingTarget] = useState<{ from: string; to: string } | null>(null)
+  const [linkLabelDraft, setLinkLabelDraft] = useState('')
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   // The actual content layer (holds every cluster/item, sized to the full
@@ -644,9 +651,15 @@ function BoardView(): JSX.Element {
       setLinkFromCategoryId(null) // clicking the same cluster again cancels the pick
       return
     }
-    const label = window.prompt('Label this relationship (e.g. "shapes", "contrasts with"):', '')
-    if (label !== null) createClusterLink(linkFromCategoryId, categoryId, label.trim(), linkDirected)
+    setLinkPendingTarget({ from: linkFromCategoryId, to: categoryId })
+    setLinkLabelDraft('')
     setLinkFromCategoryId(null)
+  }
+
+  function handleConfirmPendingLink(): void {
+    if (!linkPendingTarget) return
+    createClusterLink(linkPendingTarget.from, linkPendingTarget.to, linkLabelDraft.trim(), linkDirected)
+    setLinkPendingTarget(null)
   }
 
   function handleCreateBoard(): void {
@@ -919,6 +932,35 @@ function BoardView(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {linkPendingTarget && (
+        <div className="flex items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-1.5 text-xs">
+          <span className="text-slate-600">Label this relationship:</span>
+          <input
+            autoFocus
+            className="w-64 rounded border border-slate-300 px-2 py-1"
+            placeholder="e.g. shapes, contrasts with…"
+            value={linkLabelDraft}
+            onChange={(e) => setLinkLabelDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleConfirmPendingLink()
+              if (e.key === 'Escape') setLinkPendingTarget(null)
+            }}
+          />
+          <button
+            className="rounded bg-sky-600 px-2 py-1 font-medium text-white hover:bg-sky-500"
+            onClick={handleConfirmPendingLink}
+          >
+            Add link
+          </button>
+          <button
+            className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-100"
+            onClick={() => setLinkPendingTarget(null)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {currentBoard && (
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">

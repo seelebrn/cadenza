@@ -1120,3 +1120,16 @@ full suite green (296/296), typecheck clean, production build clean. Boot-tested
 instance (`npx electron .`) — confirmed via `tasklist` that the process actually launched (8
 electron.exe processes, normal multi-process Electron shape), no errors beyond the expected
 shared-cache warnings, then killed every PID and confirmed none remained.
+
+**Bug, caught by real use the same day**: the second click of a link never did anything.
+Cause — the label step used `window.prompt()`, which Electron's renderer doesn't implement
+(unlike `alert()`/`confirm()`, which do work and are already used elsewhere on this same
+board): it returns `null` immediately with no dialog ever shown, so the code's `label !==
+null` check always failed silently — the picked cluster's highlight just cleared with
+nothing visibly happening, which is exactly the reported "doesn't do anything on click."
+Fixed by replacing it with a plain inline input (a small bar under the toolbar, Enter to
+confirm, Escape or a Cancel button to back out) — the same kind of toolbar text input this
+file already uses for naming a new board/cluster, rather than a browser dialog API that was
+never going to work in this runtime. Re-verified: typecheck, full suite (296/296), and
+production build all still clean; boot-tested again the same way (8 electron.exe processes,
+no new errors), confirmed cleanly killed afterward.

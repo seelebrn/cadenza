@@ -106,6 +106,10 @@ describe('normalizeProjectData', () => {
     expect(normalizeProjectData(rawData()).boardLinks).toEqual([])
   })
 
+  it('backfills clusterLinks when missing', () => {
+    expect(normalizeProjectData(rawData()).clusterLinks).toEqual([])
+  })
+
   describe('legacy cluster migration (the "must not silently drop data" case)', () => {
     it('passes a NEW-shape cluster (already has categoryId) through untouched', () => {
       const next = normalizeProjectData(

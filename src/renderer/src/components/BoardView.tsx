@@ -12,6 +12,7 @@ import {
   getLinkedGroup,
   getVisibleBoardClusters,
   getVisibleBoardItems,
+  getVisibleClusterLinks,
   MEMBER_CARD_HEIGHT,
   MEMBER_CARD_WIDTH
 } from '@shared/boardOps'
@@ -69,6 +70,10 @@ function BoardView(): JSX.Element {
   const unlinkItemsAction = useProjectStore((s) => s.unlinkItems)
   const resetBoardLayout = useProjectStore((s) => s.resetBoardLayout)
   const withBatch = useProjectStore((s) => s.withBatch)
+  const createClusterLink = useProjectStore((s) => s.createClusterLink)
+  const deleteClusterLink = useProjectStore((s) => s.deleteClusterLink)
+  const applyTreeLayout = useProjectStore((s) => s.applyTreeLayout)
+  const applyRadialLayout = useProjectStore((s) => s.applyRadialLayout)
 
   const selectedBoardId = useWorkspaceUiStore((s) => s.selectedBoardId)
   const setSelectedBoardId = useWorkspaceUiStore((s) => s.setSelectedBoardId)
@@ -82,6 +87,14 @@ function BoardView(): JSX.Element {
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [liveDelta, setLiveDelta] = useState({ dx: 0, dy: 0 })
   const [zoom, setZoom] = useState(1)
+  // Thematic-map cluster links: link mode replaces the normal drag gesture
+  // (see ClusterFrame's onPick) rather than racing it, since dragging one
+  // cluster onto another already means "nest it". Directed defaults on
+  // (an arrow) since a named relationship — "shapes", "contrasts with" —
+  // usually reads one way; toggled off for a plain undirected line.
+  const [linkMode, setLinkMode] = useState(false)
+  const [linkDirected, setLinkDirected] = useState(true)
+  const [linkFromCategoryId, setLinkFromCategoryId] = useState<string | null>(null)
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   // The actual content layer (holds every cluster/item, sized to the full
@@ -114,6 +127,14 @@ function BoardView(): JSX.Element {
     const isValid = selectedBoardId !== null && boards.some((b) => b.id === selectedBoardId)
     if (!isValid) setSelectedBoardId(getDefaultBoardId(boards))
   }, [selectedBoardId, boards, setSelectedBoardId])
+
+  // A cluster picked as a link's "from" end only makes sense on the board
+  // it was picked on — switching boards (or leaving link mode) drops it,
+  // rather than silently carrying a stale pick over to a different board's
+  // clusters.
+  useEffect(() => {
+    setLinkFromCategoryId(null)
+  }, [selectedBoardId, linkMode])
 
   const currentBoard = boards.find((b) => b.id === selectedBoardId) ?? null
   const explicitClusters = data?.boardClusters.filter((c) => c.boardId === selectedBoardId) ?? []
@@ -587,7 +608,46 @@ function BoardView(): JSX.Element {
       .filter((g): g is NonNullable<typeof g> => g !== null)
   }, [links, items, displayPositions])
 
+  // Thematic-map cluster links visible on this board (both endpoints
+  // present here — see getVisibleClusterLinks) — geometry between cluster
+  // centers, same live-drag-following treatment as clusterLinkGeometries'
+  // item-link counterpart above: an endpoint currently being dragged as
+  // part of a cluster-move follows liveDelta so the line doesn't lag a
+  // frame behind the frame it's attached to.
+  const clusterLinkGeometries = useMemo(() => {
+    if (!data) return []
+    const visible = getVisibleClusterLinks(data.clusterLinks, clusters)
+    return visible
+      .map((link) => {
+        const a = clusters.find((c) => c.categoryId === link.fromCategoryId)
+        const b = clusters.find((c) => c.categoryId === link.toCategoryId)
+        if (!a || !b) return null
+        const aMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(a.id)
+        const bMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(b.id)
+        const ax = a.x + (aMoving ? liveDelta.dx : 0) + a.width / 2
+        const ay = a.y + (aMoving ? liveDelta.dy : 0) + a.height / 2
+        const bx = b.x + (bMoving ? liveDelta.dx : 0) + b.width / 2
+        const by = b.y + (bMoving ? liveDelta.dy : 0) + b.height / 2
+        return { link, ax, ay, bx, by, midX: (ax + bx) / 2, midY: (ay + by) / 2 }
+      })
+      .filter((g): g is NonNullable<typeof g> => g !== null)
+  }, [data, clusters, dragState, liveDelta])
+
   if (!data) return <></>
+
+  function handlePickClusterForLink(categoryId: string): void {
+    if (!linkFromCategoryId) {
+      setLinkFromCategoryId(categoryId)
+      return
+    }
+    if (linkFromCategoryId === categoryId) {
+      setLinkFromCategoryId(null) // clicking the same cluster again cancels the pick
+      return
+    }
+    const label = window.prompt('Label this relationship (e.g. "shapes", "contrasts with"):', '')
+    if (label !== null) createClusterLink(linkFromCategoryId, categoryId, label.trim(), linkDirected)
+    setLinkFromCategoryId(null)
+  }
 
   function handleCreateBoard(): void {
     const name = newBoardName.trim()
@@ -727,6 +787,46 @@ function BoardView(): JSX.Element {
               </>
             )}
 
+            {!currentBoard.isDefault && (
+              <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
+                <button
+                  className={`rounded border px-2 py-1 text-xs ${
+                    linkMode
+                      ? 'border-sky-500 bg-sky-500 text-white'
+                      : 'border-slate-300 hover:bg-slate-100'
+                  }`}
+                  title="Click one cluster, then another, to draw a labeled relationship between them (a thematic-map link)"
+                  onClick={() => setLinkMode((v) => !v)}
+                >
+                  🔗 {linkMode ? 'Linking: click two clusters' : 'Link clusters'}
+                </button>
+                {linkMode && (
+                  <label className="flex items-center gap-1 text-xs text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={linkDirected}
+                      onChange={(e) => setLinkDirected(e.target.checked)}
+                    />
+                    Arrow
+                  </label>
+                )}
+                <button
+                  className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                  title="Re-arrange this board's clusters as a top-down hierarchical tree, following their superordinate/subordinate structure — you can still drag them afterward"
+                  onClick={() => applyTreeLayout(currentBoard.id)}
+                >
+                  Tree
+                </button>
+                <button
+                  className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+                  title="Re-arrange this board's clusters radially around one focus cluster (the first one, by default) — you can still drag them afterward"
+                  onClick={() => applyRadialLayout(currentBoard.id, clusters[0]?.categoryId ?? null)}
+                >
+                  Radial
+                </button>
+              </div>
+            )}
+
             {placeableCategories.length > 0 && (
               <select
                 className="rounded border border-slate-300 px-2 py-1 text-xs"
@@ -828,6 +928,8 @@ function BoardView(): JSX.Element {
           cards move together (shift+drag to move just one) · drag a cluster into another to nest it as a
           superordinate group (shift+drag to pull it out) · click the × on a connector to unlink · right-click a
           code/note card for its full info and verbatim excerpts
+          {!currentBoard.isDefault &&
+            ' · "Link clusters" then click two clusters to draw a labeled thematic-map relationship between them'}
         </p>
       )}
 
@@ -853,8 +955,55 @@ function BoardView(): JSX.Element {
                 in the snap gap between two cards, which is narrower than the
                 button itself, so it always overlaps both cards a little. */}
             <svg className="pointer-events-none absolute left-0 top-0" width={CANVAS_WIDTH} height={CANVAS_HEIGHT}>
+              <defs>
+                <marker
+                  id="cluster-link-arrow"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+                </marker>
+              </defs>
               {linkGeometries.map(({ link, ax, ay, bx, by }) => (
                 <line key={link.id} x1={ax} y1={ay} x2={bx} y2={by} stroke="#94a3b8" strokeWidth={2} />
+              ))}
+              {/* Thematic-map cluster links — a labeled relationship between two
+                  clusters (see ClusterLink in types.ts), distinct from the plain
+                  item-link lines above. Drawn with an optional arrowhead for a
+                  directed relationship, and the label on a small background
+                  rect so it stays legible over whatever it crosses. */}
+              {clusterLinkGeometries.map(({ link, ax, ay, bx, by, midX, midY }) => (
+                <g key={link.id}>
+                  <line
+                    x1={ax}
+                    y1={ay}
+                    x2={bx}
+                    y2={by}
+                    stroke="#475569"
+                    strokeWidth={2}
+                    markerEnd={link.directed ? 'url(#cluster-link-arrow)' : undefined}
+                  />
+                  {link.label && (
+                    <>
+                      <rect
+                        x={midX - (link.label.length * 3.2 + 6)}
+                        y={midY - 9}
+                        width={link.label.length * 6.4 + 12}
+                        height={18}
+                        rx={4}
+                        fill="white"
+                        stroke="#cbd5e1"
+                      />
+                      <text x={midX} y={midY + 4} textAnchor="middle" fontSize={11} fill="#334155">
+                        {link.label}
+                      </text>
+                    </>
+                  )}
+                </g>
               ))}
             </svg>
 
@@ -872,6 +1021,9 @@ function BoardView(): JSX.Element {
                   resizePreview={dragNestTarget?.targetClusterId === cluster.id ? dragNestTarget.growSize : null}
                   isNestTarget={dragNestTarget?.targetClusterId === cluster.id}
                   isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}
+                  isLinkMode={linkMode}
+                  isLinkPicked={linkFromCategoryId === category.id}
+                  onPick={() => handlePickClusterForLink(category.id)}
                   onStartMove={(e) => {
                     const descendantCategoryIds = getDescendantCategoryIds(data.categories, category.id)
                     const groupCategoryIds = [category.id, ...descendantCategoryIds]
@@ -1003,6 +1155,21 @@ function BoardView(): JSX.Element {
                   style={{ left: midX, top: midY }}
                   title="Unlink"
                   onClick={() => unlinkItemsAction(link.id)}
+                >
+                  ×
+                </button>
+              ))}
+              {/* Offset below the label rather than centered on it (unlike the
+                  item-unlink button above, which sits on a bare line with
+                  nothing else to cover) so this never sits on top of the
+                  cluster-link's own label text. */}
+              {clusterLinkGeometries.map(({ link, midX, midY }) => (
+                <button
+                  key={link.id}
+                  className="pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 items-center justify-center rounded-full border border-slate-400 bg-white text-[10px] leading-none text-slate-500 shadow hover:border-red-400 hover:text-red-500"
+                  style={{ left: midX, top: midY + 12 }}
+                  title="Remove this relationship"
+                  onClick={() => deleteClusterLink(link.id)}
                 >
                   ×
                 </button>

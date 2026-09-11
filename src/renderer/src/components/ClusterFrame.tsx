@@ -45,8 +45,18 @@ interface ClusterFrameProps {
    * currently fully enclosed by that growing frame — it's about to become
    * that cluster's child on release. */
   isEnclosedByResize: boolean
+  /** While true, the header's mousedown picks this cluster as a link
+   * endpoint (onPick) instead of starting a move — link-mode and the
+   * normal drag-to-nest gesture would otherwise be indistinguishable, both
+   * starting from the same mousedown. */
+  isLinkMode: boolean
+  /** True while this cluster is the already-picked "from" end of a link
+   * being drawn — highlighted so it's clear which one a second click will
+   * connect to. */
+  isLinkPicked: boolean
   onStartMove: (e: React.MouseEvent) => void
   onStartResize: (e: React.MouseEvent) => void
+  onPick: () => void
 }
 
 function ClusterFrame({
@@ -58,8 +68,11 @@ function ClusterFrame({
   resizePreview,
   isNestTarget,
   isEnclosedByResize,
+  isLinkMode,
+  isLinkPicked,
   onStartMove,
-  onStartResize
+  onStartResize,
+  onPick
 }: ClusterFrameProps): JSX.Element {
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
@@ -111,9 +124,17 @@ function ClusterFrame({
             ? `0 0 0 3px ${category.color}`
             : isEnclosedByResize
               ? `0 0 0 3px ${ENCLOSED_BY_RESIZE_COLOR}`
-              : undefined
+              : isLinkPicked
+                ? `0 0 0 3px #0ea5e9`
+                : undefined,
+          cursor: isLinkMode ? 'crosshair' : undefined
         }}
       >
+        {isLinkPicked && (
+          <span className="pointer-events-none absolute -top-2.5 left-1 whitespace-nowrap rounded bg-sky-500 px-1.5 py-0.5 text-[9px] font-medium text-white shadow">
+            Click another cluster to link
+          </span>
+        )}
         {isNestTarget && (
           <span
             className="pointer-events-none absolute -top-2.5 right-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-medium text-white shadow"
@@ -139,7 +160,17 @@ function ClusterFrame({
           // stray move/resize is exactly the kind of left-click-leaking-
           // through-a-right-click bug already fixed once for board item
           // cards; guarding it here too keeps the whole board consistent).
-          if (e.button === 0) onStartMove(e)
+          if (e.button !== 0) return
+          // Link mode replaces the drag gesture entirely rather than
+          // racing it — dragging one cluster onto another already means
+          // "nest it", so a click-to-link gesture on the same mousedown
+          // would be ambiguous with that.
+          if (isLinkMode) {
+            e.preventDefault()
+            onPick()
+            return
+          }
+          onStartMove(e)
         }}
         // The name/emoji in here are plain text, so a mousedown-then-move
         // gesture starting on top of them can be interpreted as a native

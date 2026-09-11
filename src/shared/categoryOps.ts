@@ -16,7 +16,7 @@
 // versa, because it's the same record.
 
 import { nanoid } from 'nanoid'
-import type { CategoryKind, CategoryRecord, ProjectData } from './types'
+import type { CategoryKind, CategoryRecord, ClusterLink, ProjectData } from './types'
 
 export function createCategory(
   data: ProjectData,
@@ -127,8 +127,9 @@ export function getCategoryDepth(categories: CategoryRecord[], categoryId: strin
 /** Deletes a category, promoting its children to its own parent (mirrors
  * deleteCode) so nesting collapses one level rather than losing them.
  * Notes attached directly *to* the category fall back to a project-level
- * attachment, and any board clusters representing it (on any board) are
- * removed — they have nothing left to point at. */
+ * attachment, any board clusters representing it (on any board) are
+ * removed — they have nothing left to point at — and so is any
+ * ClusterLink naming it as either endpoint, for the same reason. */
 export function deleteCategory(data: ProjectData, categoryId: string): ProjectData {
   const target = data.categories.find((c) => c.id === categoryId)
   if (!target) return data
@@ -142,7 +143,54 @@ export function deleteCategory(data: ProjectData, categoryId: string): ProjectDa
       : n
   )
   const boardClusters = data.boardClusters.filter((bc) => bc.categoryId !== categoryId)
-  return { ...data, categories, notes, boardClusters }
+  const clusterLinks = data.clusterLinks.filter(
+    (l) => l.fromCategoryId !== categoryId && l.toCategoryId !== categoryId
+  )
+  return { ...data, categories, notes, boardClusters, clusterLinks }
+}
+
+// --- Cluster links (labeled relationships between two clusters) ---
+
+/** No-ops (returns the existing link's id) if an identical from/to pair
+ * already exists — same direction only: A->B and B->A are treated as
+ * distinct relationships, since a directed pair can mean different things
+ * each way ("A causes B" isn't "B causes A"). */
+export function createClusterLink(
+  data: ProjectData,
+  fromCategoryId: string,
+  toCategoryId: string,
+  label: string,
+  directed: boolean
+): { data: ProjectData; linkId: string } {
+  const existing = data.clusterLinks.find(
+    (l) => l.fromCategoryId === fromCategoryId && l.toCategoryId === toCategoryId
+  )
+  if (existing) return { data, linkId: existing.id }
+
+  const link: ClusterLink = {
+    id: nanoid(),
+    fromCategoryId,
+    toCategoryId,
+    label,
+    directed,
+    createdAt: new Date().toISOString()
+  }
+  return { data: { ...data, clusterLinks: [...data.clusterLinks, link] }, linkId: link.id }
+}
+
+export function updateClusterLink(
+  data: ProjectData,
+  linkId: string,
+  changes: { label?: string; directed?: boolean }
+): ProjectData {
+  return {
+    ...data,
+    clusterLinks: data.clusterLinks.map((l) => (l.id === linkId ? { ...l, ...changes } : l))
+  }
+}
+
+export function deleteClusterLink(data: ProjectData, linkId: string): ProjectData {
+  return { ...data, clusterLinks: data.clusterLinks.filter((l) => l.id !== linkId) }
 }
 
 function addMember<K extends 'codeIds' | 'noteIds' | 'segmentIds'>(

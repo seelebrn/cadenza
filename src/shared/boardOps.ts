@@ -17,7 +17,7 @@ import {
   isCategoryMember,
   removeMemberByRefType
 } from './categoryOps'
-import type { BoardCluster, BoardItem, BoardRecord, CategoryKind, CategoryRecord, ProjectData } from './types'
+import type { BoardCluster, BoardItem, BoardRecord, CategoryKind, CategoryRecord, ClusterLink, ProjectData } from './types'
 
 export interface BoardItemDescription {
   label: string
@@ -853,6 +853,137 @@ export function getLinkedGroup(
     }
   }
   return visited
+}
+
+// --- Cluster links (labeled relationships between clusters — thematic map) ---
+
+/** ClusterLinks are project-wide (see the type's own doc comment), but only
+ * drawable on a board that actually shows both endpoint clusters — a link
+ * naming a category with no shape here yet has nothing to connect to. */
+export function getVisibleClusterLinks(clusterLinks: ClusterLink[], clustersOnBoard: BoardCluster[]): ClusterLink[] {
+  const categoryIdsOnBoard = new Set(clustersOnBoard.map((c) => c.categoryId))
+  return clusterLinks.filter(
+    (l) => categoryIdsOnBoard.has(l.fromCategoryId) && categoryIdsOnBoard.has(l.toCategoryId)
+  )
+}
+
+export interface ClusterPosition {
+  id: string
+  x: number
+  y: number
+}
+
+/** Writes back a set of computed positions (from computeTreeLayout /
+ * computeRadialLayout below) onto the matching BoardClusters — the one
+ * place either layout actually touches ProjectData, so the layouts
+ * themselves can stay pure geometry. A cluster with no entry in `positions`
+ * (not part of this layout pass) is left untouched. */
+export function applyClusterPositions(data: ProjectData, positions: ClusterPosition[]): ProjectData {
+  const byId = new Map(positions.map((p) => [p.id, p]))
+  return {
+    ...data,
+    boardClusters: data.boardClusters.map((c) => {
+      const pos = byId.get(c.id)
+      return pos ? { ...c, x: pos.x, y: pos.y } : c
+    })
+  }
+}
+
+const TREE_LEVEL_HEIGHT = 220
+const TREE_NODE_GAP = 40
+
+/**
+ * A top-down hierarchical-tree arrangement of a board's own clusters,
+ * driven by the category hierarchy (parentCategoryId) — a cluster whose
+ * parent category isn't *also* on this board is treated as its own root,
+ * since there's nothing here to hang it under. Purely computes new x/y for
+ * the clusters already passed in (never creates, removes, or resizes one);
+ * apply with applyClusterPositions. Meant for a curated (non-default)
+ * board built specifically as a figure — the default board has its own
+ * auto-layout (see getVisibleBoardClusters) and isn't a target for this.
+ */
+export function computeTreeLayout(clusters: BoardCluster[], categories: CategoryRecord[]): ClusterPosition[] {
+  const categoryById = new Map(categories.map((c) => [c.id, c]))
+  const categoryIdsOnBoard = new Set(clusters.map((c) => c.categoryId))
+  const childrenByParentCategoryId = new Map<string, BoardCluster[]>()
+  const roots: BoardCluster[] = []
+
+  for (const cluster of clusters) {
+    const parentCategoryId = categoryById.get(cluster.categoryId)?.parentCategoryId ?? null
+    if (parentCategoryId && categoryIdsOnBoard.has(parentCategoryId)) {
+      const siblings = childrenByParentCategoryId.get(parentCategoryId) ?? []
+      siblings.push(cluster)
+      childrenByParentCategoryId.set(parentCategoryId, siblings)
+    } else {
+      roots.push(cluster)
+    }
+  }
+
+  const result: ClusterPosition[] = []
+
+  // Bottom-up: how wide a cluster's whole subtree needs to be so every
+  // descendant fits side by side beneath it — a parent with children wider
+  // (combined) than itself centers over them rather than the reverse.
+  function subtreeWidth(cluster: BoardCluster): number {
+    const children = childrenByParentCategoryId.get(cluster.categoryId) ?? []
+    if (children.length === 0) return cluster.width
+    const childrenWidth =
+      children.reduce((sum, child) => sum + subtreeWidth(child), 0) + TREE_NODE_GAP * (children.length - 1)
+    return Math.max(cluster.width, childrenWidth)
+  }
+
+  // Top-down: places `cluster` centered within the span [left, left +
+  // subtreeWidth(cluster)) at its depth's row, then lays out its children
+  // left-to-right immediately below, each within its own subtree's span.
+  function place(cluster: BoardCluster, left: number, depth: number): void {
+    const width = subtreeWidth(cluster)
+    result.push({ id: cluster.id, x: left + (width - cluster.width) / 2, y: GRID_ORIGIN_Y + depth * TREE_LEVEL_HEIGHT })
+
+    const children = childrenByParentCategoryId.get(cluster.categoryId) ?? []
+    let childLeft = left
+    for (const child of children) {
+      place(child, childLeft, depth + 1)
+      childLeft += subtreeWidth(child) + TREE_NODE_GAP
+    }
+  }
+
+  let rootLeft = GRID_ORIGIN_X
+  for (const root of roots) {
+    place(root, rootLeft, 0)
+    rootLeft += subtreeWidth(root) + TREE_NODE_GAP
+  }
+
+  return result
+}
+
+const RADIAL_RADIUS_STEP = 260
+
+/**
+ * A radial (hub-and-spoke) arrangement: one focus cluster stays put at its
+ * current position, every other cluster on the board is spread around it
+ * in a single ring at equal angular spacing. `focusCategoryId` picks the
+ * hub; if it's not one of `clusters` (or omitted), the first cluster is
+ * used instead so this never errors on a mismatched id. Same
+ * pure-geometry/apply-separately contract as computeTreeLayout above.
+ */
+export function computeRadialLayout(clusters: BoardCluster[], focusCategoryId: string | null): ClusterPosition[] {
+  if (clusters.length === 0) return []
+  const focus = clusters.find((c) => c.categoryId === focusCategoryId) ?? clusters[0]
+  const others = clusters.filter((c) => c.id !== focus.id)
+  if (others.length === 0) return [{ id: focus.id, x: focus.x, y: focus.y }]
+
+  const centerX = focus.x + focus.width / 2
+  const centerY = focus.y + focus.height / 2
+  const radius = RADIAL_RADIUS_STEP + Math.max(focus.width, focus.height) / 2
+
+  const result: ClusterPosition[] = [{ id: focus.id, x: focus.x, y: focus.y }]
+  others.forEach((cluster, i) => {
+    const angle = (2 * Math.PI * i) / others.length - Math.PI / 2 // start straight up, go clockwise
+    const cx = centerX + radius * Math.cos(angle)
+    const cy = centerY + radius * Math.sin(angle)
+    result.push({ id: cluster.id, x: cx - cluster.width / 2, y: cy - cluster.height / 2 })
+  })
+  return result
 }
 
 export interface PositionedItem {

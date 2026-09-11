@@ -5,7 +5,9 @@ import {
   addNoteToCategory,
   addSegmentToCategory,
   createCategory,
+  createClusterLink,
   deleteCategory,
+  deleteClusterLink,
   getCategoryDepth,
   getDescendantCategoryIds,
   isCategoryMember,
@@ -17,7 +19,8 @@ import {
   reparentCategory,
   setCategoryColor,
   setCategoryDefinition,
-  setCategoryKind
+  setCategoryKind,
+  updateClusterLink
 } from './categoryOps'
 import type { CategoryRecord, ProjectData } from './types'
 
@@ -54,7 +57,8 @@ function makeData(categories: CategoryRecord[] = []): ProjectData {
     boards: [],
     boardItems: [],
     boardClusters: [],
-    boardLinks: []
+    boardLinks: [],
+    clusterLinks: []
   } as ProjectData
 }
 
@@ -244,6 +248,19 @@ describe('deleteCategory', () => {
     const data = makeData([makeCategory('A')])
     expect(deleteCategory(data, 'missing')).toBe(data)
   })
+
+  it('removes any cluster link naming the deleted category as either endpoint', () => {
+    const data: ProjectData = {
+      ...makeData([makeCategory('A'), makeCategory('B'), makeCategory('C')]),
+      clusterLinks: [
+        { id: 'l1', fromCategoryId: 'A', toCategoryId: 'B', label: 'shapes', directed: true, createdAt: '0' },
+        { id: 'l2', fromCategoryId: 'B', toCategoryId: 'A', label: 'reacts to', directed: true, createdAt: '0' },
+        { id: 'l3', fromCategoryId: 'B', toCategoryId: 'C', label: 'unrelated', directed: false, createdAt: '0' }
+      ]
+    }
+    const next = deleteCategory(data, 'A')
+    expect(next.clusterLinks.map((l) => l.id)).toEqual(['l3'])
+  })
 })
 
 describe('member add/remove (codes, notes, segments)', () => {
@@ -299,5 +316,48 @@ describe('isCategoryMember', () => {
     expect(isCategoryMember(category, 'note', 'n1')).toBe(true)
     expect(isCategoryMember(category, 'segment', 's1')).toBe(true)
     expect(isCategoryMember(category, 'segment', 'nope')).toBe(false)
+  })
+})
+
+describe('cluster links', () => {
+  it('createClusterLink adds a labeled, directed link between two categories', () => {
+    const data = makeData([makeCategory('A'), makeCategory('B')])
+    const { data: next, linkId } = createClusterLink(data, 'A', 'B', 'shapes', true)
+    expect(next.clusterLinks).toEqual([
+      { id: linkId, fromCategoryId: 'A', toCategoryId: 'B', label: 'shapes', directed: true, createdAt: expect.any(String) }
+    ])
+  })
+
+  it('createClusterLink no-ops (returns the existing id) for an identical from/to pair already linked', () => {
+    const data = makeData([makeCategory('A'), makeCategory('B')])
+    const first = createClusterLink(data, 'A', 'B', 'shapes', true)
+    const second = createClusterLink(first.data, 'A', 'B', 'different label', false)
+    expect(second.linkId).toBe(first.linkId)
+    expect(second.data.clusterLinks).toHaveLength(1)
+    expect(second.data.clusterLinks[0].label).toBe('shapes') // untouched, not overwritten
+  })
+
+  it('createClusterLink treats A->B and B->A as distinct relationships', () => {
+    const data = makeData([makeCategory('A'), makeCategory('B')])
+    const withAB = createClusterLink(data, 'A', 'B', 'shapes', true).data
+    const withBoth = createClusterLink(withAB, 'B', 'A', 'reacts to', true).data
+    expect(withBoth.clusterLinks).toHaveLength(2)
+  })
+
+  it('updateClusterLink changes only the targeted link\'s given fields', () => {
+    const data = makeData([makeCategory('A'), makeCategory('B')])
+    const { data: created, linkId } = createClusterLink(data, 'A', 'B', 'shapes', true)
+    const next = updateClusterLink(created, linkId, { label: 'renamed' })
+    expect(next.clusterLinks[0].label).toBe('renamed')
+    expect(next.clusterLinks[0].directed).toBe(true) // untouched field survives
+  })
+
+  it('deleteClusterLink removes only the targeted link', () => {
+    const data = makeData([makeCategory('A'), makeCategory('B'), makeCategory('C')])
+    const withOne = createClusterLink(data, 'A', 'B', 'x', true).data
+    const withTwo = createClusterLink(withOne, 'B', 'C', 'y', false)
+    const next = deleteClusterLink(withTwo.data, withTwo.linkId)
+    expect(next.clusterLinks).toHaveLength(1)
+    expect(next.clusterLinks[0].label).toBe('x')
   })
 })

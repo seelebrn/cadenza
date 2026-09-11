@@ -4,10 +4,13 @@ import {
   addAllCodesToBoard,
   addAllNotesToBoard,
   addItemToBoard,
+  applyClusterPositions,
   assignItemToCluster,
   computeAccommodatingSize,
   computeClusterSize,
   computeGridPosition,
+  computeRadialLayout,
+  computeTreeLayout,
   createBoard,
   createClusterForCategory,
   createClusterWithNewCategory,
@@ -23,6 +26,7 @@ import {
   getLinkedGroup,
   getVisibleBoardClusters,
   getVisibleBoardItems,
+  getVisibleClusterLinks,
   linkItems,
   moveCluster,
   moveItem,
@@ -34,7 +38,7 @@ import {
   unlinkItems
 } from './boardOps'
 import { addCodeToCategory } from './categoryOps'
-import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ProjectData } from './types'
+import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ClusterLink, ProjectData } from './types'
 
 // --- test fixtures -----------------------------------------------------
 
@@ -72,6 +76,7 @@ function makeData(overrides: Partial<ProjectData> = {}): ProjectData {
     boardItems: [],
     boardClusters: [],
     boardLinks: [],
+    clusterLinks: [],
     ...overrides
   } as ProjectData
 }
@@ -956,5 +961,122 @@ describe('findSnapTarget', () => {
     ]
     const snap = findSnapTarget(items, 'dragged', 0, 0, CARD_WIDTH, CARD_HEIGHT, 200)
     expect(snap?.targetId).toBe('near')
+  })
+})
+
+describe('getVisibleClusterLinks', () => {
+  function link(id: string, fromCategoryId: string, toCategoryId: string): ClusterLink {
+    return { id, fromCategoryId, toCategoryId, label: 'x', directed: true, createdAt: '0' }
+  }
+
+  it('only shows a link when both endpoint categories have a cluster on this board', () => {
+    const onBoard: BoardCluster[] = [
+      { id: 'c1', boardId: 'b1', categoryId: 'A', x: 0, y: 0, width: 1, height: 1, createdAt: '0' },
+      { id: 'c2', boardId: 'b1', categoryId: 'B', x: 0, y: 0, width: 1, height: 1, createdAt: '0' }
+    ]
+    const links = [link('l1', 'A', 'B'), link('l2', 'A', 'not-on-board')]
+    expect(getVisibleClusterLinks(links, onBoard).map((l) => l.id)).toEqual(['l1'])
+  })
+})
+
+describe('applyClusterPositions', () => {
+  it('repositions only the clusters named in the given positions, leaving others untouched', () => {
+    const data = makeData({
+      boardClusters: [
+        { id: 'c1', boardId: 'b1', categoryId: 'A', x: 0, y: 0, width: 10, height: 10, createdAt: '0' },
+        { id: 'c2', boardId: 'b1', categoryId: 'B', x: 5, y: 5, width: 10, height: 10, createdAt: '0' }
+      ]
+    })
+    const next = applyClusterPositions(data, [{ id: 'c1', x: 100, y: 200 }])
+    expect(next.boardClusters.find((c) => c.id === 'c1')).toMatchObject({ x: 100, y: 200 })
+    expect(next.boardClusters.find((c) => c.id === 'c2')).toMatchObject({ x: 5, y: 5 })
+  })
+})
+
+describe('computeTreeLayout', () => {
+  function cluster(id: string, categoryId: string, width = 100, height = 100): BoardCluster {
+    return { id, boardId: 'b1', categoryId, x: 0, y: 0, width, height, createdAt: '0' }
+  }
+
+  it('stacks a parent above its children, one row per depth', () => {
+    const clusters = [cluster('root', 'A'), cluster('child', 'B')]
+    const categories: CategoryRecord[] = [
+      { id: 'A', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
+      { id: 'B', kind: 'theme', name: 'B', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'A', createdAt: '0' }
+    ]
+    const positions = computeTreeLayout(clusters, categories)
+    const byId = new Map(positions.map((p) => [p.id, p]))
+    expect(byId.get('child')!.y).toBeGreaterThan(byId.get('root')!.y)
+  })
+
+  it('treats a category whose parent has no cluster on this board as its own root', () => {
+    // Only 'B' is actually on the board — its parent 'A' isn't, so it must
+    // not crash looking for a parent slot that was never placed here.
+    const clusters = [cluster('onlyChild', 'B')]
+    const categories: CategoryRecord[] = [
+      { id: 'A', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
+      { id: 'B', kind: 'theme', name: 'B', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'A', createdAt: '0' }
+    ]
+    const positions = computeTreeLayout(clusters, categories)
+    expect(positions).toHaveLength(1)
+  })
+
+  it('a wide subtree pushes its next sibling root further right, never overlapping', () => {
+    const clusters = [
+      cluster('rootA', 'A'),
+      cluster('childA1', 'B', 300),
+      cluster('childA2', 'C', 300),
+      cluster('rootD', 'D')
+    ]
+    const categories: CategoryRecord[] = [
+      { id: 'A', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
+      { id: 'B', kind: 'theme', name: 'B', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'A', createdAt: '0' },
+      { id: 'C', kind: 'theme', name: 'C', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'A', createdAt: '0' },
+      { id: 'D', kind: 'theme', name: 'D', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' }
+    ]
+    const positions = computeTreeLayout(clusters, categories)
+    const byId = new Map(positions.map((p) => [p.id, p]))
+    // rootD must clear the whole (wide) subtree under rootA, not just rootA's own narrow width.
+    expect(byId.get('rootD')!.x).toBeGreaterThanOrEqual(byId.get('childA1')!.x + 300)
+  })
+})
+
+describe('computeRadialLayout', () => {
+  function cluster(id: string, categoryId: string, x = 0, y = 0): BoardCluster {
+    return { id, boardId: 'b1', categoryId, x, y, width: 100, height: 100, createdAt: '0' }
+  }
+
+  it('returns nothing for an empty board', () => {
+    expect(computeRadialLayout([], null)).toEqual([])
+  })
+
+  it('a single cluster stays exactly where it is', () => {
+    const positions = computeRadialLayout([cluster('only', 'A', 50, 60)], null)
+    expect(positions).toEqual([{ id: 'only', x: 50, y: 60 }])
+  })
+
+  it('keeps the focus cluster in place and spreads the rest around it, equidistant from center', () => {
+    const focus = cluster('focus', 'A', 0, 0)
+    const others = [cluster('b', 'B'), cluster('c', 'C'), cluster('d', 'D')]
+    const positions = computeRadialLayout([focus, ...others], 'A')
+    const byId = new Map(positions.map((p) => [p.id, p]))
+    expect(byId.get('focus')).toEqual({ id: 'focus', x: 0, y: 0 })
+
+    const centerX = focus.x + focus.width / 2
+    const centerY = focus.y + focus.height / 2
+    const distances = others.map((o) => {
+      const pos = byId.get(o.id)!
+      const cx = pos.x + o.width / 2
+      const cy = pos.y + o.height / 2
+      return Math.hypot(cx - centerX, cy - centerY)
+    })
+    // All three the same distance from the hub (within floating-point noise).
+    expect(distances[1]).toBeCloseTo(distances[0], 5)
+    expect(distances[2]).toBeCloseTo(distances[0], 5)
+  })
+
+  it('falls back to the first cluster as focus when focusCategoryId matches nothing on the board', () => {
+    const positions = computeRadialLayout([cluster('only', 'A', 5, 5), cluster('other', 'B')], 'missing')
+    expect(positions.find((p) => p.id === 'only')).toEqual({ id: 'only', x: 5, y: 5 })
   })
 })

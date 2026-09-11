@@ -44,7 +44,8 @@ export function createEmptyProject(name: string): ProjectData {
     boards: [{ id: nanoid(), name: 'Main board', isDefault: true }],
     boardItems: [],
     boardClusters: [],
-    boardLinks: []
+    boardLinks: [],
+    clusterLinks: []
   }
 }
 

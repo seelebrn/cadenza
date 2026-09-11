@@ -172,6 +172,29 @@ export interface BoardLink {
   createdAt: ISODateString
 }
 
+/**
+ * A labeled relationship between two clusters (themes) — e.g. Braun &
+ * Clarke-style thematic-map connections ("shapes", "contrasts with"). This
+ * is deliberately project-wide, not per-board like BoardLink above: unlike
+ * a snap-linked pair of item cards (a visual arrangement choice specific to
+ * one board), a relationship between two themes is an analytic claim — the
+ * same fact regardless of which board happens to be showing it. `label` is
+ * free text rather than a fixed vocabulary, same reasoning as
+ * CategoryRecord.definition: the app doesn't assume which relationship
+ * types matter for a given method or project. A link is visible on any
+ * board that currently shows both of its clusters (see
+ * getVisibleClusterLinks in boardOps.ts) — it isn't itself tied to one.
+ */
+export interface ClusterLink {
+  id: string
+  fromCategoryId: string
+  toCategoryId: string
+  label: string
+  /** true = drawn as an arrow from -> to; false = a plain undirected line. */
+  directed: boolean
+  createdAt: ISODateString
+}
+
 export interface BoardRecord {
   id: string
   name: string
@@ -200,6 +223,7 @@ export interface ProjectData {
   boardItems: BoardItem[]
   boardClusters: BoardCluster[]
   boardLinks: BoardLink[]
+  clusterLinks: ClusterLink[]
 }
 
 export interface RecentProjectEntry {

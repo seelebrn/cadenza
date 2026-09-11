@@ -132,6 +132,7 @@ export function normalizeProjectData(raw: ProjectData): ProjectData {
     boards: ensureDefaultBoard(raw.boards ?? []),
     boardItems,
     boardClusters,
-    boardLinks: raw.boardLinks ?? []
+    boardLinks: raw.boardLinks ?? [],
+    clusterLinks: raw.clusterLinks ?? []
   }
 }

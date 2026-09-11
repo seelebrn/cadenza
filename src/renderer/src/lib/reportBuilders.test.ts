@@ -55,6 +55,7 @@ function makeData(overrides: Partial<ProjectData> = {}): ProjectData {
     boardItems: [],
     boardClusters: [],
     boardLinks: [],
+    clusterLinks: [],
     ...overrides
   } as ProjectData
 }

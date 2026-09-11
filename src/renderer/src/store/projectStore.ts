@@ -36,14 +36,17 @@ import {
   addNoteToCategory as addNoteToCategoryOp,
   addSegmentToCategory as addSegmentToCategoryOp,
   createCategory as createCategoryOp,
+  createClusterLink as createClusterLinkOp,
   deleteCategory as deleteCategoryOp,
+  deleteClusterLink as deleteClusterLinkOp,
   removeCodeFromCategory as removeCodeFromCategoryOp,
   removeNoteFromCategory as removeNoteFromCategoryOp,
   removeSegmentFromCategory as removeSegmentFromCategoryOp,
   renameCategory as renameCategoryOp,
   reparentCategory as reparentCategoryOp,
   setCategoryColor as setCategoryColorOp,
-  setCategoryDefinition as setCategoryDefinitionOp
+  setCategoryDefinition as setCategoryDefinitionOp,
+  updateClusterLink as updateClusterLinkOp
 } from '@shared/categoryOps'
 import { editParagraph as editParagraphOp, renameDocument as renameDocumentOp } from '@shared/documentOps'
 import {
@@ -51,7 +54,10 @@ import {
   addAllCodesToBoard as addAllCodesToBoardOp,
   addAllNotesToBoard as addAllNotesToBoardOp,
   addItemToBoard as addItemToBoardOp,
+  applyClusterPositions as applyClusterPositionsOp,
   assignItemToCluster as assignItemToClusterOp,
+  computeRadialLayout,
+  computeTreeLayout,
   createBoard as createBoardOp,
   createClusterForCategory as createClusterForCategoryOp,
   createClusterWithNewCategory as createClusterWithNewCategoryOp,
@@ -246,6 +252,18 @@ interface ProjectState {
    * it's given), and a non-default board has no auto-layout fallback to
    * recompute *to* — running it there would just empty the board out. */
   resetBoardLayout: (boardId: string) => void
+
+  // Cluster links (labeled thematic-map relationships) + alternate layouts
+  createClusterLink: (fromCategoryId: string, toCategoryId: string, label: string, directed: boolean) => string | null
+  updateClusterLink: (linkId: string, changes: { label?: string; directed?: boolean }) => void
+  deleteClusterLink: (linkId: string) => void
+  /** One-click re-arrangements for a curated (non-default) board built as a
+   * figure — purely repositions the clusters already there, same
+   * non-destructive contract as resetBoardLayout: never touches which
+   * clusters exist, their links, or anything off this one board. No-ops on
+   * the default board, which has its own auto-layout already. */
+  applyTreeLayout: (boardId: string) => void
+  applyRadialLayout: (boardId: string, focusCategoryId: string | null) => void
 }
 
 const AUTOSAVE_DELAY_MS = 1500
@@ -702,5 +720,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const board = get().data?.boards.find((b) => b.id === boardId)
     if (!board?.isDefault) return
     get().updateProject((data) => resetDefaultBoardClusterLayoutOp(data, boardId))
+  },
+
+  createClusterLink: (fromCategoryId, toCategoryId, label, directed) => {
+    const { data } = get()
+    if (!data) return null
+    const result = createClusterLinkOp(data, fromCategoryId, toCategoryId, label, directed)
+    get().updateProject(() => result.data)
+    return result.linkId
+  },
+
+  updateClusterLink: (linkId, changes) =>
+    get().updateProject((data) => updateClusterLinkOp(data, linkId, changes)),
+
+  deleteClusterLink: (linkId) => get().updateProject((data) => deleteClusterLinkOp(data, linkId)),
+
+  applyTreeLayout: (boardId) => {
+    const { data } = get()
+    const board = data?.boards.find((b) => b.id === boardId)
+    if (!data || !board || board.isDefault) return
+    const clusters = data.boardClusters.filter((c) => c.boardId === boardId)
+    const positions = computeTreeLayout(clusters, data.categories)
+    get().updateProject((current) => applyClusterPositionsOp(current, positions))
+  },
+
+  applyRadialLayout: (boardId, focusCategoryId) => {
+    const { data } = get()
+    const board = data?.boards.find((b) => b.id === boardId)
+    if (!data || !board || board.isDefault) return
+    const clusters = data.boardClusters.filter((c) => c.boardId === boardId)
+    const positions = computeRadialLayout(clusters, focusCategoryId)
+    get().updateProject((current) => applyClusterPositionsOp(current, positions))
   }
 }))

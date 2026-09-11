@@ -69,7 +69,8 @@ All nine planned phases are built and shipping:
 - [x] Coding — select text → code/item, codebook hierarchy, merge
 - [x] Notes/AQA — question+answer memos, attach-anywhere, promote-to-code
 - [x] Retrieval + clusters — by-code/by-note browsing, theme/question cluster management
-- [x] Visual board — drag-and-drop clustering of codes, notes, and quotes
+- [x] Visual board — drag-and-drop clustering of codes/notes/quotes, plus labeled
+  cluster-to-cluster links and tree/radial layouts for a thematic-map figure
 - [x] Cross-case comparison — Kaufmann contrastive view, IPA-style GECT table
 - [x] Exporters — codebook/notes/comparison reports and the results-draft writing aid (docx/html/pdf)
 - [x] Packaging — Windows/macOS/Linux builds, auto-published to GitHub Releases via CI
@@ -1060,3 +1061,62 @@ Verified: 13 new tests in `reportBuilders.test.ts` (all three axes — empty-sta
 quote gathering from both member codes and raw segments, notes shown separately from
 excerpts, the descriptive count line, question-cluster filtering, per-case code scoping),
 full suite green (280/280), typecheck clean, production build clean.
+
+### Cluster links + thematic-map layouts (2026-09-11)
+
+A gap distinct from the results draft above but raised in the same conversation: students
+writing an article or poster often get stuck specifically on producing a figure — a
+Braun & Clarke-style thematic map (clusters/themes connected by labeled relationships) is a
+named deliverable of Reflexive TA, not an optional nice-to-have, and nothing in the app
+produced one.
+
+Scoped down from an initial "new visualization view" idea to reuse what already existed:
+a curated (non-default) board already *is* a named, freely-arranged subset of clusters —
+building a figure is just creating one and adding only the clusters that belong in it, no
+new view needed. The one genuinely missing primitive was a labeled relationship between two
+clusters; item-to-item `BoardLink`s already exist (a plain unlabeled snap-connection,
+per-board) but nothing connected clusters themselves, and nothing carried a label at all.
+
+Added `ClusterLink` (types.ts): `fromCategoryId`, `toCategoryId`, a free-text `label` (not a
+fixed vocabulary — same reasoning as `CategoryRecord.definition`, the app doesn't assume
+which relationship types matter for a given method), and `directed`. Deliberately
+project-wide, not per-board like `BoardLink` — a relationship between two themes is an
+analytic claim, not a visual arrangement choice specific to one board, so it's the same fact
+regardless of which board happens to be showing it. `getVisibleClusterLinks` (boardOps.ts)
+is the only board-specific part: a link only draws on a board that currently shows both its
+endpoint clusters.
+
+**Creating a link** needed its own interaction mode rather than a drag gesture: dragging one
+cluster onto another already means "nest it" (an existing, established gesture), so a
+drag-to-connect motion for links would collide with that. Added a "Link clusters" toggle in
+the board toolbar (non-default boards only) — while active, a cluster's header mousedown
+picks it as an endpoint (`ClusterFrame`'s `onPick`) instead of starting the normal move,
+click a second cluster, type a label in a prompt, done. Rendered as an SVG line (with an
+arrowhead marker when directed) plus the label on a small background rect, reusing the same
+SVG-overlay mechanism the existing item `BoardLink` lines already used — confirmed that
+mechanism was real and working (not dead/unwired code) before building on it.
+
+**Two alternate layouts**, one-click re-arrangements of a board's existing clusters (never
+creating/removing one, never touching links) — `computeTreeLayout` and `computeRadialLayout`
+(boardOps.ts), applied via `applyClusterPositions`:
+- **Tree**: a top-down hierarchical layout driven by `parentCategoryId` — bottom-up subtree-
+  width calculation so a parent centers over its children (rather than just starting at the
+  leftmost one), a category whose parent isn't also on this board treated as its own root.
+- **Radial**: one focus cluster (first cluster by default) stays put, everything else spreads
+  around it in a single ring at equal angular spacing.
+
+Both are explicitly scoped to non-default boards — the default board has its own auto-layout
+already (`getVisibleBoardClusters`), including "virtual" not-yet-materialized cluster shapes
+these functions aren't designed to handle, and isn't a target for this feature; a curated
+figure-board only ever has real `BoardCluster` records to begin with. Manual dragging
+afterward is unaffected (same non-destructive contract as the existing "Reset placement"
+button) — these are starting points, not a lock-in.
+
+Verified: 15 new tests (categoryOps.test.ts: link CRUD including the A→B/B→A-are-distinct
+case and no-op-on-duplicate; the existing `deleteCategory` now cleans up any link naming the
+deleted category; boardOps.test.ts: visibility filtering, both layouts including a
+wide-subtree-doesn't-overlap-its-sibling tree case and an equidistant-from-hub radial case),
+full suite green (296/296), typecheck clean, production build clean. Boot-tested a packaged
+instance (`npx electron .`) — confirmed via `tasklist` that the process actually launched (8
+electron.exe processes, normal multi-process Electron shape), no errors beyond the expected
+shared-cache warnings, then killed every PID and confirmed none remained.

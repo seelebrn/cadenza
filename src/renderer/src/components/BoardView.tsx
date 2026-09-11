@@ -144,6 +144,16 @@ function BoardView(): JSX.Element {
   const setSelectedBoardId = useWorkspaceUiStore((s) => s.setSelectedBoardId)
 
   const [newBoardName, setNewBoardName] = useState('')
+  // A plain inline confirmation bar rather than window.confirm() — the
+  // exact same category of native-dialog issue already found with
+  // window.prompt() (see the cluster-link labeling fix) is the leading
+  // suspect for a reported "board delete, then the New board input won't
+  // take focus for close to a minute" freeze: no timer in this codebase
+  // accounts for that delay, and the layout computation this project's
+  // size actually needs is sub-millisecond, so a native dialog's
+  // known Windows/Electron focus-restoration quirks are the most likely
+  // explanation even without being able to reproduce it interactively.
+  const [confirmingDeleteBoard, setConfirmingDeleteBoard] = useState(false)
   const [codeToAdd, setCodeToAdd] = useState('')
   const [noteToAdd, setNoteToAdd] = useState('')
   const [categoryToPlace, setCategoryToPlace] = useState('')
@@ -207,6 +217,12 @@ function BoardView(): JSX.Element {
   useEffect(() => {
     setLinkFromCategoryId(null)
   }, [selectedBoardId, linkMode])
+
+  // A pending "delete this board" confirmation only makes sense for the
+  // board it was raised on.
+  useEffect(() => {
+    setConfirmingDeleteBoard(false)
+  }, [selectedBoardId])
 
   const currentBoard = boards.find((b) => b.id === selectedBoardId) ?? null
   const explicitClusters = data?.boardClusters.filter((c) => c.boardId === selectedBoardId) ?? []
@@ -823,12 +839,7 @@ function BoardView(): JSX.Element {
           <button
             className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
             title="Delete this board (the codes, notes, and clusters placed on it are not affected — only this board's own layout)"
-            onClick={() => {
-              const warning = currentBoard.isDefault
-                ? `Delete "${currentBoard.name}"? This is the default board — it auto-shows every code, note, and cluster, and another board will become the new default in its place. The codes, notes, and clusters themselves are not affected, only this board's own layout.`
-                : `Delete "${currentBoard.name}"? The codes, notes, and clusters placed here are not affected — only this board's own layout is removed.`
-              if (window.confirm(warning)) deleteBoard(currentBoard.id)
-            }}
+            onClick={() => setConfirmingDeleteBoard(true)}
           >
             Delete board
           </button>
@@ -1038,6 +1049,31 @@ function BoardView(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {confirmingDeleteBoard && currentBoard && (
+        <div className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs">
+          <span className="text-slate-700">
+            {currentBoard.isDefault
+              ? `Delete "${currentBoard.name}"? This is the default board — it auto-shows every code, note, and cluster, and another board will become the new default in its place. The codes, notes, and clusters themselves are not affected, only this board's own layout.`
+              : `Delete "${currentBoard.name}"? The codes, notes, and clusters placed here are not affected — only this board's own layout is removed.`}
+          </span>
+          <button
+            className="flex-shrink-0 rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-500"
+            onClick={() => {
+              deleteBoard(currentBoard.id)
+              setConfirmingDeleteBoard(false)
+            }}
+          >
+            Delete
+          </button>
+          <button
+            className="flex-shrink-0 rounded border border-slate-300 px-2 py-1 hover:bg-slate-100"
+            onClick={() => setConfirmingDeleteBoard(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {linkPendingTarget && (
         <div className="flex items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-1.5 text-xs">

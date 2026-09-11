@@ -1426,3 +1426,35 @@ just the one that surfaced the bug) via the same standalone bundled-script appro
 overlaps for Tree and Radial on both. Full suite green (323/323), typecheck clean, production
 build clean, boot-tested (no errors, cleanly killed). Releases paused per instruction until
 this was resolved — not yet re-tagged.
+
+### "Delete board" left the New-board input unresponsive for close to a minute (2026-09-11)
+
+Reported: after deleting a board, the "New board name…" text field wouldn't take a cursor or
+accept typing for nearly a minute afterward — not visibly disabled, just unresponsive.
+
+Investigated rather than guessed: timed `getVisibleBoardClusters`/`getVisibleBoardItems`/a
+full project `JSON.stringify` against the 500-code test project — all sub-millisecond, ruling
+out "the project is just big enough to be slow" as an explanation. Searched the codebase for
+anything resembling a ~60-second timer — none exists (the only timer anywhere is the 1.5s
+autosave debounce). With both of those ruled out, the leading remaining suspect is
+`window.confirm()` itself: this session already found `window.prompt()` silently doesn't work
+in Electron's renderer (a real, confirmed bug fixed earlier in this log), and `confirm()`/
+`alert()` are the same category of synchronous native-dialog API, with their own documented
+Windows/Electron focus-restoration quirks after the dialog closes — a plausible, if not
+independently reproducible from this environment, explanation for input focus specifically
+misbehaving right after a `confirm()` prompt.
+
+Replaced "Delete board"'s `window.confirm()` with the same plain inline confirmation bar
+already used for the cluster-link labeling fix (an explicit `confirmingDeleteBoard` state, a
+red confirm bar with Delete/Cancel buttons, reset when the selected board changes) — removing
+the one concrete suspect regardless of whether the exact mechanism is fully confirmed.
+Deliberately scoped to just this one dialog rather than converting every `window.confirm()` in
+the app pre-emptively (`Reset placement` on the default board, category deletion in
+`ClusterRowShell.tsx` also use it) — asked the user to report whether those show the same
+freeze, which would confirm it's `confirm()` itself at fault rather than something specific to
+the delete-board code path, before touching call sites with no reported problem.
+
+Verified: no shared/pure logic touched (this is a UI-only change), typecheck clean, full suite
+still 323/323, production build clean, boot-tested (no errors, cleanly killed). The actual fix
+still needs the user's own hands-on confirmation that the freeze is gone, since the trigger
+couldn't be reproduced directly in this environment.

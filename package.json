@@ -1,7 +1,7 @@
 {
   "name": "cadenza",
   "productName": "Cadenza",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Cadenza — a local qualitative data analysis desktop app",
   "main": "./out/main/index.js",
   "author": "seelebrn@gmail.com",

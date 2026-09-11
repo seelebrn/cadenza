@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildProjectReport, hasComparisonData } from './reportBuilders'
-import type { ProjectReportOptions } from './reportBuilders'
+import { buildProjectReport, buildResultsDraftReport, hasComparisonData } from './reportBuilders'
+import type { ProjectReportOptions, ResultsDraftOptions } from './reportBuilders'
 import type { CategoryRecord, CodeNode, DocumentRecord, NoteRecord, ProjectData, Segment } from '@shared/types'
 
 function makeCode(id: string, overrides: Partial<CodeNode> = {}): CodeNode {
@@ -209,6 +209,121 @@ describe('buildProjectReport', () => {
     const headings = report.blocks.filter((b) => b.kind === 'heading').map((b) => (b as { text: string }).text)
     expect(headings).toContain('Codebook')
     expect(headings).toContain('Notes & clusters')
+  })
+})
+
+const DRAFT_NONE: ResultsDraftOptions = { axis: 'theme', includeNotes: false, includeCounts: false, contextWords: 0 }
+
+describe('buildResultsDraftReport', () => {
+  it('by theme: says so when there are no clusters yet', () => {
+    const report = buildResultsDraftReport(makeData(), { ...DRAFT_NONE, axis: 'theme' })
+    expect(report.blocks).toContainEqual({
+      kind: 'paragraph',
+      text: 'No clusters yet — group codes/notes into clusters first.',
+      style: 'meta'
+    })
+  })
+
+  it('by theme: quotes from a member code and a raw segment both surface, sorted, under the cluster', () => {
+    const doc = makeDoc('d1', { title: 'Interview A', paragraphs: ['first segment second segment'] })
+    const coded: Segment = { id: 's1', documentId: 'd1', start: 0, end: 5, text: 'first' }
+    const raw: Segment = { id: 's2', documentId: 'd1', start: 13, end: 19, text: 'second' }
+    const theme = makeCategory('t1', { name: 'Isolation', codeIds: ['a'], segmentIds: ['s2'] })
+    const data = makeData({
+      documents: [doc],
+      segments: [coded, raw],
+      codes: [makeCode('a')],
+      codings: [{ id: 'c1', segmentId: 's1', codeId: 'a', createdAt: '0' }],
+      categories: [theme]
+    })
+    const report = buildResultsDraftReport(data, { ...DRAFT_NONE, axis: 'theme' })
+    const quotes = report.blocks.filter((b) => b.kind === 'paragraph' && b.style === 'quote')
+    expect(quotes).toEqual([
+      { kind: 'paragraph', text: 'first', style: 'quote' },
+      { kind: 'paragraph', text: 'second', style: 'quote' }
+    ])
+  })
+
+  it('by theme: a cluster with nothing filed says so, and always ends with the interpretation prompt', () => {
+    const theme = makeCategory('t1', { name: 'Empty theme' })
+    const data = makeData({ categories: [theme] })
+    const report = buildResultsDraftReport(data, { ...DRAFT_NONE, axis: 'theme' })
+    expect(report.blocks).toContainEqual({ kind: 'paragraph', text: '(nothing filed here yet)', style: 'meta' })
+    expect(report.blocks).toContainEqual({
+      kind: 'paragraph',
+      text: '[Interpretation to write — what does this theme contribute to the research question?]',
+      style: 'meta'
+    })
+  })
+
+  it('by theme: includeNotes shows notes under their own heading, separate from Excerpts', () => {
+    const theme = makeCategory('t1', { name: 'Isolation', noteIds: ['n1'] })
+    const note = makeNote('n1', { answer: 'My reading of this.' })
+    const data = makeData({ categories: [theme], notes: [note] })
+    const withNotes = buildResultsDraftReport(data, { ...DRAFT_NONE, axis: 'theme', includeNotes: true })
+    const headings = withNotes.blocks.filter((b) => b.kind === 'heading').map((b) => (b as { text: string }).text)
+    expect(headings).toContain('My analytic notes')
+    expect(withNotes.blocks).toContainEqual({ kind: 'paragraph', text: 'My reading of this.' })
+
+    const withoutNotes = buildResultsDraftReport(data, { ...DRAFT_NONE, axis: 'theme', includeNotes: false })
+    expect(withoutNotes.blocks).not.toContainEqual({ kind: 'paragraph', text: 'My reading of this.' })
+  })
+
+  it('by theme: includeCounts adds a plain excerpt/case line', () => {
+    const doc = makeDoc('d1', { paragraphs: ['some text'] })
+    const segment: Segment = { id: 's1', documentId: 'd1', start: 0, end: 4, text: 'some' }
+    const theme = makeCategory('t1', { name: 'Isolation', codeIds: ['a'] })
+    const data = makeData({
+      documents: [doc],
+      segments: [segment],
+      codes: [makeCode('a')],
+      codings: [{ id: 'c1', segmentId: 's1', codeId: 'a', createdAt: '0' }],
+      categories: [theme]
+    })
+    const report = buildResultsDraftReport(data, { ...DRAFT_NONE, axis: 'theme', includeCounts: true })
+    expect(report.blocks).toContainEqual({ kind: 'paragraph', text: '1 excerpt · 1 case', style: 'meta' })
+  })
+
+  it('by question: only renders kind "question" clusters, not themes, and labels with curly quotes', () => {
+    const theme = makeCategory('t1', { name: 'A theme' })
+    const question = makeCategory('q1', { kind: 'question', name: 'Why?' })
+    const data = makeData({ categories: [theme, question] })
+    const report = buildResultsDraftReport(data, { ...DRAFT_NONE, axis: 'question' })
+    const headings = report.blocks.filter((b) => b.kind === 'heading').map((b) => (b as { text: string }).text)
+    expect(headings).toContain('“Why?”')
+    expect(headings).not.toContain('A theme')
+  })
+
+  it('by question: says so when there are no question-clusters yet', () => {
+    const theme = makeCategory('t1', { name: 'A theme' })
+    const data = makeData({ categories: [theme] })
+    const report = buildResultsDraftReport(data, { ...DRAFT_NONE, axis: 'question' })
+    expect(report.blocks).toContainEqual({
+      kind: 'paragraph',
+      text: 'No question-clusters yet — an AQA-style question is a cluster whose "kind" is set to question.',
+      style: 'meta'
+    })
+  })
+
+  it('by case: one section per document, only codes actually used in that case', () => {
+    const docA = makeDoc('d1', { title: 'Case A', importedAt: '0', paragraphs: ['alpha text'] })
+    const docB = makeDoc('d2', { title: 'Case B', importedAt: '1', paragraphs: ['beta text'] })
+    const segA: Segment = { id: 's1', documentId: 'd1', start: 0, end: 5, text: 'alpha' }
+    const data = makeData({
+      documents: [docA, docB],
+      segments: [segA],
+      codes: [makeCode('a', { name: 'CodeA' })],
+      codings: [{ id: 'c1', segmentId: 's1', codeId: 'a', createdAt: '0' }]
+    })
+    const report = buildResultsDraftReport(data, { ...DRAFT_NONE, axis: 'case' })
+    const headings = report.blocks.filter((b) => b.kind === 'heading').map((b) => (b as { text: string }).text)
+    expect(headings).toEqual(['Case A', 'CodeA', 'Case B'])
+    expect(report.blocks).toContainEqual({ kind: 'paragraph', text: '(no coded passages in this case yet)', style: 'meta' })
+  })
+
+  it('by case: says so when there are no documents yet', () => {
+    const report = buildResultsDraftReport(makeData(), { ...DRAFT_NONE, axis: 'case' })
+    expect(report.blocks).toContainEqual({ kind: 'paragraph', text: 'No documents yet.', style: 'meta' })
   })
 })
 

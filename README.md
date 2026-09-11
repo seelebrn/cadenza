@@ -1029,3 +1029,44 @@ the reliable path on current macOS); now leads with System Settings → Privacy 
 is what actually works. Landed at the same place QualCoder and comparable unsigned open-source
 tools sit — a normal, well-documented, one-time warning — without spending anything on Apple
 Developer Program enrollment.
+
+### Results draft: a write-up scaffold, deliberately not an inter-rater tool (2026-09-11)
+
+Asked what would be most valuable to add next, given who actually uses this app: trained
+sociologists, but also medical/nursing students on their first qualitative project. Proposed a
+menu (beginner onboarding, rigor/reliability tooling, de-identification, write-up support) and
+asked the user to prioritize.
+
+One data point mattered more than the ranking: the user explicitly rejected inter-rater
+reliability tooling (double-coding comparison, Cohen's kappa) on epistemological grounds —
+"deux subjectivités n'ont jamais fait une objectivité ou une neutralité." Building a kappa/
+agreement-score feature would reinforce exactly the positivist reflex they want students to
+unlearn; double-coding can be a useful discussion exercise, but the app shouldn't imply it's
+what makes coding "scientific." Saved as a standing project memory — this stance should shape
+future feature proposals for Cadenza, not just this one decision.
+
+Landed on the "results draft" export instead: reorganizes already-coded material into a
+skeleton the writer still has to interpret, along an axis they pick explicitly (by theme —
+Reflexive TA/IPA; by case — Kaufmann; by question — AQA) rather than one Cadenza infers from the
+project, since which axis fits is itself a methodological call. Two rules keep it from
+overstepping into doing the analysis for them: it never generates prose (only rearranges quotes
+and the writer's own notes), and raw quotes are always shown under a separate "Excerpts" heading
+from the writer's own "My analytic notes" — keeping data and interpretation visually distinct
+rather than blended, which doubles as a small piece of reflexivity scaffolding for students who
+haven't learned that distinction yet. Each section ends with a bracketed interpretation prompt
+(e.g. "[Interpretation to write — what does this theme contribute to the research question?]")
+so the exported document reads as a draft, not something to hand in as-is.
+
+Reused the existing format-agnostic `Report`/`ReportBlock` model (reportModel.ts) — no renderer
+changes needed, since headings/quote-paragraphs/meta-paragraphs already covered everything this
+needed. Added `buildResultsDraftReport` next to the existing `buildProjectReport` in
+reportBuilders.ts (a new builder, not more checkboxes on the existing one — the existing export
+is an inventory of everything filed under whatever's checked; this is a fundamentally different
+per-axis reorganization, and combining the two mental models in one checkbox list would have
+muddled both). ExportView.tsx now opens on a "Standard report" vs. "Results draft" mode toggle
+instead of a single checkbox list.
+
+Verified: 13 new tests in reportBuilders.test.ts (all three axes — empty-state messaging, quote
+gathering from both member codes and raw segments, notes shown separately from excerpts, the
+descriptive count line, question-cluster filtering, per-case code scoping), full suite still
+green (280/280), typecheck clean, production build clean.

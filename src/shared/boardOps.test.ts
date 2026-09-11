@@ -4,6 +4,7 @@ import {
   addAllCodesToBoard,
   addAllNotesToBoard,
   addItemToBoard,
+  applyClusterLayoutWithMembers,
   applyClusterPositions,
   assignItemToCluster,
   computeAccommodatingSize,
@@ -850,16 +851,35 @@ describe('addAllCodesToBoard / addAllNotesToBoard / addAllClustersToBoard', () =
     expect(next.boardClusters).toHaveLength(1)
     expect(next.boardItems).toHaveLength(0)
   })
+
+  it('addAllClustersToBoard(includeMembers: false) places only the empty cluster frames', () => {
+    const category = makeCategory('A', { codeIds: ['c1', 'c2'], noteIds: ['n1'] })
+    const data = makeData({ categories: [category] })
+    const next = addAllClustersToBoard(data, 'b1', false)
+    expect(next.boardClusters).toHaveLength(1)
+    expect(next.boardItems).toHaveLength(0)
+    // The frame is still sized as if the members were there, so it's
+    // already the right size if they get added later.
+    expect(next.boardClusters[0].height).toBeGreaterThan(200)
+  })
 })
 
 describe('computeCategoryLayout', () => {
+  // rectContains/rectsOverlap are typed against BoardCluster (used
+  // everywhere else in this file) — pad a ComputedClusterLayout with dummy
+  // board-specific fields rather than widening those two widely-used
+  // helpers just for this describe block.
+  function asCluster(l: { categoryId: string; x: number; y: number; width: number; height: number }): BoardCluster {
+    return { id: l.categoryId, boardId: 'b1', categoryId: l.categoryId, x: l.x, y: l.y, width: l.width, height: l.height, createdAt: '0' }
+  }
+
   it('nests a child inside its parent, matching getVisibleBoardClusters\' own containment guarantee', () => {
     const parent = makeCategory('A', { codeIds: ['c1'] })
     const child = makeCategory('B', { parentCategoryId: 'A', codeIds: ['c2'] })
     const layout = computeCategoryLayout([parent, child])
     const a = layout.find((l) => l.categoryId === 'A')!
     const b = layout.find((l) => l.categoryId === 'B')!
-    expect(rectContains(a, b)).toBe(true)
+    expect(rectContains(asCluster(a), asCluster(b))).toBe(true)
   })
 
   it('respects an explicit override for one category, computing the rest fresh around it', () => {
@@ -869,7 +889,7 @@ describe('computeCategoryLayout', () => {
     expect(layout.find((l) => l.categoryId === 'A')).toMatchObject({ x: 500, y: 500 })
     const a = layout.find((l) => l.categoryId === 'A')!
     const b = layout.find((l) => l.categoryId === 'B')!
-    expect(rectsOverlap(a, b)).toBe(false)
+    expect(rectsOverlap(asCluster(a), asCluster(b))).toBe(false)
   })
 
   it('returns an empty array for no categories', () => {
@@ -1074,6 +1094,53 @@ describe('applyClusterPositions', () => {
     const next = applyClusterPositions(data, [{ id: 'c1', x: 100, y: 200 }])
     expect(next.boardClusters.find((c) => c.id === 'c1')).toMatchObject({ x: 100, y: 200 })
     expect(next.boardClusters.find((c) => c.id === 'c2')).toMatchObject({ x: 5, y: 5 })
+  })
+})
+
+describe('applyClusterLayoutWithMembers', () => {
+  it('carries a cluster\'s member codes/notes along with it by the same delta — the exact reported bug', () => {
+    const category = makeCategory('A', { codeIds: ['code1'], noteIds: ['note1'] })
+    const data = makeData({
+      categories: [category],
+      boardClusters: [{ id: 'c1', boardId: 'b1', categoryId: 'A', x: 0, y: 0, width: 280, height: 200, createdAt: '0' }],
+      boardItems: [
+        { id: 'i1', boardId: 'b1', refType: 'code', refId: 'code1', x: 20, y: 40 },
+        { id: 'i2', boardId: 'b1', refType: 'note', refId: 'note1', x: 40, y: 80 }
+      ]
+    })
+    const next = applyClusterLayoutWithMembers(data, 'b1', [{ id: 'c1', x: 500, y: 700 }])
+    // Cluster moved by (+500, +700) -> every member should move by exactly that too.
+    expect(next.boardItems.find((i) => i.id === 'i1')).toMatchObject({ x: 520, y: 740 })
+    expect(next.boardItems.find((i) => i.id === 'i2')).toMatchObject({ x: 540, y: 780 })
+  })
+
+  it('leaves items on a different board, or not a member of any moved cluster, untouched', () => {
+    const category = makeCategory('A', { codeIds: ['code1'] })
+    const unclustered = makeCategory('B')
+    const data = makeData({
+      categories: [category, unclustered],
+      boardClusters: [{ id: 'c1', boardId: 'b1', categoryId: 'A', x: 0, y: 0, width: 280, height: 200, createdAt: '0' }],
+      boardItems: [
+        { id: 'i1', boardId: 'b1', refType: 'code', refId: 'code1', x: 20, y: 40 },
+        { id: 'i2', boardId: 'b1', refType: 'code', refId: 'unrelated', x: 20, y: 40 },
+        { id: 'i3', boardId: 'other-board', refType: 'code', refId: 'code1', x: 20, y: 40 }
+      ]
+    })
+    const next = applyClusterLayoutWithMembers(data, 'b1', [{ id: 'c1', x: 500, y: 700 }])
+    expect(next.boardItems.find((i) => i.id === 'i2')).toMatchObject({ x: 20, y: 40 })
+    expect(next.boardItems.find((i) => i.id === 'i3')).toMatchObject({ x: 20, y: 40 })
+  })
+
+  it('a cluster that did not move in this pass leaves its members untouched too', () => {
+    const category = makeCategory('A', { codeIds: ['code1'] })
+    const data = makeData({
+      categories: [category],
+      boardClusters: [{ id: 'c1', boardId: 'b1', categoryId: 'A', x: 0, y: 0, width: 280, height: 200, createdAt: '0' }],
+      boardItems: [{ id: 'i1', boardId: 'b1', refType: 'code', refId: 'code1', x: 20, y: 40 }]
+    })
+    // Same position as it already had -> zero delta -> no-op for its members.
+    const next = applyClusterLayoutWithMembers(data, 'b1', [{ id: 'c1', x: 0, y: 0 }])
+    expect(next.boardItems.find((i) => i.id === 'i1')).toMatchObject({ x: 20, y: 40 })
   })
 })
 

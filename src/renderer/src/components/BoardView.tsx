@@ -118,6 +118,7 @@ function computeClusterMoveSnap(
 function BoardView(): JSX.Element {
   const data = useProjectStore((s) => s.data)
   const createBoard = useProjectStore((s) => s.createBoard)
+  const deleteBoard = useProjectStore((s) => s.deleteBoard)
   const createClusterForCategory = useProjectStore((s) => s.createClusterForCategory)
   const createClusterWithNewCategory = useProjectStore((s) => s.createClusterWithNewCategory)
   const addItemToBoard = useProjectStore((s) => s.addItemToBoard)
@@ -818,6 +819,20 @@ function BoardView(): JSX.Element {
             </option>
           ))}
         </select>
+        {currentBoard && (
+          <button
+            className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+            title="Delete this board (the codes, notes, and clusters placed on it are not affected — only this board's own layout)"
+            onClick={() => {
+              const warning = currentBoard.isDefault
+                ? `Delete "${currentBoard.name}"? This is the default board — it auto-shows every code, note, and cluster, and another board will become the new default in its place. The codes, notes, and clusters themselves are not affected, only this board's own layout.`
+                : `Delete "${currentBoard.name}"? The codes, notes, and clusters placed here are not affected — only this board's own layout is removed.`
+              if (window.confirm(warning)) deleteBoard(currentBoard.id)
+            }}
+          >
+            Delete board
+          </button>
+        )}
         <div className="flex gap-1">
           <input
             className="rounded border border-slate-300 px-2 py-1 text-xs"
@@ -965,9 +980,17 @@ function BoardView(): JSX.Element {
             </div>
             <button
               className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
-              onClick={() => addAllClustersToBoard(currentBoard.id)}
+              title="Places every cluster's empty frame, without its codes/notes — for building a clean thematic-map figure"
+              onClick={() => addAllClustersToBoard(currentBoard.id, false)}
             >
               + Add all clusters
+            </button>
+            <button
+              className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
+              title="Places every cluster along with its codes/notes, same as this board's normal working view"
+              onClick={() => addAllClustersToBoard(currentBoard.id, true)}
+            >
+              + Add all clusters and items
             </button>
           </>
         )}

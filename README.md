@@ -1290,3 +1290,48 @@ overlaps, and every parent-child "overlap" the geometry check initially flagged 
 be legitimate containment, not a bug, once cross-checked against the real ancestor relationships.
 Full suite green (312/312), typecheck clean, production build clean, boot-tested (no errors,
 cleanly killed).
+
+**Caught by CI, not locally**: the v0.2.1 tag's first push failed CI's typecheck step, despite
+`npm run typecheck` having been run clean locally right before committing. Cause: two of the new
+tests above called the existing `rectContains`/`rectsOverlap` test helpers (typed against
+`BoardCluster`) with `ComputedClusterLayout` values instead, which are missing `id`/`boardId`/
+`createdAt` — `npm test` (Vitest, via esbuild) doesn't type-check at all, so it ran and passed
+regardless; only `tsc --noEmit` catches this, and it hadn't been re-run after that specific
+addition. Fixed by padding the two `ComputedClusterLayout` values into full `BoardCluster` shapes
+before calling the shared helpers, rather than widening those helpers' types for everyone else's
+already-passing 90+ call sites. Re-verified clean this time, retagged.
+
+### Three more board gaps, found while testing this same fix (2026-09-11)
+
+Reported in the same sitting, testing the "Add all clusters" fix above:
+
+- **No way to delete a board at all.** `deleteBoard` (boardOps.ts) already existed and was
+  already wired into the store — just never had a button anywhere. Added one next to the board
+  picker, confirming first and explaining that only the board's own layout is removed (the
+  underlying codes/notes/clusters are untouched); deleting the *default* board is allowed too
+  (matching what the op already supported — auto-promotes another board), with the confirm
+  dialog saying so explicitly.
+- **"+ Add all clusters" always added member items too**, with no way to place just the empty
+  frames — exactly what the earlier thematic-map work actually wants for a clean figure board
+  (add clusters only, arrange them, never bring codes/notes onto that board at all). Added an
+  `includeMembers` parameter (default `true`, unchanged behavior) to `addAllClustersToBoard`,
+  and split the one button into two: "+ Add all clusters" (frames only) and "+ Add all clusters
+  and items" (the original combined behavior). A cluster's frame is still sized as if its members
+  were there either way, so it's already the right size if they get added later.
+- **The real bug**: following the workflow "Add all clusters → Link → Radial/Tree," clusters
+  visibly reorganized but their codes didn't move with them — reading as if they'd been unlinked
+  from their cluster. Cause: `applyTreeLayout`/`applyRadialLayout` only ever called
+  `applyClusterPositions`, which (by design — see its own doc comment) touches `boardClusters`
+  only, never `boardItems`. A manual cluster drag already carries member items along
+  (`getClusterMemberItems` in `BoardView`'s mousedown handler); the one-click layouts never got
+  the equivalent treatment. Added `applyClusterLayoutWithMembers`: computes each repositioned
+  cluster's delta (by *category*, since that's what a member actually belongs to — a ref in more
+  than one moving category homes on the first, matching the existing multi-membership rule) and
+  shifts every member code/note/segment on that board by the same amount. `applyTreeLayout`/
+  `applyRadialLayout` now call this instead of the bare position-only version.
+
+Verified: 7 new tests (`applyClusterLayoutWithMembers`: members move by the cluster's exact
+delta — the reported scenario directly; items on a different board or unrelated cluster
+untouched; a cluster that didn't move leaves its members alone too; `addAllClustersToBoard`
+with `includeMembers: false` places only frames, still correctly sized). Full suite green
+(316/316), typecheck clean, production build clean, boot-tested (no errors, cleanly killed).

@@ -54,7 +54,7 @@ import {
   addAllCodesToBoard as addAllCodesToBoardOp,
   addAllNotesToBoard as addAllNotesToBoardOp,
   addItemToBoard as addItemToBoardOp,
-  applyClusterPositions as applyClusterPositionsOp,
+  applyClusterLayoutWithMembers as applyClusterLayoutWithMembersOp,
   assignItemToCluster as assignItemToClusterOp,
   computeRadialLayout,
   computeTreeLayout,
@@ -241,7 +241,10 @@ interface ProjectState {
   unassignItemFromCluster: (clusterId: string, refType: BoardItem['refType'], refId: string) => void
   addAllCodesToBoard: (boardId: string) => void
   addAllNotesToBoard: (boardId: string) => void
-  addAllClustersToBoard: (boardId: string) => void
+  /** includeMembers (default true): also place each cluster's member
+   * codes/notes, or just the empty cluster frames — "+ Add all clusters"
+   * vs. "+ Add all clusters and items" in the toolbar. */
+  addAllClustersToBoard: (boardId: string, includeMembers?: boolean) => void
   linkItems: (boardId: string, itemAId: string, itemBId: string) => void
   unlinkItems: (linkId: string) => void
   /** Drops every explicit cluster shape and clustered item position on this
@@ -708,8 +711,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   addAllNotesToBoard: (boardId) => get().updateProject((data) => addAllNotesToBoardOp(data, boardId)),
 
-  addAllClustersToBoard: (boardId) =>
-    get().updateProject((data) => addAllClustersToBoardOp(data, boardId)),
+  addAllClustersToBoard: (boardId, includeMembers = true) =>
+    get().updateProject((data) => addAllClustersToBoardOp(data, boardId, includeMembers)),
 
   linkItems: (boardId, itemAId, itemBId) =>
     get().updateProject((data) => linkItemsOp(data, boardId, itemAId, itemBId)),
@@ -741,7 +744,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!data || !board || board.isDefault) return
     const clusters = data.boardClusters.filter((c) => c.boardId === boardId)
     const positions = computeTreeLayout(clusters, data.categories)
-    get().updateProject((current) => applyClusterPositionsOp(current, positions))
+    get().updateProject((current) => applyClusterLayoutWithMembersOp(current, boardId, positions))
   },
 
   applyRadialLayout: (boardId, focusCategoryId) => {
@@ -750,6 +753,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!data || !board || board.isDefault) return
     const clusters = data.boardClusters.filter((c) => c.boardId === boardId)
     const positions = computeRadialLayout(clusters, focusCategoryId)
-    get().updateProject((current) => applyClusterPositionsOp(current, positions))
+    get().updateProject((current) => applyClusterLayoutWithMembersOp(current, boardId, positions))
   }
 }))

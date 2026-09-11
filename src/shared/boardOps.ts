@@ -661,8 +661,23 @@ export function addAllNotesToBoard(data: ProjectData, boardId: string): ProjectD
  * not auto-placed here, matching getVisibleBoardItems' own convention
  * elsewhere — a segment always keeps its own explicit position rather than
  * being auto-homed into a cluster's member grid.
+ *
+ * `includeMembers` (default true) controls whether each cluster's member
+ * codes/notes get placed too, or just the empty cluster frame itself —
+ * "+ Add all clusters" (false) vs. "+ Add all clusters and items" (true) in
+ * the toolbar. A curated board built as a thematic-map figure specifically
+ * wants clusters with nothing cluttering them, which the combined
+ * behavior couldn't offer at all before this split. Cluster boxes are
+ * still sized as if their members were there either way (via
+ * computeCategoryLayout, which only knows member *counts*) — a size that
+ * already fits the content if it's added later, not a decorative default
+ * that would need resizing.
  */
-export function addAllClustersToBoard(data: ProjectData, boardId: string): ProjectData {
+export function addAllClustersToBoard(
+  data: ProjectData,
+  boardId: string,
+  includeMembers: boolean = true
+): ProjectData {
   const existingOnBoard = data.boardClusters.filter((c) => c.boardId === boardId)
   const existingCategoryIds = new Set(existingOnBoard.map((c) => c.categoryId))
   const categoriesToPlace = data.categories.filter((c) => !existingCategoryIds.has(c.id))
@@ -688,6 +703,8 @@ export function addAllClustersToBoard(data: ProjectData, boardId: string): Proje
       height: layout.height
     })
     next = clusterResult.data
+
+    if (!includeMembers) continue
 
     const members: Array<{ refType: 'code' | 'note'; refId: string }> = [
       ...category.codeIds.map((refId) => ({ refType: 'code' as const, refId })),
@@ -913,6 +930,67 @@ export function applyClusterPositions(data: ProjectData, positions: ClusterPosit
     boardClusters: data.boardClusters.map((c) => {
       const pos = byId.get(c.id)
       return pos ? { ...c, x: pos.x, y: pos.y } : c
+    })
+  }
+}
+
+/**
+ * Same as applyClusterPositions, but also carries each repositioned
+ * cluster's member codes/notes/segments along with it by the same delta —
+ * the one-click Tree/Radial layouts' equivalent of what a manual cluster
+ * drag already does (see BoardView's cluster-move handling, which moves
+ * `getClusterMemberItems` alongside the frame). Without this, applying a
+ * layout moves every cluster's *frame* but leaves its member cards sitting
+ * at their old position, reading as if they'd been unlinked from their
+ * cluster even though the underlying category membership never changed.
+ *
+ * Computes one delta per *category* (not per cluster id) since that's what
+ * a member actually belongs to; a ref that's a member of more than one
+ * category moving in this pass homes on the first one, in `data.categories`
+ * order — the same "first membership wins" rule used everywhere else a
+ * board can only give a ref one position (see getVisibleBoardItems).
+ */
+export function applyClusterLayoutWithMembers(
+  data: ProjectData,
+  boardId: string,
+  positions: ClusterPosition[]
+): ProjectData {
+  const clusterById = new Map(data.boardClusters.filter((c) => c.boardId === boardId).map((c) => [c.id, c]))
+
+  const deltaByCategoryId = new Map<string, { dx: number; dy: number }>()
+  for (const pos of positions) {
+    const cluster = clusterById.get(pos.id)
+    if (!cluster) continue
+    const dx = pos.x - cluster.x
+    const dy = pos.y - cluster.y
+    if (dx !== 0 || dy !== 0) deltaByCategoryId.set(cluster.categoryId, { dx, dy })
+  }
+
+  const deltaByRefKey = new Map<string, { dx: number; dy: number }>()
+  for (const category of data.categories) {
+    const delta = deltaByCategoryId.get(category.id)
+    if (!delta) continue
+    for (const codeId of category.codeIds) {
+      const key = `code:${codeId}`
+      if (!deltaByRefKey.has(key)) deltaByRefKey.set(key, delta)
+    }
+    for (const noteId of category.noteIds) {
+      const key = `note:${noteId}`
+      if (!deltaByRefKey.has(key)) deltaByRefKey.set(key, delta)
+    }
+    for (const segmentId of category.segmentIds) {
+      const key = `segment:${segmentId}`
+      if (!deltaByRefKey.has(key)) deltaByRefKey.set(key, delta)
+    }
+  }
+
+  const withPositions = applyClusterPositions(data, positions)
+  return {
+    ...withPositions,
+    boardItems: withPositions.boardItems.map((item) => {
+      if (item.boardId !== boardId) return item
+      const delta = deltaByRefKey.get(`${item.refType}:${item.refId}`)
+      return delta ? { ...item, x: item.x + delta.dx, y: item.y + delta.dy } : item
     })
   }
 }

@@ -7,7 +7,7 @@ import {
   applyClusterPositions,
   assignItemToCluster,
   computeAccommodatingSize,
-  computeClusterSize,
+  computeCategoryLayout,
   computeGridPosition,
   computeRadialLayout,
   computeTreeLayout,
@@ -781,6 +781,100 @@ describe('addAllCodesToBoard / addAllNotesToBoard / addAllClustersToBoard', () =
       }
     }
   })
+
+  it('addAllClustersToBoard: many clusters with many members each never overlap each other — the exact reported bug', () => {
+    // Reproduces the real-world report: a project with several clusters
+    // each holding enough codes that the old fixed-height grid row (240px)
+    // was far shorter than the cluster's actual content, so the next
+    // row's cluster visually overlapped the previous one's tall box.
+    const categories = Array.from({ length: 8 }, (_, i) =>
+      makeCategory(`cat${i}`, { codeIds: Array.from({ length: 15 }, (_, j) => `c${i}-${j}`) })
+    )
+    const data = makeData({ categories })
+    const next = addAllClustersToBoard(data, 'b1')
+    expect(next.boardClusters).toHaveLength(8)
+    expect(next.boardItems).toHaveLength(8 * 15)
+
+    for (let i = 0; i < next.boardClusters.length; i++) {
+      for (let j = i + 1; j < next.boardClusters.length; j++) {
+        expect(rectsOverlap(next.boardClusters[i], next.boardClusters[j])).toBe(false)
+      }
+    }
+    // Every member genuinely sits inside its own cluster's box, not just
+    // "somewhere on the board" — the actual symptom reported was cards
+    // appearing to belong to the wrong cluster.
+    const clusterByCategoryId = new Map(next.boardClusters.map((c) => [c.categoryId, c]))
+    for (const category of categories) {
+      const cluster = clusterByCategoryId.get(category.id)!
+      const memberItems = next.boardItems.filter(
+        (i) => i.refType === 'code' && category.codeIds.includes(i.refId)
+      )
+      for (const item of memberItems) {
+        expect(item.x).toBeGreaterThanOrEqual(cluster.x)
+        expect(item.x + 180).toBeLessThanOrEqual(cluster.x + cluster.width)
+        expect(item.y).toBeGreaterThanOrEqual(cluster.y)
+        expect(item.y + 64).toBeLessThanOrEqual(cluster.y + cluster.height)
+      }
+    }
+  })
+
+  it('addAllClustersToBoard packs a cluster\'s members into a near-square grid, not a single tall column', () => {
+    const category = makeCategory('A', { codeIds: Array.from({ length: 9 }, (_, i) => `c${i}`) })
+    const data = makeData({ categories: [category] })
+    const next = addAllClustersToBoard(data, 'b1')
+    const distinctColumns = new Set(next.boardItems.map((i) => i.x))
+    // 9 members -> ceil(sqrt(9)) = 3 columns, matching computeCategoryLayout's
+    // own sizing assumption — a single column would mean distinctColumns.size === 1.
+    expect(distinctColumns.size).toBe(3)
+  })
+
+  it('addAllClustersToBoard lays new clusters out relative to ones already explicitly on this board', () => {
+    const categories = [makeCategory('A'), makeCategory('B')]
+    const existing: BoardCluster[] = [
+      { id: 'realA', boardId: 'b1', categoryId: 'A', x: 900, y: 700, width: 280, height: 200, createdAt: '0' }
+    ]
+    const data = makeData({ categories, boardClusters: existing })
+    const next = addAllClustersToBoard(data, 'b1')
+    // A's already-real shape is untouched...
+    expect(next.boardClusters.find((c) => c.categoryId === 'A')).toMatchObject({ id: 'realA', x: 900, y: 700 })
+    // ...and B is a genuinely new shape, not overlapping A.
+    const a = next.boardClusters.find((c) => c.categoryId === 'A')!
+    const b = next.boardClusters.find((c) => c.categoryId === 'B')!
+    expect(rectsOverlap(a, b)).toBe(false)
+  })
+
+  it('addAllClustersToBoard does not auto-place raw segments (they keep their own explicit position elsewhere)', () => {
+    const category = makeCategory('A', { segmentIds: ['s1', 's2'] })
+    const data = makeData({ categories: [category] })
+    const next = addAllClustersToBoard(data, 'b1')
+    expect(next.boardClusters).toHaveLength(1)
+    expect(next.boardItems).toHaveLength(0)
+  })
+})
+
+describe('computeCategoryLayout', () => {
+  it('nests a child inside its parent, matching getVisibleBoardClusters\' own containment guarantee', () => {
+    const parent = makeCategory('A', { codeIds: ['c1'] })
+    const child = makeCategory('B', { parentCategoryId: 'A', codeIds: ['c2'] })
+    const layout = computeCategoryLayout([parent, child])
+    const a = layout.find((l) => l.categoryId === 'A')!
+    const b = layout.find((l) => l.categoryId === 'B')!
+    expect(rectContains(a, b)).toBe(true)
+  })
+
+  it('respects an explicit override for one category, computing the rest fresh around it', () => {
+    const categories = [makeCategory('A'), makeCategory('B')]
+    const overrides = new Map([['A', { x: 500, y: 500, width: 280, height: 200 }]])
+    const layout = computeCategoryLayout(categories, overrides)
+    expect(layout.find((l) => l.categoryId === 'A')).toMatchObject({ x: 500, y: 500 })
+    const a = layout.find((l) => l.categoryId === 'A')!
+    const b = layout.find((l) => l.categoryId === 'B')!
+    expect(rectsOverlap(a, b)).toBe(false)
+  })
+
+  it('returns an empty array for no categories', () => {
+    expect(computeCategoryLayout([])).toEqual([])
+  })
 })
 
 // --- Clusters (category shapes) -------------------------------------------
@@ -870,18 +964,6 @@ describe('cluster CRUD', () => {
   })
 })
 
-// --- computeClusterSize ---------------------------------------------------
-
-describe('computeClusterSize', () => {
-  it('grows height with member count, never shrinking below the default', () => {
-    const empty = computeClusterSize(0)
-    const many = computeClusterSize(10)
-    expect(empty.height).toBeGreaterThanOrEqual(200)
-    expect(many.height).toBeGreaterThan(empty.height)
-    expect(empty.width).toBe(280)
-    expect(many.width).toBe(280)
-  })
-})
 
 // --- Links ------------------------------------------------------------
 

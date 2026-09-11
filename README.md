@@ -1238,3 +1238,55 @@ the cluster-links work above) any `ClusterLink` naming it as either endpoint is 
 Verified: no shared/pure logic changed (this is a UI prop + a confirm dialog), typecheck
 clean, full suite still 306/306, production build clean, boot-tested (no errors, cleanly
 killed).
+
+### "Add all clusters" on a secondary board never got the masonry-layout rework (2026-09-11)
+
+Reported from real use on the 500-code/35-category test project: on a secondary (non-default)
+board, "+ Add all clusters" produced a broken layout — none of the non-overlapping masonry
+packing the default board gets, codes spilling out of their cluster's frame or reading as
+belonging to the wrong one.
+
+Root cause: the "large synthetic test project" rework earlier in this log ("Clusters defaulted
+to a single column... Rewrote it as a multi-column masonry pack") only ever touched
+`getVisibleBoardClusters` — the default board's own *live, per-render* computation. It never
+touched `addAllClustersToBoard`, the bulk-add action used on every other board, which still ran
+its original, much cruder logic: a fixed 4-column/240px-row grid (`computeClusterGridPosition`)
+with no idea how tall a cluster's real content actually was, plus single-column member stacking.
+`computeClusterSize` did scale a cluster's own height with its member count — a cluster with,
+say, 15 members needed roughly 15 × 72px ≈ 1080px, nowhere near the fixed 240px row height — so
+the *next* row's cluster box started well inside the previous, oversized one's footprint. Every
+code was still correctly filed under its real category the whole time (a pure layout bug, not
+a data one), but visually it looked exactly like the report: codes spilling into, or reading as
+members of, whichever cluster's box happened to now overlap theirs.
+
+Fixed by extracting the masonry-packed, nesting-aware, member-grid-sized algorithm out of
+`getVisibleBoardClusters` into a standalone `computeCategoryLayout(categories, explicitOverrides)`
+— a pure refactor first (verified byte-for-byte behavior-preserving: every one of
+`getVisibleBoardClusters`' existing tests, covering the specific overlap/containment/grid-column
+guarantees from that earlier rework, passed unchanged against the extracted version before
+anything else changed). `getVisibleBoardClusters` now just calls it and wraps the result back
+into real-or-virtual `BoardCluster`s; `addAllClustersToBoard` calls the same function to compute
+real, materializable positions/sizes for whatever it's about to place — same visual quality as
+the default board, not a separate, drifted-out-of-sync reimplementation. `explicitOverrides` is
+new: whatever's already really on the target board gets passed in and respected, so bulk-adding
+the *remaining* clusters to a partially-populated board lays them out relative to what's actually
+there rather than a fresh, disconnected layout. `computeClusterGridPosition` and `computeClusterSize`
+(the old fixed-grid helpers) are now dead and removed rather than left behind unused.
+
+Segments (raw quotes filed directly under a category) are deliberately no longer auto-placed by
+this action — matching `getVisibleBoardItems`' own established convention that a segment always
+keeps its own explicit position rather than being auto-homed into a cluster's grid; the old code
+tried to stack them into the single column too, inconsistently with how they're treated
+everywhere else.
+
+Verified: 3 new `addAllClustersToBoard` tests (8 clusters × 15 members apiece — the exact
+reported scale — asserting zero cluster-cluster overlap and every member genuinely inside its
+own cluster's bounds; near-square member grid confirmed via distinct-column count instead of a
+single column; a bulk-add onto a board with one cluster already real correctly lays out around
+it) plus 3 new direct `computeCategoryLayout` tests. Re-verified end-to-end against the actual
+`LargeProjectTest.qdaproj` (500 codes, 35 categories including 5 superordinates) via a
+standalone esbuild-bundled script (bundle deleted after): zero genuine sibling/unrelated
+overlaps, and every parent-child "overlap" the geometry check initially flagged was confirmed to
+be legitimate containment, not a bug, once cross-checked against the real ancestor relationships.
+Full suite green (312/312), typecheck clean, production build clean, boot-tested (no errors,
+cleanly killed).

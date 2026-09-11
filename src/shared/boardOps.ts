@@ -213,9 +213,6 @@ export function computeGridPosition(index: number, originY: number = GRID_ORIGIN
   return { x: GRID_ORIGIN_X + column * GRID_COLUMN_WIDTH, y: originY + row * GRID_ROW_HEIGHT }
 }
 
-const CLUSTER_GRID_COLUMNS = 4
-const CLUSTER_GRID_COLUMN_WIDTH = 320
-const CLUSTER_GRID_ROW_HEIGHT = 240
 const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
 const CLUSTER_GAP = 40
@@ -245,71 +242,55 @@ function packGridColumnCount(siblingCount: number): number {
   return Math.max(1, Math.min(GRID_MAX_COLUMNS, Math.ceil(Math.sqrt(siblingCount))))
 }
 
-function computeClusterGridPosition(index: number): { x: number; y: number } {
-  const column = index % CLUSTER_GRID_COLUMNS
-  const row = Math.floor(index / CLUSTER_GRID_COLUMNS)
-  return {
-    x: GRID_ORIGIN_X + column * CLUSTER_GRID_COLUMN_WIDTH,
-    y: GRID_ORIGIN_Y + row * CLUSTER_GRID_ROW_HEIGHT
-  }
-}
-
-/** How tall/wide a cluster frame needs to be to fit its own direct members
- * stacked in a single column without overlapping — used for the default
- * board's auto-layout, where a cluster's box has to actually hold its
- * members rather than just being a fixed decorative size. */
-export function computeClusterSize(memberCount: number): { width: number; height: number } {
-  const height = Math.max(
-    DEFAULT_CLUSTER_HEIGHT,
-    CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + memberCount * CLUSTER_MEMBER_ROW_HEIGHT
-  )
-  return { width: DEFAULT_CLUSTER_WIDTH, height }
+export interface ComputedClusterLayout {
+  categoryId: string
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 /**
- * The clusters a board should actually show — the cluster counterpart of
- * getVisibleBoardItems below. On the default board, every category is
- * visible as a cluster frame whether or not it has an explicit BoardCluster
- * shape yet there; other boards only show what's been explicitly placed via
- * "+ New cluster" / "+ Place cluster…" / "+ Add all clusters". Without this,
- * creating a category anywhere that isn't the board itself (the Workspace
- * codebook tab, Analysis > Clusters) leaves it with no shape on any board —
- * including the default one — so it silently never appears until someone
- * happens to place it.
+ * The ideal, non-overlapping layout for a whole set of categories —
+ * masonry-packed roots, each box sized to fit a grid of its own member
+ * codes/notes plus a grid of its nested children, a nested category placed
+ * genuinely inside its parent's box (below the parent's own member cards,
+ * indented). This is the core algorithm behind the default board's
+ * automatic layout (getVisibleBoardClusters below) *and* behind bulk-
+ * placing every cluster onto any board at once (addAllClustersToBoard) —
+ * factored out so both get the same visual quality instead of the bulk-add
+ * path reimplementing a cruder, disconnected-from-real-size version of its
+ * own (which is exactly what used to cause tall clusters to overlap the
+ * next row on a fixed grid that had no idea how tall they actually were).
+ *
+ * `explicitOverrides`, keyed by category id, pins some categories to an
+ * already-decided position/size instead of computing one — used by
+ * getVisibleBoardClusters for a category that already has a real, user-
+ * placed BoardCluster on the default board, and by addAllClustersToBoard
+ * for whatever's already explicitly on the target board (so newly bulk-
+ * added clusters lay out relative to reality, not a hypothetical fresh
+ * position for something that's already sitting somewhere else). Leave a
+ * category out of it (the default) to always compute its position fresh.
  *
  * Both the root categories and any category's own nested children are
- * packed into a multi-column grid (see packGridColumnCount above), each
- * sized to fit its own content — a plain fixed-size grid cell doesn't
- * work here since a category's height (and, now, width too) varies a lot
- * with descendant count, so each column instead tracks its own running
- * bottom edge independently, and every next sibling goes into whichever
- * column is currently shortest. That keeps the same overlap-proof
- * guarantee a single column always had — a column only ever grows from
- * its own real content, never a fixed cell size — while actually using
- * the available width instead of stacking everything into one tall
- * strip. A superordinate category's own box grows (both wider and
- * taller) to fit the grid of sub-clusters packed inside it, the same way
- * it already grew taller to fit a single stacked column before.
- * A nested cluster is placed *inside* its actual parent's box (below the
- * parent's own member cards, indented) — genuinely visually integrated,
- * not shown in some disconnected pooled area unrelated to which category
- * is really its parent, so nesting one cluster into another from the
- * Workspace tree (no board drag involved, hence no dropped position to
- * anchor on) looks the same as nesting it by dragging on the board
- * itself. Sizing is computed bottom-up (deepest first, via computeSize)
- * before anything is positioned top-down (via placeCategory), since a
- * parent can't know how much room it needs for its children's grid until
- * their own sizes are known — and, unlike a single column, a grid's
- * *width* requirement depends on its children too, not just height.
+ * packed into a multi-column grid (packGridColumnCount below), each sized
+ * to fit its own content — a plain fixed-size grid cell doesn't work here
+ * since a category's height (and width) varies a lot with descendant/
+ * member count, so each column instead tracks its own running bottom edge
+ * independently, and every next sibling goes into whichever column is
+ * currently shortest. That keeps a column-only-ever-grows-from-its-own-
+ * content overlap-proof guarantee, while actually using the available
+ * width instead of stacking everything into one tall strip. Sizing is
+ * computed bottom-up (deepest first, via computeSize) before anything is
+ * positioned top-down (via placeCategory), since a parent can't know how
+ * much room it needs for its children's grid until their own sizes are
+ * known — and a grid's *width* requirement depends on its children too,
+ * not just height.
  */
-export function getVisibleBoardClusters(
-  board: Pick<BoardRecord, 'id' | 'isDefault'>,
-  explicitClusters: BoardCluster[],
-  categories: CategoryRecord[]
-): BoardCluster[] {
-  if (!board.isDefault) return explicitClusters
-
-  const explicitByCategory = new Map(explicitClusters.map((c) => [c.categoryId, c]))
+export function computeCategoryLayout(
+  categories: CategoryRecord[],
+  explicitOverrides: Map<string, { x: number; y: number; width: number; height: number }> = new Map()
+): ComputedClusterLayout[] {
   const childrenByParentId = new Map<string, CategoryRecord[]>()
   for (const category of categories) {
     if (!category.parentCategoryId) continue
@@ -322,10 +303,7 @@ export function getVisibleBoardClusters(
   // cluster's own content area (see getVisibleBoardItems below) — a
   // segment/quote filed directly under a category always keeps its own
   // explicit position instead, so it doesn't factor into how much room a
-  // cluster's own content needs here. Packed into the same near-square
-  // grid as everything else in this file (packGridColumnCount), rather
-  // than one long column, so a cluster with many members reads as a
-  // block instead of a strip.
+  // cluster's own content needs here.
   function ownMemberGridSize(category: CategoryRecord): { width: number; height: number } {
     const memberCount = category.codeIds.length + category.noteIds.length
     if (memberCount === 0) return { width: 0, height: 0 }
@@ -347,21 +325,20 @@ export function getVisibleBoardClusters(
     return Math.max(DEFAULT_CLUSTER_WIDTH, ...childSizes.map((s) => s.width))
   }
 
-  // Bottom-up: the size a virtual category's box needs to fit its own
-  // member cards plus a grid of its nested children packed inside it. An
-  // explicit category keeps its own stored size unconditionally (never
-  // recomputed — the user, or an earlier auto-layout/resize, already
-  // decided it) — placeCategory below still sizes and packs *its*
-  // children within whatever room the frozen box actually gives them,
-  // which may not be enough; the fix is the same as always, resetting the
-  // board's layout. No cycle guard needed here: every category has
-  // exactly one parentCategoryId, so a cycle can only exist among
-  // categories that are *not* reachable from any real root in the first
-  // place (reparentCategory also prevents ever creating one) — this only
+  // Bottom-up: the size a category's box needs to fit its own member cards
+  // plus a grid of its nested children packed inside it. An overridden
+  // category keeps its own given size unconditionally (never recomputed —
+  // the caller already decided it) — placeCategory below still sizes and
+  // packs *its* children within whatever room that frozen box actually
+  // gives them, which may not be enough; the fix is the same as always,
+  // resetting the board's layout. No cycle guard needed here: every
+  // category has exactly one parentCategoryId, so a cycle can only exist
+  // among categories that are *not* reachable from any real root in the
+  // first place (reparentCategory prevents ever creating one) — this only
   // ever recurses along real parent->child edges starting from an actual
   // root.
   function computeSize(category: CategoryRecord): { width: number; height: number } {
-    const existing = explicitByCategory.get(category.id)
+    const existing = explicitOverrides.get(category.id)
     if (existing) return { width: existing.width, height: existing.height }
 
     const children = childrenByParentId.get(category.id) ?? []
@@ -398,7 +375,7 @@ export function getVisibleBoardClusters(
     }
   }
 
-  const result: BoardCluster[] = []
+  const result: ComputedClusterLayout[] = []
 
   // Top-down: place this category's box at (x, y) using the size already
   // determined by computeSize, then recursively place its nested children
@@ -406,23 +383,12 @@ export function getVisibleBoardClusters(
   // sizes, same greedy packing order, so the two can never disagree about
   // how much room was actually needed vs. how it's actually laid out.
   function placeCategory(category: CategoryRecord, x: number, y: number): { y: number; height: number } {
-    const existing = explicitByCategory.get(category.id)
+    const existing = explicitOverrides.get(category.id)
     const size = existing ?? computeSize(category)
     const actualX = existing ? existing.x : x
     const actualY = existing ? existing.y : y
 
-    result.push(
-      existing ?? {
-        id: `virtual:cluster:${category.id}`,
-        boardId: board.id,
-        categoryId: category.id,
-        x: actualX,
-        y: actualY,
-        width: size.width,
-        height: size.height,
-        createdAt: ''
-      }
-    )
+    result.push({ categoryId: category.id, x: actualX, y: actualY, width: size.width, height: size.height })
 
     const children = childrenByParentId.get(category.id) ?? []
     if (children.length > 0) {
@@ -466,6 +432,42 @@ export function getVisibleBoardClusters(
   }
 
   return result
+}
+
+/**
+ * The clusters a board should actually show — the cluster counterpart of
+ * getVisibleBoardItems below. On the default board, every category is
+ * visible as a cluster frame whether or not it has an explicit BoardCluster
+ * shape yet there (computeCategoryLayout above supplies the position/size
+ * for whichever ones don't); other boards only show what's been explicitly
+ * placed via "+ New cluster" / "+ Place cluster…" / "+ Add all clusters".
+ * Without this, creating a category anywhere that isn't the board itself
+ * (the Workspace codebook tab, Analysis > Clusters) leaves it with no shape
+ * on any board — including the default one — so it silently never appears
+ * until someone happens to place it.
+ */
+export function getVisibleBoardClusters(
+  board: Pick<BoardRecord, 'id' | 'isDefault'>,
+  explicitClusters: BoardCluster[],
+  categories: CategoryRecord[]
+): BoardCluster[] {
+  if (!board.isDefault) return explicitClusters
+
+  const explicitByCategory = new Map(explicitClusters.map((c) => [c.categoryId, c]))
+  const layout = computeCategoryLayout(categories, explicitByCategory)
+  return layout.map(
+    (l) =>
+      explicitByCategory.get(l.categoryId) ?? {
+        id: `virtual:cluster:${l.categoryId}`,
+        boardId: board.id,
+        categoryId: l.categoryId,
+        x: l.x,
+        y: l.y,
+        width: l.width,
+        height: l.height,
+        createdAt: ''
+      }
+  )
 }
 
 /**
@@ -636,58 +638,84 @@ export function addAllNotesToBoard(data: ProjectData, boardId: string): ProjectD
   return { ...data, boardItems: [...data.boardItems, ...newItems] }
 }
 
-/** Adds every category not already shaped on this board as a cluster (grid
- * layout), and ensures each of its current members also has a board item
+/**
+ * Adds every category not already shaped on this board as a cluster, and
+ * ensures each of its current member codes/notes also has a board item
  * here, positioned inside the new cluster — so the existing grouping
- * structure is visible immediately, not just the empty frames. */
+ * structure is visible immediately, not just the empty frames.
+ *
+ * Uses computeCategoryLayout — the same masonry-packed, nesting-aware,
+ * member-grid-sized algorithm the default board's own auto-layout runs —
+ * rather than a separate, simpler fixed grid: that older approach placed
+ * cluster boxes on a fixed row height with no idea how tall a cluster with
+ * many members actually was, so a tall cluster would visually overlap the
+ * next row's clusters (member cards from one appearing to sit inside a
+ * different cluster's frame, though the underlying category membership was
+ * always correct — a pure layout bug, not a data one). Whatever's already
+ * explicitly on this board is passed in as computeCategoryLayout's
+ * overrides, so newly-added clusters lay out relative to reality rather
+ * than a hypothetical fresh position for something already placed
+ * elsewhere on this same board.
+ *
+ * Segments (raw quotes filed directly under a category) are deliberately
+ * not auto-placed here, matching getVisibleBoardItems' own convention
+ * elsewhere — a segment always keeps its own explicit position rather than
+ * being auto-homed into a cluster's member grid.
+ */
 export function addAllClustersToBoard(data: ProjectData, boardId: string): ProjectData {
-  const existingCategoryIds = new Set(
-    data.boardClusters.filter((c) => c.boardId === boardId).map((c) => c.categoryId)
-  )
+  const existingOnBoard = data.boardClusters.filter((c) => c.boardId === boardId)
+  const existingCategoryIds = new Set(existingOnBoard.map((c) => c.categoryId))
   const categoriesToPlace = data.categories.filter((c) => !existingCategoryIds.has(c.id))
   if (categoriesToPlace.length === 0) return data
 
-  let next = data
-  const startIndex = data.boardClusters.filter((c) => c.boardId === boardId).length
+  const explicitOverrides = new Map(existingOnBoard.map((c) => [c.categoryId, c]))
+  const layoutByCategoryId = new Map(
+    computeCategoryLayout(data.categories, explicitOverrides).map((l) => [l.categoryId, l])
+  )
 
-  categoriesToPlace.forEach((category, categoryIndex) => {
-    const pos = computeClusterGridPosition(startIndex + categoryIndex)
-    const members: Array<{ refType: BoardItem['refType']; refId: string }> = [
-      ...category.codeIds.map((refId) => ({ refType: 'code' as const, refId })),
-      ...category.noteIds.map((refId) => ({ refType: 'note' as const, refId })),
-      ...category.segmentIds.map((refId) => ({ refType: 'segment' as const, refId }))
-    ]
-    // Sized to actually fit the member cards stacked inside it — a fixed
-    // DEFAULT_CLUSTER_HEIGHT with members packed every 20px (the previous
-    // approach) overlapped them the moment a cluster had more than a
-    // couple of members, since a rendered card is MEMBER_CARD_HEIGHT tall.
-    const size = computeClusterSize(members.length)
+  let next = data
+
+  for (const category of categoriesToPlace) {
+    const layout = layoutByCategoryId.get(category.id)
+    if (!layout) continue // every category gets an entry; defensive only
+
     const clusterResult = createClusterForCategory(next, {
       boardId,
       categoryId: category.id,
-      x: pos.x,
-      y: pos.y,
-      width: size.width,
-      height: size.height
+      x: layout.x,
+      y: layout.y,
+      width: layout.width,
+      height: layout.height
     })
     next = clusterResult.data
+
+    const members: Array<{ refType: 'code' | 'note'; refId: string }> = [
+      ...category.codeIds.map((refId) => ({ refType: 'code' as const, refId })),
+      ...category.noteIds.map((refId) => ({ refType: 'note' as const, refId }))
+    ]
+    // Same near-square grid ownMemberGridSize (computeCategoryLayout)
+    // already assumed when it sized this cluster's box, so cards never
+    // overflow it.
+    const columnCount = packGridColumnCount(members.length)
 
     members.forEach((member, memberIndex) => {
       const alreadyOnBoard = next.boardItems.some(
         (bi) => bi.boardId === boardId && bi.refType === member.refType && bi.refId === member.refId
       )
       if (alreadyOnBoard) return
+      const row = Math.floor(memberIndex / columnCount)
+      const column = memberIndex % columnCount
       const item: BoardItem = {
         id: nanoid(),
         boardId,
         refType: member.refType,
         refId: member.refId,
-        x: pos.x + CLUSTER_PADDING,
-        y: pos.y + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + memberIndex * CLUSTER_MEMBER_ROW_HEIGHT
+        x: layout.x + CLUSTER_PADDING + column * (MEMBER_CARD_WIDTH + MEMBER_CARD_GAP),
+        y: layout.y + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + row * CLUSTER_MEMBER_ROW_HEIGHT
       }
       next = { ...next, boardItems: [...next.boardItems, item] }
     })
-  })
+  }
 
   return next
 }

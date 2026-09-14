@@ -1770,3 +1770,27 @@ cards-free board) still holds for them.
 Verified: rendering-only change (a JSX reorder, one marker def duplicated into the new layer),
 no shared logic touched — full suite still green (332/332, unchanged), typecheck clean,
 production build clean, boot-tested (no errors, cleanly killed).
+
+### ClusterLink arrows clipped to cluster edges, not drawn straight through their interiors (2026-09-14)
+
+Suggested, not reported as broken: a `ClusterLink` (the labeled thematic-map relationship,
+distinct from the automatic structural nesting edges) still connected cluster *centers*, same
+as before any of the connector work this session — meaning its line, and the arrowhead at its
+end, visibly cut across the inside of both boxes rather than stopping at their edges. The
+structural nesting edges got exactly this fix earlier (`boxExitPoint`, clipping a line to where
+a ray from a box's own center toward the other box crosses that box's boundary); `ClusterLink`
+had simply never been updated to use it.
+
+Fixed by reusing `boxExitPoint` for `clusterLinkGeometries` too: both endpoints now clip to
+each cluster's own edge, and the label's midpoint is recomputed from the *clipped* segment
+(not the full center-to-center span), so it lands in the actual gap between two clusters
+instead of potentially inside one of them.
+
+(Also confirmed, not a bug: an arrow without a head is a `ClusterLink` explicitly marked
+un-directed — the link-creation UI defaults to a directed arrow but has its own toggle for a
+plain undirected line, since a named relationship like "contrasts with" doesn't always read
+one-way.)
+
+Verified: rendering-only change reusing an already-tested function; full suite still green
+(332/332, unchanged), typecheck clean, production build clean, boot-tested (no errors, cleanly
+killed).

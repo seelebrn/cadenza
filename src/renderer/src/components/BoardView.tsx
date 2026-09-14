@@ -741,11 +741,19 @@ function BoardView(): JSX.Element {
   }, [links, items, displayPositions])
 
   // Thematic-map cluster links visible on this board (both endpoints
-  // present here — see getVisibleClusterLinks) — geometry between cluster
-  // centers, same live-drag-following treatment as clusterLinkGeometries'
-  // item-link counterpart above: an endpoint currently being dragged as
-  // part of a cluster-move follows liveDelta so the line doesn't lag a
-  // frame behind the frame it's attached to.
+  // present here — see getVisibleClusterLinks) — clipped to each cluster's
+  // own edge via boxExitPoint (defined below; hoisted, so usable here)
+  // rather than drawn center-to-center, so the line and its arrowhead sit
+  // in the open gap between the two clusters instead of visibly cutting
+  // across their interiors — the same reasoning already applied to
+  // nestingEdgeGeometries just below. midX/midY (where the label sits) is
+  // the midpoint of that *clipped* segment, not the full center-to-center
+  // span, so a label between two large clusters lands in the actual gap
+  // between them rather than potentially inside one of the boxes. Same
+  // live-drag-following treatment as the item-link geometries above: an
+  // endpoint currently being dragged as part of a cluster-move follows
+  // liveDelta so the line doesn't lag a frame behind the frame it's
+  // attached to.
   const clusterLinkGeometries = useMemo(() => {
     if (!data) return []
     const visible = getVisibleClusterLinks(data.clusterLinks, clusters)
@@ -756,23 +764,40 @@ function BoardView(): JSX.Element {
         if (!a || !b) return null
         const aMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(a.id)
         const bMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(b.id)
-        const ax = a.x + (aMoving ? clusterMoveDelta.dx : 0) + a.width / 2
-        const ay = a.y + (aMoving ? clusterMoveDelta.dy : 0) + a.height / 2
-        const bx = b.x + (bMoving ? clusterMoveDelta.dx : 0) + b.width / 2
-        const by = b.y + (bMoving ? clusterMoveDelta.dy : 0) + b.height / 2
-        return { link, ax, ay, bx, by, midX: (ax + bx) / 2, midY: (ay + by) / 2 }
+        const aBox = {
+          x: a.x + (aMoving ? clusterMoveDelta.dx : 0),
+          y: a.y + (aMoving ? clusterMoveDelta.dy : 0),
+          width: a.width,
+          height: a.height
+        }
+        const bBox = {
+          x: b.x + (bMoving ? clusterMoveDelta.dx : 0),
+          y: b.y + (bMoving ? clusterMoveDelta.dy : 0),
+          width: b.width,
+          height: b.height
+        }
+        const aCenter = { x: aBox.x + aBox.width / 2, y: aBox.y + aBox.height / 2 }
+        const bCenter = { x: bBox.x + bBox.width / 2, y: bBox.y + bBox.height / 2 }
+        const start = boxExitPoint(aBox, bCenter.x, bCenter.y)
+        const end = boxExitPoint(bBox, aCenter.x, aCenter.y)
+        return {
+          link,
+          ax: start.x,
+          ay: start.y,
+          bx: end.x,
+          by: end.y,
+          midX: (start.x + end.x) / 2,
+          midY: (start.y + end.y) / 2
+        }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)
   }, [data, clusters, dragState, clusterMoveDelta])
 
   // Where a ray from `box`'s own center toward (towardX, towardY) crosses
-  // the box's boundary — used below to clip a structural nesting edge to
-  // each box's actual edge rather than drawing center-to-center. Without
-  // this, most of a long edge (e.g. a child laid out well to the side of a
-  // wide subtree, per computeTreeLayout's centering) would run *behind*
-  // whichever boxes its straight center-to-center path happens to cross,
-  // since the connector layer paints below the cards — clipping to the
-  // boundary keeps the whole visible line in the open gap between clusters.
+  // the box's boundary — used both above (clusterLinkGeometries) and below
+  // (nestingEdgeGeometries) to clip a connector to each box's actual edge
+  // rather than drawing it center-to-center, so a line/arrowhead never
+  // visibly cuts across a cluster's interior on its way to the other end.
   function boxExitPoint(
     box: { x: number; y: number; width: number; height: number },
     towardX: number,
@@ -1254,11 +1279,12 @@ function BoardView(): JSX.Element {
               ))}
               {/* Structural parent/child edges — drawn only where the layout
                   (Tree) has broken plain visual containment; see
-                  getStructuralNestingEdges. Solid, with an arrowhead, and
-                  clipped to each box's own edge (see boxExitPoint above) so
-                  it reads unambiguously as "still nested" — distinct from a
-                  labeled, user-authored ClusterLink, which keeps its own
-                  arrow style and connects box *centers*. */}
+                  getStructuralNestingEdges. Solid, with its own arrowhead
+                  style, clipped to each box's own edge (see boxExitPoint
+                  above) so it reads unambiguously as "still nested" —
+                  distinct from a labeled, user-authored ClusterLink
+                  (rendered separately, after the cards; see below), which
+                  keeps its own arrow style but the same edge-clipping. */}
               {nestingEdgeGeometries.map(({ key, ax, ay, bx, by }) => (
                 <line
                   key={key}

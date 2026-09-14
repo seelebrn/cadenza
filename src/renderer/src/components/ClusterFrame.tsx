@@ -209,7 +209,7 @@ function ClusterFrame({
       >
         <input
           type="color"
-          className="h-3 w-3 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
+          className="board-export-hide h-3 w-3 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
           value={category.color}
           onMouseDown={(e) => e.stopPropagation()}
           onChange={(e) => setCategoryColor(category.id, e.target.value)}
@@ -242,7 +242,11 @@ function ClusterFrame({
           </button>
         )}
         <button
-          className={canDelete ? 'flex-shrink-0 text-white/80 hover:text-white' : 'flex-shrink-0 text-white/40'}
+          className={
+            canDelete
+              ? 'board-export-hide flex-shrink-0 text-white/80 hover:text-white'
+              : 'board-export-hide flex-shrink-0 text-white/40'
+          }
           disabled={!canDelete}
           title={
             canDelete
@@ -260,7 +264,7 @@ function ClusterFrame({
         </button>
       </div>
       <div
-        className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
+        className="board-export-hide absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
         style={{ backgroundColor: category.color }}
         onMouseDown={(e) => {
           if (e.button !== 0) return // left button only, same reasoning as the header's move handler above

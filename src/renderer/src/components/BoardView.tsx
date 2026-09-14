@@ -427,7 +427,13 @@ function BoardView(): JSX.Element {
       snapshot.style.width = `${pageWidth}px`
       snapshot.style.height = `${pageHeight}px`
 
-      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${css}\nhtml,body{margin:0;padding:0;}</style></head><body>${snapshot.outerHTML}</body></html>`
+      // The live canvas is cloned as-is, interactive chrome included — a
+      // delete "×", a color-swatch input, a resize handle read as noise on
+      // an exported figure meant to be read/printed, not clicked. Elements
+      // carrying no informational content of their own (see each one's own
+      // board-export-hide class) are hidden here, in the *exported* HTML
+      // only — nothing about the live, interactive board changes.
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>${css}\nhtml,body{margin:0;padding:0;}\n.board-export-hide{display:none !important;}</style></head><body>${snapshot.outerHTML}</body></html>`
 
       const savedPath = await window.api.export.boardPdf(html, pageWidth, pageHeight, currentBoard.name)
       if (savedPath) window.alert(`Exported to ${savedPath}`)
@@ -1605,16 +1611,31 @@ function BoardView(): JSX.Element {
                     )}
                     {link.label && (
                       <>
+                        {/* Sized and weighted to hold up once the whole
+                            board (easily several thousand px across, once
+                            more than a couple of superclusters are on it)
+                            gets shrunk to fit one exported page — a small,
+                            thin, pale label reads fine at 100% on screen
+                            but disappears into little more than a smudge
+                            at that scale. */}
                         <rect
-                          x={midX - (link.label.length * 3.2 + 6)}
-                          y={midY - 9}
-                          width={link.label.length * 6.4 + 12}
-                          height={18}
+                          x={midX - (link.label.length * 3.8 + 7)}
+                          y={midY - 10}
+                          width={link.label.length * 7.6 + 14}
+                          height={20}
                           rx={4}
                           fill="white"
-                          stroke="#cbd5e1"
+                          stroke="#94a3b8"
+                          strokeWidth={1.25}
                         />
-                        <text x={midX} y={midY + 4} textAnchor="middle" fontSize={11} fill="#334155">
+                        <text
+                          x={midX}
+                          y={midY + 4.5}
+                          textAnchor="middle"
+                          fontSize={13}
+                          fontWeight={600}
+                          fill="#1e293b"
+                        >
                           {link.label}
                         </text>
                       </>
@@ -1634,7 +1655,7 @@ function BoardView(): JSX.Element {
               {linkGeometries.map(({ link, midX, midY }) => (
                 <button
                   key={link.id}
-                  className="pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-slate-400 bg-white text-[10px] leading-none text-slate-500 shadow hover:border-red-400 hover:text-red-500"
+                  className="board-export-hide pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-slate-400 bg-white text-[10px] leading-none text-slate-500 shadow hover:border-red-400 hover:text-red-500"
                   style={{ left: midX, top: midY }}
                   title="Unlink"
                   onClick={() => unlinkItemsAction(link.id)}
@@ -1649,7 +1670,7 @@ function BoardView(): JSX.Element {
               {clusterLinkGeometries.map(({ link, midX, midY }) => (
                 <button
                   key={link.id}
-                  className="pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 items-center justify-center rounded-full border border-slate-400 bg-white text-[10px] leading-none text-slate-500 shadow hover:border-red-400 hover:text-red-500"
+                  className="board-export-hide pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 items-center justify-center rounded-full border border-slate-400 bg-white text-[10px] leading-none text-slate-500 shadow hover:border-red-400 hover:text-red-500"
                   style={{ left: midX, top: midY + 12 }}
                   title="Remove this relationship"
                   onClick={() => deleteClusterLink(link.id)}

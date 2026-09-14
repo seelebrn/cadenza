@@ -99,7 +99,7 @@ function BoardItemCard({
           {description.sublabel}
         </span>
         <button
-          className="hidden flex-shrink-0 text-slate-300 hover:text-red-500 group-hover:block"
+          className="board-export-hide hidden flex-shrink-0 text-slate-300 hover:text-red-500 group-hover:block"
           title="Remove from board"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => {

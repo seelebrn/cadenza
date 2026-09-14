@@ -1871,3 +1871,30 @@ every curve) stays within non-negative bounds. One existing test relocated away 
 canvas origin (it was about curving in general, not the edge case) and a new dedicated
 regression test added reproducing the exact reported scenario. Full suite green (343/343),
 typecheck clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### PDF export was cloning interactive UI chrome into the figure (2026-09-14)
+
+Asked for a design/readability review of an exported thematic map, not a bug report — but one
+turned up on inspection: `handleExportBoardPdf` clones `canvasRef.current` verbatim
+(`cloneNode(true)`), which is the *live, interactive* canvas — every cluster's delete "×",
+its color-swatch `<input type="color">`, its resize handle, every `ClusterLink`'s own delete
+"×", and an item card's remove "×" all rode along into what's meant to be a clean, printable
+figure.
+
+Fixed by giving each of those a `board-export-hide` class and injecting a `.board-export-hide
+{ display: none !important; }` rule into the *exported* HTML only — the live, interactive
+board is completely unchanged; the rule only exists in the cloned snapshot handed to the PDF
+renderer.
+
+Also bumped the `ClusterLink` label's legibility while looking at the same figure: 11px,
+default-weight text in a thin pale-bordered pill reads fine at 100% on screen, but a board
+spanning several thousand px (ordinary once more than a couple of superclusters are on it)
+gets shrunk a lot to fit one exported page, and a label that small all but disappears at that
+scale. Bumped to 13px/semibold with a darker, slightly thicker rect border.
+
+Verified: every intended element confirmed to carry the new class (`grep` across the three
+components involved); the export path itself needs a live `BrowserWindow` to fully re-render
+(Electron's `printToPDF`, not reproducible standalone the way this session's other geometry
+fixes were), so this relied on the established boot-test + build discipline rather than a
+full re-export. Full suite green (343/343, unchanged — no shared logic touched), typecheck
+clean, production build clean, boot-tested (no errors, cleanly killed).

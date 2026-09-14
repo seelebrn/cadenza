@@ -1971,3 +1971,32 @@ reproduce the freeze interactively (no way to drive the Electron UI from this en
 so this is a strong-fit diagnosis based on the codebase's own prior documented instance of the
 exact same symptom, not a confirmed root-cause fix — worth the user confirming it's actually
 gone next time they delete something.
+
+User confirmed afterward: "Everything works perfectly now" — the freeze is gone.
+
+### Item/cluster delete on the default board looked broken, but only there (2026-09-14)
+
+Two follow-up reports, both on the Main (default) board: deleting a board item just reset it
+to its default position instead of removing it; the cluster frame's × looked hoverable but
+did nothing on click.
+
+Both trace to the same structural fact, already documented for clusters but not for items:
+the default board always auto-shows every code, note, and category (see
+`getVisibleBoardItems`/`getVisibleBoardClusters` in boardOps.ts) — there's no "not on this
+board" state to fall into there. `ClusterFrame` already accounted for this (`canDelete`,
+disabled with an explanatory tooltip on the default board), which is exactly what the user
+hit — not a regression, just a dim, easy-to-miss disabled state with a `cursor-not-allowed`
+missing, read as "unreachable." `BoardItemCard`'s own × had no such gating at all: on the
+default board, clicking it deletes the item's *explicit* BoardItem row, which the board
+then immediately re-derives as a virtual (auto-positioned) item again — from the outside,
+indistinguishable from "did nothing but reset the position," since the card never actually
+disappears.
+
+Fixed `BoardItemCard` to compute the same kind of `canDelete` (`!isDefaultBoard`) ClusterFrame
+already had, disabling the × with a matching explanatory tooltip there instead of letting the
+click silently do something other than what "Remove from board" claims. Added
+`cursor-not-allowed` to both components' disabled state so it reads as deliberately disabled
+rather than broken.
+
+Verified: typecheck clean, full suite green (359/359 — UI-only, nothing new to unit-test),
+production build clean, boot-tested.

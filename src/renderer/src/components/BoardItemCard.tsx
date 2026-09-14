@@ -41,6 +41,15 @@ function BoardItemCard({
   if (!description) return null
 
   const isVirtual = item.id.startsWith('virtual:')
+  // On the default board every code/note always shows (see
+  // getVisibleBoardItems) — even a materialized (non-virtual) item's "×"
+  // can only ever delete its own explicit position, which just falls back
+  // to the same auto-placed default spot rather than actually
+  // disappearing. Same reasoning as ClusterFrame's own canDelete: offer
+  // the action only where it can do what its label says, rather than
+  // letting a click silently do something other than what it claims.
+  const isDefaultBoard = data.boards.find((b) => b.id === boardId)?.isDefault ?? false
+  const canDelete = !isDefaultBoard
 
   return (
     <div
@@ -99,11 +108,20 @@ function BoardItemCard({
           {description.sublabel}
         </span>
         <button
-          className="board-export-hide hidden flex-shrink-0 text-slate-300 hover:text-red-500 group-hover:block"
-          title="Remove from board"
+          className={
+            canDelete
+              ? 'board-export-hide hidden flex-shrink-0 text-slate-300 hover:text-red-500 group-hover:block'
+              : 'board-export-hide hidden flex-shrink-0 cursor-not-allowed text-slate-200 group-hover:block'
+          }
+          disabled={!canDelete}
+          title={
+            canDelete
+              ? 'Remove from board'
+              : 'Every code and note always shows on the default board — use a different board to curate a subset'
+          }
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => {
-            if (!isVirtual) removeItemFromBoard(item.id)
+            if (canDelete && !isVirtual) removeItemFromBoard(item.id)
           }}
         >
           ×

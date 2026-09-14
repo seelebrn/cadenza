@@ -274,7 +274,7 @@ function ClusterFrame({
             className={
               canDelete
                 ? 'board-export-hide flex-shrink-0 text-white/80 hover:text-white'
-                : 'board-export-hide flex-shrink-0 text-white/40'
+                : 'board-export-hide flex-shrink-0 cursor-not-allowed text-white/40'
             }
             disabled={!canDelete}
             title={

@@ -1680,3 +1680,38 @@ tests added, including one reproducing the exact reported scenario (a superclust
 codes of its own, holding clusters that were left separated by Tree, restored to full
 containment by `computeNestedLayout`). Full suite green (332/332), typecheck clean, production
 build clean, boot-tested (no errors, cleanly killed).
+
+### Example project: codes were thematically unrelated to their quotes (2026-09-14)
+
+Reported with a concrete example: the segment "Il faut prendre des décisions cliniques très
+vite, souvent avec des informations incomplètes, et ça, ça m'a terrifié au début" — a nurse
+describing the terror of fast clinical decisions under incomplete information — was coded as
+"Plaisir de la relation de confiance" ("pleasure of the trust relationship"). Not a bug, but a
+real quality problem: the whole point of a bundled example is to model good coding practice for
+a first-time user, and a code with no real relationship to its quote actively works against
+that.
+
+Root cause: the generator (a one-off Node script, not part of the app) originally drew every
+code/note's verbatim anchor from a single flat pool of sentences extracted from the three
+transcripts in document order, assigned round-robin across all 195 codes regardless of which
+cluster they belonged to — a purely positional assignment with zero regard for content, so a
+sentence about clinical terror could land on any code in the codebook by coincidence of where
+it fell in the pool.
+
+Fixed by replacing the flat pool with an explicit, hand-picked quote list *per cluster* —
+roughly 3-10 real sentences per cluster, chosen by actually reading the transcripts for what
+each one discusses — with codes and notes *within* a cluster still cycling round-robin, but
+only ever drawing from that cluster's own on-theme pool (92 distinct quotes total across the 15
+clusters, verified to exist verbatim in the transcripts — the generator throws immediately on
+any quote that doesn't literally match, which caught one typo before it shipped). A quote
+naturally ends up carrying more than one code/note this way, which is realistic — a rich
+passage in a real interview commonly earns several codes — rather than a defect.
+
+Verified: the exact reported segment now codes as "Sentiment de dépassement" ("feeling
+overwhelmed"), a genuine fit, in its correct cluster ("Stress et charge mentale"); spot-checked
+a broader sample every 20th coding across the full set and confirmed every one lands on a
+thematically coherent cluster. Re-verified referential integrity (0 errors) and reopened
+through the app's own `readProjectFile`/`normalizeProjectData` path. No app source changed —
+this only touched the generator script and its output file
+(`resources/sample-projects/example.qdaproj`) — so the existing suite is unaffected: still
+332/332, typecheck clean.

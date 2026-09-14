@@ -52,6 +52,12 @@
     "files": [
       "out/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "resources/sample-projects",
+        "to": "sample-projects"
+      }
+    ],
     "win": {
       "target": [
         "nsis",

@@ -1,11 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { writeFile } from 'fs/promises'
+import { copyFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import type { ProjectData, SerializedAssets } from '../shared/types'
 import type { ReportExportFormat } from '../shared/api'
 import { importDocumentDialog } from './import'
 import { createEmptyProject, readProjectFile, writeProjectFile } from './projectFile'
-import { addRecentProject, getRecentProjects } from './recentProjects'
+import { addRecentProject, getRecentProjects, removeRecentProject } from './recentProjects'
 import { renderReportToDocx } from './export/docxRenderer'
 import { renderHtmlToPdf } from './export/pdfRenderer'
 import { renderReportToHtml } from '../shared/reportModel'
@@ -14,6 +14,15 @@ import type { Report } from '../shared/reportModel'
 const isDev = !app.isPackaged
 
 const PROJECT_FILE_FILTERS = [{ name: 'Cadenza Project', extensions: ['qdaproj'] }]
+
+/** Bundled sample project shown from ProjectHome's "Explore an example"
+ * button. Shipped via electron-builder's `extraResources` (see
+ * package.json), landing at <resources>/sample-projects in a packaged
+ * build; in dev mode the equivalent files live in the repo itself. */
+function sampleProjectPath(): string {
+  const base = isDev ? join(app.getAppPath(), 'resources') : process.resourcesPath
+  return join(base, 'sample-projects', 'example.qdaproj')
+}
 
 const REPORT_FILE_FILTERS: Record<ReportExportFormat, { name: string; extensions: string[] }[]> = {
   html: [{ name: 'HTML', extensions: ['html'] }],
@@ -104,6 +113,30 @@ function registerProjectHandlers(): void {
   )
 
   ipcMain.handle('project:get-recent', () => getRecentProjects())
+
+  ipcMain.handle('project:remove-recent', (_event, filePath: string) =>
+    removeRecentProject(filePath)
+  )
+
+  ipcMain.handle('project:open-example', async () => {
+    const result = await dialog.showSaveDialog({
+      title: 'Save the example project as…',
+      defaultPath: 'Cadenza — Example.qdaproj',
+      filters: PROJECT_FILE_FILTERS
+    })
+    if (result.canceled || !result.filePath) return null
+    // The bundled file is copied to a path the user owns and can edit
+    // freely, rather than opened in place — the shipped copy stays a
+    // pristine template for next time.
+    await copyFile(sampleProjectPath(), result.filePath)
+    const { data, assets } = await readProjectFile(result.filePath)
+    await addRecentProject({
+      filePath: result.filePath,
+      name: data.name,
+      lastOpenedAt: new Date().toISOString()
+    })
+    return { data, assets, filePath: result.filePath }
+  })
 }
 
 function registerDocumentHandlers(): void {

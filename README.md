@@ -1458,3 +1458,60 @@ Verified: no shared/pure logic touched (this is a UI-only change), typecheck cle
 still 323/323, production build clean, boot-tested (no errors, cleanly killed). The actual fix
 still needs the user's own hands-on confirmation that the freeze is gone, since the trigger
 couldn't be reproduced directly in this environment.
+
+### A bundled example project for first-time users (2026-09-14)
+
+Cadenza had zero onboarding: a first-time user landed on an empty project-creation screen with
+no sample data, no glossary, nothing to explore before committing to their own material — a
+real gap for the target audience of nursing/medical students who may never have used a QDA
+tool at all, alongside trained sociologists who have.
+
+Built a complete fictional example project rather than a toy: 3 interview transcripts (newly
+qualified nurses in different settings — general ward, emergency department, care home),
+coded into 195 codes and 105 analytic notes, organized into 15 clusters grouped under 3
+superclusters (`Vécu émotionnel et psychologique`, `Construction de l'identité
+professionnelle`, `Environnement et organisation du travail`). 3 of the 15 clusters are
+`kind: 'question'` categories, demonstrating the AQA workflow (a question as the category
+itself, with notes filed under it read as answers) alongside the theme-based clusters. Every
+supercluster and cluster carries a real `definition`. A second board, `Carte thématique`,
+lays out all 18 categories via the same `computeCategoryLayout` algorithm the app itself uses
+and adds 4 labeled `ClusterLink`s, so the thematic-map feature is visible in the example too,
+not just describable.
+
+Generated programmatically (a one-off Node script, not checked into the app) rather than
+hand-built line by line, given the scale: sentences from the three transcripts are extracted
+into a flat pool and assigned round-robin to codes/notes as verbatim-anchored segments, so
+every one of the 300 segments has a real, correctly-offset quote rather than a placeholder.
+Verified referentially before shipping it: every segment's `start:end` slice matches its
+stored `text`, every coding/category/note/board reference resolves, no code is orphaned or
+double-owned, zero errors — and separately opened through the app's own
+`readProjectFile`/`normalizeProjectData` path (not just re-parsed by the generator's own
+checker) to confirm it loads exactly as a real user's file would.
+
+Wired in as a genuine feature, not just a committed file: the project ships from
+`resources/sample-projects/example.qdaproj`, copied into the packaged app's `resources/`
+folder via electron-builder's `extraResources` (and read straight from the repo in dev mode).
+A new "Explore an example project" link on the project-creation screen triggers a save-dialog
+copy of the bundled file to a location the user owns — the shipped copy stays a clean
+template every time, edits go to the user's own copy — then opens it exactly like any other
+project. `.gitignore`'s blanket `*.qdaproj` rule got a `!resources/sample-projects/*.qdaproj`
+exception so the file is actually tracked.
+
+Verified: typecheck clean, full suite green (323/323, unchanged — this added no shared logic
+of its own beyond the generator script), production build clean, boot-tested (no errors,
+cleanly killed).
+
+### Removing a stale entry from Recent Projects (2026-09-14)
+
+Reported: after renaming the working folder (`Sandbox7` → `cadenza`), every entry in Recent
+Projects pointed at a path that no longer existed, and there was no way to clear them out
+short of manually editing the underlying JSON file.
+
+Added a `removeRecentProject` operation (filters the entry out of the same
+`recent-projects.json` the existing `add`/`get` operations already use, no new storage), a
+`project:remove-recent` IPC handler, and a small "✕" button that appears on hover next to each
+row in the Recent Projects list — clicking it drops just that entry, without touching (or
+needing) the file it pointed to.
+
+Verified: typecheck clean, full suite green (323/323), production build clean, boot-tested (no
+errors, cleanly killed).

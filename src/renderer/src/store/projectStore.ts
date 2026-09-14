@@ -93,9 +93,13 @@ interface ProjectState {
   future: ProjectData[]
 
   loadRecent: () => Promise<void>
+  removeRecent: (filePath: string) => Promise<void>
   newProject: (name: string) => Promise<void>
   openProject: () => Promise<void>
   openRecent: (filePath: string) => Promise<void>
+  /** Opens the bundled example project via a save-a-copy dialog (see
+   * ProjectHome's "Explore an example" button). No-op if the user cancels. */
+  openExample: () => Promise<void>
   save: () => Promise<void>
   saveAs: () => Promise<void>
   closeProject: () => void
@@ -318,6 +322,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ recent })
   },
 
+  removeRecent: async (filePath) => {
+    const recent = await window.api.project.removeRecent(filePath)
+    set({ recent })
+  },
+
   newProject: async (name) => {
     const data = await window.api.project.create(name)
     set({ data, assets: {}, filePath: null, isDirty: true, error: null, past: [], future: [] })
@@ -360,6 +369,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await get().loadRecent()
     } catch (e) {
       set({ error: `Could not open ${filePath}: ${(e as Error).message}` })
+    }
+  },
+
+  openExample: async () => {
+    try {
+      const result = await window.api.project.openExample()
+      if (!result) return
+      set({
+        data: result.data,
+        assets: result.assets,
+        filePath: result.filePath,
+        isDirty: false,
+        error: null,
+        past: [],
+        future: []
+      })
+      useWorkspaceUiStore.getState().resetForProjectSwitch()
+      await get().loadRecent()
+    } catch (e) {
+      set({ error: `Could not open the example project: ${(e as Error).message}` })
     }
   },
 

@@ -28,3 +28,12 @@ export async function addRecentProject(
   await writeFile(recentFilePath(), JSON.stringify(trimmed, null, 2), 'utf-8')
   return trimmed
 }
+
+/** Removes one entry from the recent-projects list (e.g. because the file
+ * moved or no longer opens) without touching the file it points to. */
+export async function removeRecentProject(filePath: string): Promise<RecentProjectEntry[]> {
+  const existing = await getRecentProjects()
+  const remaining = existing.filter((e) => e.filePath !== filePath)
+  await writeFile(recentFilePath(), JSON.stringify(remaining, null, 2), 'utf-8')
+  return remaining
+}

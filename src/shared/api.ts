@@ -27,6 +27,12 @@ export interface CadenzaApi {
     ) => Promise<SaveProjectResult | null>
     saveAs: (data: ProjectData, assets: SerializedAssets) => Promise<SaveProjectResult | null>
     getRecent: () => Promise<RecentProjectEntry[]>
+    /** Drops one entry from the recent-projects list (e.g. it moved or no
+     * longer opens) without touching the file it points to. */
+    removeRecent: (filePath: string) => Promise<RecentProjectEntry[]>
+    /** Shows a save dialog, copies the bundled example project to that path,
+     * and opens the copy. Null = user canceled. */
+    openExample: () => Promise<OpenProjectResult | null>
   }
   document: {
     /** Opens a native file picker (.docx/.odt/.txt) and imports the chosen file. Null = user canceled. */

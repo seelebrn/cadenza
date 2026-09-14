@@ -8,6 +8,8 @@ function ProjectHome(): JSX.Element {
   const newProject = useProjectStore((s) => s.newProject)
   const openProject = useProjectStore((s) => s.openProject)
   const openRecent = useProjectStore((s) => s.openRecent)
+  const removeRecent = useProjectStore((s) => s.removeRecent)
+  const openExample = useProjectStore((s) => s.openExample)
 
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col justify-center gap-8 px-8">
@@ -43,6 +45,17 @@ function ProjectHome(): JSX.Element {
         </button>
       </div>
 
+      <p className="-mt-4 text-sm text-slate-500">
+        New to Cadenza?{' '}
+        <button
+          className="font-medium text-slate-700 underline hover:text-slate-900"
+          onClick={() => void openExample()}
+        >
+          Explore an example project
+        </button>{' '}
+        — a small fictional study, already coded, notated, and organized into a thematic map.
+      </p>
+
       <div>
         <h2 className="mb-2 text-sm font-medium text-slate-500">Recent projects</h2>
         {recent.length === 0 ? (
@@ -50,13 +63,24 @@ function ProjectHome(): JSX.Element {
         ) : (
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {recent.map((entry) => (
-              <li key={entry.filePath}>
+              <li key={entry.filePath} className="group flex items-center">
                 <button
-                  className="flex w-full flex-col items-start px-4 py-3 text-left hover:bg-slate-50"
+                  className="flex flex-1 flex-col items-start px-4 py-3 text-left hover:bg-slate-50"
                   onClick={() => void openRecent(entry.filePath)}
                 >
                   <span className="text-sm font-medium">{entry.name}</span>
                   <span className="text-xs text-slate-400">{entry.filePath}</span>
+                </button>
+                <button
+                  className="mr-3 rounded px-2 py-1 text-xs text-slate-300 opacity-0 hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100"
+                  title="Remove from recent projects"
+                  aria-label={`Remove ${entry.name} from recent projects`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void removeRecent(entry.filePath)
+                  }}
+                >
+                  ✕
                 </button>
               </li>
             ))}

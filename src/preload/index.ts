@@ -8,7 +8,9 @@ const api: CadenzaApi = {
     openPath: (filePath) => ipcRenderer.invoke('project:open-path', filePath),
     save: (data, assets, filePath) => ipcRenderer.invoke('project:save', data, assets, filePath),
     saveAs: (data, assets) => ipcRenderer.invoke('project:save-as', data, assets),
-    getRecent: () => ipcRenderer.invoke('project:get-recent')
+    getRecent: () => ipcRenderer.invoke('project:get-recent'),
+    removeRecent: (filePath) => ipcRenderer.invoke('project:remove-recent', filePath),
+    openExample: () => ipcRenderer.invoke('project:open-example')
   },
   document: {
     importDialog: () => ipcRenderer.invoke('document:import-dialog')

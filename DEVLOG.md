@@ -1,0 +1,1895 @@
+# Cadenza — Development Log
+
+The full, narrated history of Cadenza's development: what was reported or asked,
+why each change happened, how bugs were root-caused, and how fixes were verified.
+One dated entry per round of work, oldest first.
+
+See `README.md` for the current feature overview and `CHANGELOG.md` for a short,
+per-release summary of what actually shipped in each version.
+
+### Methodology alignment (2026-09-07)
+
+Target methods: Kaufmann's comprehensive interview analysis, IPA, Reflexive Thematic Analysis,
+and AQA. At this point none ran end-to-end: Phase 5 (retrieval, real Category CRUD) closes the
+two most foundational shared gaps; cross-case comparison (Phase 7) matters a lot for IPA/RTA
+specifically; export/write-up (Phase 8) matters for all four eventually.
+
+### Board/Workspace unification (2026-09-07)
+
+The board and the Categories view used to be two separate grouping mechanisms (a
+`BoardCluster` with its own copied membership, "promoted" once into a `CategoryRecord`) that
+could drift out of sync. They're now the same data: a cluster is a category's spatial shape
+on a given board, with no separate membership or promotion step — see `boardOps.ts` and
+`categoryOps.ts`. Categories can also nest (`parentCategoryId`, mirroring `CodeNode.parentId`),
+surfaced on the board as dragging one cluster into another. Every code and note is visible
+on the one default board automatically; other boards stay opt-in/curated, with bulk
+"add all codes/notes/clusters" actions for quickly populating one.
+
+### Terminology + clusters inside the codebook tab (2026-09-07)
+
+User-facing text says "cluster" everywhere this concept appears (Board, Analysis,
+Workspace), rather than mixing "category"/"cluster"/"theme". The underlying type stays
+`CategoryRecord`/`categoryOps.ts` internally — renaming it would have collided with the
+already-distinct `BoardCluster` (a category's per-board position, not the category itself).
+
+Cluster creation/management lives in the Workspace's existing "Codes & items" tab, not a
+separate tab, and not even a separate section within it: clusters render as rows in the
+*same* tree as codes, not beside it. The "New" form's second option creates a cluster
+instead of a code; a cluster row sits as a sibling of root codes; and a code filed under a
+cluster (drag it onto the cluster row) renders as that cluster's child, with its own
+sub-codes nested beneath it exactly as they would at the root — a code has one place in the
+tree at a time, cluster membership or plain code-hierarchy position, and dragging it
+anywhere (another cluster, another code, back out to the root) moves it cleanly out of
+wherever it was. Clusters can nest into each other the same way. Since this tree reads and
+writes the exact same `data.categories`/`data.codes` the board does, there's no separate
+sync step — dragging in this tree *is* dragging on the board, just via a list instead of a
+canvas, and a change from either place is visible in the other immediately because it's one
+underlying record, not two views kept in agreement by a mechanism that could fall out of
+sync. Analysis still has its own Clusters tab for full membership management (notes,
+quotes, AQA question/theme kind) — same `ClustersView` component, same data. (The separate
+`NoteCategoryDef` concept — Note Descriptive/Linguistique/Conceptuelle classification tags
+— intentionally keeps the word "category": a genuinely different thing, a flat per-note tag,
+not a grouping cluster.)
+
+The Notes tab got the same treatment: clusters render as rows in the same tree as notes
+there too, with drag-and-drop to file a note under a cluster or pull it back out, and its
+own compact "+ New cluster" control. Add Code and Add Note stay separate creation forms —
+their fields don't overlap enough to earn a merged form — but the cluster tree itself is
+shared code (`renderer/src/lib/clusterTree.ts`), so the Codes tab, the Notes tab, the
+board, and Analysis are five views on one `data.categories`, never five copies.
+
+Fixed: a cluster created anywhere other than the board itself (the Workspace codebook
+tree, Analysis > Clusters) never showed up on any board, including the default one.
+Cause — a `BoardCluster` is a category's spatial *shape* on a given board, and nothing
+ever created one automatically; codes and notes get this for free via
+`getVisibleBoardItems`'s virtual fallback, but clusters had no equivalent. Added
+`getVisibleBoardClusters`, the cluster counterpart: on the default board, every category
+now shows as a cluster frame whether or not it has a stored shape yet, materializing into
+a real `BoardCluster` only once actually touched (moved, resized, or dropped into) — same
+pattern as items, including the same "virtual id has nothing to update" failure mode it
+had to avoid for moving/resizing/assigning members to a still-virtual cluster.
+
+Fixed: dragging a cluster frame on the board stopped carrying its member items along.
+Cause — a member that had only ever appeared as a "virtual" (not-yet-persisted) fallback
+card, e.g. because it was added to the cluster from the codebook tab rather than physically
+dragged into the frame, has no real `BoardItem` for `moveItem` to update, so the move
+silently no-op'd and the item snapped back to its grid fallback position afterward. Fixed by
+materializing every member into a real `BoardItem` the moment a cluster-drag starts, the
+same way a lone card already materializes on its own mousedown.
+
+Fixed: nesting a cluster into a superordinate one could make the nested cluster's own
+title bar, resize handle, and delete button unreachable. Cause — cluster frames paint in
+plain array order with no z-index, so whichever cluster happened to come later in
+`data.categories` rendered on top; if the superordinate one was created *after* the one
+nested into it, its larger frame painted over the nested cluster's controls entirely.
+Added `getCategoryDepth` (categoryOps.ts) and sort board clusters by depth before
+rendering — ancestors first, so a cluster's own frame always paints after, and on top of,
+everything it's nested inside, independent of creation order.
+
+### Default-board auto-layout rewrite (2026-09-07)
+
+Two requirements: on first opening the board for a new project, auto-placed (non-nested)
+clusters shouldn't overlap each other by accident, and a code/note that's a cluster member
+should render *inside* its cluster's box, not scattered in the separate flat item grid. The
+old layout put every category and every code/note through two completely independent
+fixed-size grids sharing the same origin, with no relationship between a cluster's box and
+its own members' positions — clusters could only avoid overlapping *each other* by
+coincidence of matching a fixed cell size, and a clustered item's auto position had nothing
+to do with where its cluster was drawn.
+
+Rewrote both `getVisibleBoardClusters` and `getVisibleBoardItems` (boardOps.ts) to compute
+clusters first, then items relative to them: root clusters stack in a single column, each
+sized by `computeClusterSize` to actually fit its own member count before the next one is
+placed below it — this guarantees no two auto-placed root clusters overlap regardless of
+size, unlike a fixed grid cell. Nested clusters get a second column, offset clear of the
+root one (true visual containment inside the literal parent frame wasn't attempted — only
+the paint-order fix above matters for those). A clustered code/note now stacks inside its
+resolved cluster box instead of the flat grid; anything with no cluster still uses the flat
+grid, shifted below the whole cluster layout so the two regions can't collide. A ref
+deliberately in more than one cluster (multi-membership) homes in the first one, since a
+board item has exactly one position unlike the Workspace tree.
+
+Extracted `MEMBER_CARD_WIDTH`/`MEMBER_CARD_HEIGHT` into boardOps.ts (BoardView.tsx now
+imports them instead of keeping its own separate copy) since the cluster layout needs to
+know a card's real size to stack members without overlapping — previously these lived only
+in the renderer, invisible to the shared layout logic. Also fixed `addAllClustersToBoard`'s
+member spacing, which packed members every 20px regardless of the ~64px card height it
+was actually placing (a latent overlap bug in that separate, opt-in bulk action, caught
+while touching the same sizing logic).
+
+### Code-info window (2026-09-07)
+
+Double-click a code anywhere it appears — a coded passage in the source text, its row in
+the Workspace codebook tree, or its card on the board — to open a window showing its name,
+how many times it's been used, and the verbatim of every instance, with a checkbox to show
+15 words of context on each side pulled from the source document. One `inspectedCodeId`
+flag (`workspaceUiStore.ts`) drives it regardless of which of the three triggered it, and
+the window (`CodeInfoModal.tsx`) is mounted once at the project-shell level so it survives
+switching between Workspace/Analysis/Board while open. The underlying data — usage count,
+verbatim, and context — comes from a new pure `getCodeUsageDetail` (retrieval.ts) and
+`getSurroundingWords` (text.ts), deliberately excluding a code's descendants (unlike
+`retrieveByCode`'s default) since this is "how many times was *this* code applied," not a
+rollup of its sub-codes. Repurposing double-click on the Workspace tree's code name (it
+used to start an inline rename) meant giving rename its own dedicated "✎" button instead,
+so the feature already there didn't just disappear.
+
+### Resize-on-nest (2026-09-07)
+
+Dragging a cluster into another to nest it now grows the destination to actually fit the
+one just dropped in, with a live dashed "ghost" preview shown on the destination while
+still dragging (matching what the drop will commit) rather than a silent resize with no
+warning. `computeAccommodatingSize` (boardOps.ts) only ever grows width/height — it never
+moves the destination's x/y — specifically so an already-nested sibling cluster (positioned
+in absolute canvas coordinates, not relative to its parent) can't be orphaned by the
+parent's origin shifting out from under it. The trade-off, made deliberately rather than
+by accident: a cluster dropped so it pokes out past the destination's *top* or *left* edge
+isn't fully accommodated — it'll visually overhang that edge instead of the destination
+growing to meet it. Growing toward the bottom/right (where a cluster's own resize handle
+already lives) covers the common case; solving the top/left case would mean reflowing the
+destination's other existing children too, which is a bigger feature than what was needed
+here.
+
+### Three more QoL items (2026-09-07)
+
+- **Escape closes the code-info window** — it only closed via the × or a backdrop click
+  before.
+- **"Fit view" on the board** — a toolbar button that zooms/scrolls so every cluster and
+  item currently on the board is visible at once, reusing the same zoom-anchor mechanism
+  wheel-zoom already uses (center the content's bounding-box midpoint in the viewport)
+  when the zoom level needs to change, or corrects scroll immediately when it doesn't.
+  Matters more now that the auto-layout can stack many clusters into a tall column.
+- **A filter box in the Codes & items tree** — type to narrow the tree down to just the
+  paths leading to a match (code name, cluster name, or a member code's name), scaling
+  better than scrolling once a project has dozens of codes/clusters. A node that matches
+  by its own name shows its *whole* subtree unfiltered ("found the neighborhood, show
+  everything under it") rather than pruning further within an already-matched branch —
+  deliberately not the same as a match reached only via a member code, which still filters
+  its own sub-clusters normally, tested explicitly to keep the two cases from blurring
+  together.
+
+### Undo/redo (2026-09-07)
+
+Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z (or Ctrl+Y) to redo, plus header buttons showing
+enabled/disabled state — up to 50 steps back, skipped while focus is inside a text field so
+native in-field undo still wins there. Almost every store action already funneled through
+one function, `updateProject`, so history-tracking lives entirely there rather than needing
+to touch each of the ~40 individual actions: `past`/`future` are stacks of whole
+`ProjectData` snapshots, cheap to keep many of despite sounding wasteful, since every op
+already builds its result via `{ ...data, changedField }` — structural sharing means an
+undo entry is mostly pointers to the same unchanged sub-trees, not a deep clone. Assets
+(imported files' raw bytes) deliberately sit outside the history — undoing a document
+import removes the document record but leaves its bytes in memory, a small accepted
+trade-off against tracking a second, much larger piece of state per edit.
+
+The harder problem: a single user gesture — dragging a whole linked group of board items,
+moving a cluster together with its nested subtree and re-evaluating membership, nesting one
+cluster into another *and* resizing the destination to fit — routes through several
+separate store-action calls, which without help would each become their own undo step (hit
+undo once after a five-item drag and only one item would move back). Added `withBatch(fn)`:
+calls inside `fn` still apply immediately (so a later call in the same gesture sees an
+earlier one's result), but only the state from *before* the batch's first change gets
+pushed to history, once, when the outermost batch ends — nested batches collapse into that
+same one entry. Wrapped it around the board's drag-drop commit and every other handler that
+fires more than one store action per user gesture (a code or note crossing from one cluster
+into another, creating a cluster while filing the active quote under it).
+
+Verified: typecheck and build clean. Unit-tested the exact history/batching algorithm
+(copied verbatim from projectStore.ts into a minimal set/get harness standing in for
+Zustand, since the logic itself has nothing Zustand- or React-specific about it) covering:
+sequential calls each getting their own step, a batch of three calls collapsing to one,
+nested batches still collapsing to one, a no-op update not polluting history, redo
+restoring what undo took back, a fresh edit after an undo correctly invalidating the redo
+stack, and the history cap trimming old entries without erroring once exhausted. Boot-
+tested a separate packaged instance (window title "Cadenza", no errors), then killed it and
+confirmed no electron process was left running.
+
+### Rename a project (2026-09-07)
+
+There was genuinely no way to do this — `ProjectData.name` was set once at creation
+(`newProject(name)`) and never touched again anywhere in the app. Added `renameProject`
+(a one-line `updateProject` call, same as `importDocument`'s inline pattern, since there's
+no real logic to a plain field assignment worth a dedicated shared/*.ts op function) and
+double-click-to-rename on the project title in the header, matching the exact rename UI
+already used for documents/codes/clusters elsewhere. Renaming only changes the in-app
+name shown in the header and used as the default filename the next time a Save-As dialog
+opens — it does not rename the `.qdaproj` file already on disk, the same way renaming a
+document doesn't touch its imported source file.
+
+### Nested clusters genuinely integrated on the board (2026-09-07)
+
+Nesting a cluster into another from the Workspace tree wasn't showing up "integrated" on
+the board — the earlier auto-layout put every nested cluster in a single disconnected
+second column, unrelated to which category was actually its parent, since there was no
+board-drag position to anchor a Workspace-driven nesting on. Rewrote `getVisibleBoardClusters`
+around genuine recursive containment: a nested cluster is now placed *inside* its real
+parent's box (below the parent's own member cards, indented, narrower by one padding's
+worth per level), computed bottom-up (a parent's height has to account for its full nested
+subtree, not just its own direct members) then placed top-down. Nesting from the Workspace
+now looks the same as nesting by dragging on the board itself, and `getVisibleBoardItems`
+needed no changes at all — it already treats `clusters` generically, so a member's fallback
+position now correctly lands inside its actual (properly nested) cluster's box for free.
+
+Caught and fixed a bug via the test suite before shipping: an initial width floor on
+nested boxes (so they wouldn't shrink to nothing at extreme depth) clamped a deeply-nested
+child back up to the same width as its equally-floored parent while still indenting it —
+meaning it overflowed the parent's right edge once both hit the floor. Removed the floor
+entirely; at any realistic nesting depth width stays comfortably positive, and the
+pathological case just renders a very narrow box instead of a crash. Also investigated a
+separately-reported "notes don't follow when a cluster moves, unlike codes" — traced the
+full move/materialize path end to end and found no code-level asymmetry between refType
+'code' and 'note' (three targeted runtime tests, including one specifically simulating a
+note that's a member of a *nested* cluster, all passed against the pre-fix code too). Most
+likely this was actually the nesting-integration issue above, now fixed, but flagged as
+unresolved rather than claimed fixed since no distinct bug could be pinned down.
+
+Verified: typecheck and build clean. Unit-tested the new layout extensively (bundled with
+esbuild, run with node, then deleted): a nested cluster fully contained inside its real
+parent, parent height growing to fit a nested child, three levels of transitive containment,
+sibling root clusters and sibling nested children both never overlapping, an explicit
+(user-placed) parent still correctly anchoring a virtual child, a later root cluster
+clearing a tall nested subtree, non-default boards still auto-showing nothing, a fully
+cyclic pair (unreachable from any root, given the single-parentCategoryId data model)
+safely producing zero clusters rather than hanging, and a legitimate 30-level-deep chain
+placing every level without an artificial cap truncating it. Boot-tested a separate
+packaged instance (window title "Cadenza", no errors), then killed it and confirmed no
+electron process was left running.
+
+### The board reflows when nesting changes in the Workspace (2026-09-07)
+
+The previous fix made a category's *first* board appearance correctly nest inside its
+parent, but once a cluster has an explicit shape (dragged/resized even once), its position
+stays frozen — `getVisibleBoardClusters` always trusts an explicit shape over recomputing
+it. So integrating one cluster into another from the Workspace tree still didn't visually
+move/resize anything on the board once either cluster had already been touched there — the
+common case for a project anyone's actually worked in.
+
+Added `resetDefaultBoardClusterLayout` (boardOps.ts): drops every explicit cluster shape
+on one board, so the whole thing recomputes fresh from `getVisibleBoardClusters`'s
+already-tested recursive layout. Deliberately resets *everything* on the board rather than
+trying to patch just the directly-affected clusters — an incremental patch has to either
+also reset every affected cluster's entire descendant subtree (to avoid orphaning children
+whose parent's box just moved out from under their untouched absolute position) or risk
+exactly that orphaning; a full reset sidesteps the problem by construction. Board *items*
+(individual code/note/quote cards) are untouched — an item with its own explicit position
+keeps it regardless of where its cluster's frame ends up, the same trade-off that already
+applies when a cluster is manually dragged on the board itself.
+
+New store action `reparentCategoryAndReflowBoard` wraps `reparentCategory` + (when the
+parent actually changed) this reset, both inside one `withBatch` so it's still a single
+undo step. `CodebookPanel.tsx` and `NotesPanel.tsx`'s Workspace-tree nesting/un-nesting now
+call this instead of plain `reparentCategory`; `BoardView.tsx`'s board-drag nesting keeps
+calling the plain action unchanged, since a board drag already positions everything itself
+(via the resize-on-nest feature) and running a full reset on top would discard the position
+the user just dragged the cluster to.
+
+Only ever resets the *default* board — other boards stay fully user-curated, since the
+whole point of a non-default board is manual, deliberate arrangement that shouldn't get
+silently rewritten by an unrelated Workspace edit.
+
+Verified: typecheck and build clean. Unit-tested `resetDefaultBoardClusterLayout` in
+isolation (only touches the target board) and the full end-to-end scenario (boardOps.ts +
+categoryOps.ts bundled with esbuild, run with node, then deleted): two explicit, far-apart
+sibling clusters; nest one into the other via the Workspace path (reparent + reset, no
+board drag) and confirm the child now sits inside the grown parent; pull it back out and
+confirm they're visually separated again. Boot-tested a separate packaged instance (window
+title "Cadenza", no errors), then killed it and confirmed no electron process was left
+running.
+
+### Two follow-up fixes to the reflow above (2026-09-07)
+
+Two remaining gaps, both fixed:
+
+- **Member items were left outside their (reflowed) cluster.** `resetDefaultBoardClusterLayout`
+  deliberately left board *items* untouched, matching the pre-existing rule that an item
+  with its own explicit position keeps it regardless of where its cluster's frame moves to
+  — reasonable for a manual board drag, wrong here: after a Workspace-driven reflow, *every*
+  already-materialized member (which in an actively-used project is most of them) stayed
+  frozen at its old absolute spot while its cluster's frame moved out from under it. Fixed
+  by having the reset also drop the explicit `BoardItem` position of any code/note/segment
+  that's a member of *some* category — same reasoning as the cluster shapes themselves,
+  just extended to their contents. Unclustered items are untouched, same as before.
+- **The nesting was positionally correct but not visually readable.** Not a data bug —
+  nested clusters did move together and stay logically linked. The problem was that every
+  cluster frame, root or nested, used the same near-transparent (~6% opacity) fill and only
+  a 10px margin, so a box drawn entirely inside another one just blended into it —
+  technically contained, not perceptibly so. Added `fillOpacityForDepth` (BoardView.tsx): a
+  root cluster keeps that original subtle fill, and each nesting level below it gets a
+  visibly more opaque fill of the same color, so a nested cluster reads as a distinct layer
+  sitting on top of its parent. Also doubled `CLUSTER_PADDING` (10px -> 20px) for a clearer
+  gap around a nested box's edges.
+
+Verified: typecheck and build clean. Unit-tested the item-position reset in isolation
+(a clustered item's explicit position on the target board is dropped, an unclustered
+item and an item on a *different* board are both left alone) and re-ran the nested-
+containment test suite against the larger padding to confirm nothing regressed (still
+contained at three levels, siblings still don't overlap, a 15-level chain still places
+everything without overflow). Boot-tested a separate packaged instance alongside an
+already-running dev session (window title "Cadenza", no renderer errors — only the
+disk-cache warnings expected from two Electron instances sharing a user-data dir), then
+killed only that instance's PIDs and confirmed the process list returned to exactly what
+was running beforehand.
+
+### A real test suite (2026-09-07)
+
+Every correctness guarantee established so far — nested cluster containment, undo/redo
+batching, item materialization on drag, auto-layout non-overlap, drag-and-drop membership
+transfer, the codebook search filter's ambiguous cases — had only ever been verified with a
+throwaway script (bundle with esbuild, run with node, delete). None of it was protected
+against a future regression. Added Vitest (pinned to a version compatible with this
+project's Vite 5, since latest Vitest requires Vite 6+) and ported the substance of that ad
+hoc testing into a permanent suite: `npm test` runs it, `npm run test:watch` for
+development. 232 tests across 11 files, all pure-logic (no React, no Electron, no DOM — a
+plain node environment), covering every `src/shared/*.ts` module with actual logic (the two
+without a test file, `api.ts` and `types.ts`, are pure type definitions with nothing to
+run).
+
+Also extracted the Workspace codebook tab's tree-building/search-filter logic
+(`buildTree`/`findTreeNode`/`pruneClaimed`/`filterTreeByQuery`/`filterClusterTree`/
+`treeHasMatch`) out of `CodebookPanel.tsx` into `renderer/src/lib/codebookTree.ts` —
+it was pure logic with real edge cases (a code that's both a subcode of another code AND a
+cluster member; a search match needing to keep its whole subtree rather than re-filtering
+within an already-matched branch) sitting inert inside a `.tsx` file where it couldn't be
+tested at all. Shrunk `CodebookPanel.tsx` by about 90 lines in the process.
+
+### Reflow was still missing for plain membership changes (2026-09-07)
+
+Symptom persisted: codes not landing inside their cluster's box after joining/splitting
+clusters, still logically linked but not positioned right.
+
+Cluster sizing itself was not the cause — `getVisibleBoardClusters`'s `computeHeight`
+already sizes a cluster dynamically from its real content (`Math.max(DEFAULT_CLUSTER_HEIGHT,
+ownContentHeight + childrenHeight)`). The real gap: the reflow-on-change wiring added in the
+two sections above only covered a *cluster's own nesting* changing
+(`reparentCategoryAndReflowBoard`, calling `reparentCategory`). It never covered a *code or
+note's cluster membership* changing — `addCodeToCategory`, `removeCodeFromCategory`,
+`addNoteToCategory`, `removeNoteFromCategory` all still went through unreflowed. So the
+moment any cluster had an explicit (materialized) shape, filing a code/note into or out of
+it from the Workspace tree or the Analysis > Clusters picker left the cluster's frame
+frozen at its old size — exactly the reported symptom, and the more common path to hitting
+it than re-nesting a whole cluster.
+
+Fixed by extending the same pattern to these four actions: a new `reflowDefaultBoard(get,
+boards)` module-level helper in `projectStore.ts` (factored out of what
+`reparentCategoryAndReflowBoard` was already doing inline) backs four new store actions —
+`addCodeToCategoryAndReflowBoard`, `removeCodeFromCategoryAndReflowBoard`,
+`addNoteToCategoryAndReflowBoard`, `removeNoteFromCategoryAndReflowBoard` — each the plain
+action plus a reflow, batched into one undo step. `CodebookPanel.tsx`, `NotesPanel.tsx`,
+and `ClustersView.tsx` (the Analysis > Clusters picker) now call these instead of the plain
+actions for every membership change that originates off the board. `BoardView.tsx`'s own
+drag-based membership changes (dragging a card into/out of a cluster) keep calling the
+plain actions unchanged, same reasoning as before — a board drag already positions
+everything itself, so resetting on top of it would discard the position just dragged to.
+Left `removeSegmentFromCategory` in `ClustersView.tsx` on the plain action deliberately: a
+raw quote/segment filed directly under a category has no auto-position-inside-its-cluster
+treatment at all yet (`getVisibleBoardItems` only homes codes/notes), so reflowing wouldn't
+currently do anything for it — a separate, smaller, acknowledged gap, out of scope here.
+
+Verified: typecheck and full test suite (233 tests, up from 232) clean, including a new
+`resetDefaultBoardClusterLayout` case that reproduces the exact bug in isolation — an
+already-explicit 60x60 cluster too small for a member row, a code added to it via
+`addCodeToCategory`, then reset + recompute, asserting the box actually grew and the new
+member's row lands inside it. Production build clean. Boot-tested a separate packaged
+instance alongside an already-running dev session (only the expected shared-user-data-
+dir disk-cache warnings, no real errors), then killed only that instance's PIDs and
+confirmed the process list returned to exactly what was running beforehand.
+
+### Low-risk cleanup: splitting BoardView.tsx and deduping the cluster rows (2026-09-07)
+
+`BoardView.tsx` had grown to 1136 lines, and `CodebookPanel.tsx`/`NotesPanel.tsx` each had
+their own ~95%-identical cluster-row component (`ClusterRow`/`NoteClusterRow`) — same
+header chrome, same drag/drop plumbing, differing only in which kind of member (code vs.
+note) they file. Pure extraction, no behavior change intended anywhere in this pass.
+
+`BoardView.tsx`'s `ClusterFrame` and `BoardItemCard` were already broken out into their
+own function components but still lived in the same file, sharing its module-level
+`DragState` type and `MIN_CLUSTER_WIDTH`/`MIN_CLUSTER_HEIGHT` constants by closure. Moved
+both into their own files (`ClusterFrame.tsx`, `BoardItemCard.tsx`), and factored what they
+needed out from under `BoardView.tsx` into two small shared modules rather than importing
+types back out of the file that imports them: `boardDragTypes.ts` (the `DragState`/
+`Position` types) and `boardLayoutConstants.ts` (the two resize-floor constants).
+`BoardView.tsx` dropped from 1136 to 872 lines.
+
+For the row duplication: added `ClusterRowShell.tsx`, owning everything that was
+byte-for-byte identical between the two rows (color swatch, inline rename, the "cluster"
+kind badge, the other-member-count badge, delete button, and all the drag/drop/nest
+plumbing including the reflow-triggering `reparentCategoryAndReflowBoard` call). It takes
+a `memberKind: 'code' | 'note'` (which also now correctly gates handleDrop — a latent gap
+in the original `ClusterRow` let it accept a drop without checking the payload was
+actually a code, since nothing in practice ever dragged a note over it; `NoteClusterRow`
+already had the equivalent `note` check, so the shared shell just applies it uniformly
+now), `onAddMember`/`onRemoveMember`, an `otherMemberCount`/tooltip pair, and a
+`children` slot for whatever the two callers render below the header — which stayed with
+each of them, since a codebook row's members are a hierarchical, search-filtered code
+subtree and a notes row's are a flat, document/category-filtered note list: different
+enough in shape that folding that into the shared shell wasn't worth it.
+`CodebookPanel.tsx`'s `ClusterRow` and `NotesPanel.tsx`'s `NoteClusterRow` are now thin
+wrappers that compute their own member list and pass it to `ClusterRowShell` as children.
+649 -> 549 lines and 741 -> 638 lines respectively, with the ~100 lines of duplication
+between them now living once, in the 179-line shell.
+
+Verified: typecheck clean, full test suite still 233/233 (nothing here touches
+`src/shared/*.ts`, so no test changes were needed or expected), production build clean.
+Boot-tested a separate packaged instance alongside an already-running dev session (only
+the expected disk-cache warnings), then killed only that instance's PIDs and confirmed the
+process list returned to exactly what was running beforehand.
+
+### Board ease-of-use: a stuck-drag bug and highlighting cluster nesting (2026-09-08)
+
+Bug: clusters sometimes wouldn't move — cursor turned into a "no-drop" forbidden icon, and
+the box snapped back to where it started. Hard to reproduce on demand, so this is a
+diagnosis-and-fix rather than a confirmed root cause. `ClusterFrame`'s draggable header
+(and `BoardItemCard`'s card) move via a custom mousedown/mousemove/mouseup implementation,
+not native HTML5 drag-and-drop — but the header's content is plain text (the cluster name,
+an emoji), and neither element had `select-none`. A mousedown-then-move gesture that lands
+on that text can be interpreted by the browser as "drag this selected text" instead of (or
+racing) the app's own drag: the OS shows exactly the reported forbidden cursor, and —
+worse — a native drag swallows the `mouseup` event the app's `window` listener is waiting
+for, so the move never commits. Since nothing ever actually changed in the store, the
+cluster's next render draws it right back at its stored position: the reported "reverts to
+its original position." Matches the "hard to reproduce" symptom too, since it depends on
+exactly where the mousedown lands relative to the text, not on any particular cluster or
+action. Fixed by adding `select-none` to both `ClusterFrame`'s frame/header and
+`BoardItemCard`, plus `onDragStart={(e) => e.preventDefault()}` on both as a backstop for
+a selection that already existed before the mousedown.
+
+Second: a visual highlight for board nesting, in both directions.
+
+- **Dragging an existing cluster onto another** already showed a dashed ghost of how much
+  the destination would need to grow, but that ghost stays hidden whenever the destination
+  is already roomy enough — leaving no signal at all that a drop right there would nest
+  into it. Split the old `resizePreview` computation into `dragNestTarget` (the target
+  cluster, always known while hovering over one) and an optional `growSize` (only when a
+  ghost is actually useful), and added `isNestTarget` to `ClusterFrame`: a solid highlight
+  ring in the destination's own color, plus a small "Drop to nest here" badge.
+- **Resizing a cluster to enclose other existing ones** — a "draw a box around them"
+  motion — previously did nothing beyond the resize itself; there was no way to
+  batch-nest several existing clusters at once, only one at a time via the drag-to-nest
+  above. Added `findClustersEnclosedBy` (boardOps.ts): the clusters fully contained by a
+  given box, excluding a given set of category ids (the resizing cluster itself, and
+  anything already nested under it — already correct, not newly enclosed). Wired into
+  `BoardView.tsx` two ways: a live `resizeEnclosedCategoryIds` set drives a matching
+  highlight (a blue ring + "Will become a child" badge, a fixed accent independent of
+  either cluster's own color so it reads consistently) on every cluster currently inside
+  the growing frame, and `handleMouseUp`'s resize branch re-runs the identical containment
+  check against the final size and calls `reparentCategory` on each one — so what got
+  highlighted during the drag is exactly what ends up nested, never a surprise either way.
+
+Verified: typecheck clean, full test suite 236/236 (three new `findClustersEnclosedBy`
+cases: only fully-contained clusters count, not merely-overlapping ones; excluded
+category ids are still excluded even if geometrically enclosed; an exact size match
+counts as contained). Production build clean. Boot-tested a separate packaged instance
+alongside an already-running dev session, confirmed no errors beyond the expected
+disk-cache warnings, killed only that instance and confirmed the process list returned to
+its prior state. The stuck-drag fix still needs hands-on confirmation next time the
+underlying trigger recurs, since it couldn't be reproduced directly.
+
+### Phase 7: cross-case comparison (2026-09-08)
+
+The plan called for a Kaufmann-style contrastive view across interviews and an IPA-style
+Group Experiential Themes (GECT) table (themes × cases) — flagged as "an upgrade of Phase
+5's retrieval view into a matrix." Implemented as a new Analysis > Compare cases tab.
+
+No separate case/participant concept exists in the data model, so a "case" is simply one
+document — matches how documents are already used everywhere else (one transcript per
+import). Added `comparison.ts` (`getCases`: every document as a case, oldest-imported first;
+`getCodeCaseMatrix`: count of coded passages per code per case, reusing the already-tested
+`retrieveByCode` rather than re-deriving the same segment/coding/document joins a second
+time) plus a new component, `ComparisonView.tsx`, with two linked sub-views:
+
+- **Themes × cases**: a table, codes down the rows (indented by depth, same list source as
+  the plain retrieval view) and cases across the columns, each cell the count of coded
+  passages — the GECT table, using the existing code hierarchy as the theming structure (a
+  parent code as a superordinate theme, its children as sub-themes) rather than inventing a
+  second, category-based rollup alongside it. A "Roll up sub-codes" toggle matches the
+  plain retrieval view's equivalent option. Clicking a non-zero cell jumps straight to the
+  contrast view below, already filtered to that code.
+- **Contrast one code**: pick a code, see every case's instances of it in its own
+  side-by-side column, including a case with zero instances (shown as "No instances in this
+  case" rather than omitted) — this is the Kaufmann-style reading, where whether a case
+  addresses something at all is as analytically meaningful as what it says when it does.
+  Each quote has a "Go to passage" link, reusing the same navigate-to-source-text pattern
+  already used by the plain retrieval view.
+
+Verified: typecheck clean, full suite 242/242 (six new `comparison.ts` tests: cases sorted
+by import date, per-code-per-case counts, descendant roll-up on/off, zero-count cells
+omitted rather than carried as explicit zeros, multiple codes counted independently).
+Production build clean. Boot-tested a fresh packaged instance (no other instance running,
+so no shared-user-data-dir warnings either — a clean launch with no errors at all), then
+killed it and confirmed no electron process was left running.
+
+### A large synthetic test project, and what using it surfaced (2026-09-08)
+
+Generated `LargeProjectTest.qdaproj` (untracked, matches the existing `*.qdaproj` gitignore
+rule) to usability-test a big hierarchy: 500 codes, 30 clusters, 5 superordinate clusters,
+nothing else — deliberately minimal so opening the Board immediately exercises the
+auto-layout at that scale. Verified end-to-end through the app's own logic before use
+(unzip -> parse -> `normalizeProjectData` -> `getVisibleBoardClusters`/
+`getVisibleBoardItems`).
+
+Using it surfaced two real issues, plus two follow-on improvements once the grid idea
+proved out.
+
+**Ctrl/Cmd+wheel zoom silently did nothing on a freshly opened project.** The wheel
+listener effect had an empty dependency array, attached once to
+`scrollContainerRef.current` on mount. But the scrollable container only exists once
+`currentBoard` resolves to a real board — on a fresh mount `currentBoard` is still `null`
+on the very first render (the effect that fixes a stale/empty `selectedBoardId` hasn't run
+yet), so the listener attached to a still-`null` ref and never got a second chance once the
+container actually appeared. Not specific to a large project at all — reproducible on
+*any* fresh Board-tab mount — just more consistently hit while opening a brand new project
+for the first time. Fixed by depending on `currentBoard` instead of `[]`, so the effect
+re-attaches once the container exists.
+
+**Clusters defaulted to a single column.** `getVisibleBoardClusters`'s root-level
+auto-layout stacked every root category in one column, sized to content — safe (no
+fixed-size grid cell could work when height varies this much with descendant count) but,
+at 5 superordinates each containing a stack of sub-clusters, produced an extremely tall,
+narrow board. Rewrote it as a multi-column masonry pack: `packGridColumnCount` picks a
+near-square column count (`ceil(sqrt(n))`, capped at 6) from however many siblings there
+are, and each next root goes into whichever column currently has the least height used so
+far — same overlap-proof guarantee a single column always had (a column only ever grows
+from its own real content), just spread across the board's width instead of stacked into
+one strip.
+
+Two follow-on improvements, extending the same idea further:
+
+- **Sub-clusters inside a superordinate, gridded too** — not just the root level. This
+  needed more than reusing the column-packing loop: since a grid's *width* need depends on
+  its children (unlike a single column, which just took whatever width its parent handed
+  down), sizing had to become genuinely bottom-up. Replaced the old top-down-width/
+  bottom-up-height split (`computeHeight` + `placeCategory`) with `computeSize` (bottom-up,
+  determines a virtual category's width *and* height from a grid of its own children) +
+  `placeCategory` (top-down, now just places using sizes `computeSize` already settled,
+  re-deriving the identical grid assignment deterministically so the two can never
+  disagree). An explicit (frozen) category's own size is still never recomputed, same rule
+  as always — its children still get gridded, just within whatever room the frozen box
+  actually gives them.
+- **Codes/notes inside a cluster, gridded too** — the member cards themselves, not just
+  the cluster shapes containing them. Added `ownMemberGridSize` (only codes/notes factor
+  in; a segment/quote filed directly under a category always keeps its own explicit
+  position, unaffected either way) using the same `packGridColumnCount` heuristic, folded
+  into both `computeSize` (a cluster's own box now widens/shortens to fit a grid of its
+  member cards, not just a grid of its nested children) and `getVisibleBoardItems`'s
+  per-cluster positioning (so cards actually land in the grid the box was sized for, never
+  overflowing it).
+
+One heuristic (`packGridColumnCount`) now drives every grid-packing decision in this file —
+root clusters on the board, a cluster's nested children, and a cluster's own member
+cards — so there's one column-count rule to reason about instead of three.
+
+**"Reset placement" button.** With sizing now driven by three different grids at three
+different levels, a fast way to discard whatever's been dragged/resized and see the
+current auto-layout fresh became worth having on its own, not just as a side effect of a
+membership change. Added `resetBoardLayout` (projectStore.ts) — a thin wrapper around the
+already-existing `resetDefaultBoardClusterLayout`, guarded to only ever act on the actual
+default board (that op doesn't check `board.isDefault` itself; running it against a
+non-default board — which has no auto-layout to fall back to — would just empty it out).
+The button only renders when the current board *is* the default one, and confirms first
+("Any positions you've dragged or resized here will be lost — the underlying codes, notes,
+and clusters themselves are not affected") since it's a real, if easily-avoidable, loss of
+manual arrangement.
+
+Verified: typecheck clean, full suite 250/250 (13 new tests: multi-column root packing
+including a 40-cluster no-overlap sweep and a 100-cluster column cap; a superordinate's
+children gridded and its box widening to fit them; member cards gridded inside a cluster,
+still fully contained, still non-overlapping; a 12-member cluster ending up wider and much
+shorter than 12 stacked rows would need). Re-verified against the actual
+`LargeProjectTest.qdaproj` after each change (not just synthetic fixtures) — confirmed
+sub-clusters actually grid inside their superordinates with zero overlap, and the whole
+500-code/35-cluster layout still computes in ~1ms. Production build clean. Boot-tested a
+fresh packaged instance after every change in this batch, no errors beyond (when another
+instance happened to be running) the expected shared-user-data-dir cache warnings.
+
+### Phase 8: exporters (2026-09-08)
+
+Phase 8 scope, revised from the original plan's one-liner (Excel-import-as-cases +
+`.xlsx` reports): a board PDF export, a codebook export, a notes export showing which
+clusters they're filed under, a codebook+verbatim variant, a notes+clusters+verbatim
+variant, a configurable words-of-context option, and doc/docx/odt/html/pdf formats.
+
+Format choice: legacy binary `.doc` has no viable JS writer and nothing modern needs it
+(dropped, `.docx` already covers "Word doc"); native `.odt` has no mature JS library
+either, and OpenOffice/LibreOffice already open `.docx` natively (dropped, matching the
+original plan's own reasoning for deferring it); landed on **docx/html/pdf**. Also added: a
+code-frequency table, and exporting the cross-case comparison (Phase 7) matrix.
+
+Built as one flexible report rather than four fixed report types, since the four listed
+variants (codebook / codebook+verbatim / notes+clusters / notes+clusters+verbatim) are all
+just checkbox combinations of the same underlying content:
+
+- **`reportModel.ts`** (shared): a tiny format-agnostic document model — headings,
+  paragraphs (with `quote`/`meta` styling), tables — plus `renderReportToHtml`. Every
+  format renders the *same* Report, so the actual content logic is written once.
+- **`reportBuilders.ts`** (renderer/src/lib, since it needs `buildClusterTree` from that
+  same directory): `buildProjectReport(data, options)` assembles one Report from whichever
+  sections are checked — codes (with hierarchy + definitions), notes (walked through the
+  cluster tree, a question-cluster labeled with curly quotes matching the app's existing
+  AQA convention, plus an "Unfiled notes" section), cross-case comparison (the codes ×
+  cases matrix), each optionally with verbatim quotes and N words of surrounding context
+  (reusing `getSurroundingWords`, the same mechanism the code-info window already used —
+  configurable in the dialog, defaulting to 15), plus an independent code-frequency table
+  toggle.
+- **`docxRenderer.ts`** (main process, via the new `docx` package dependency) and the
+  PDF path — a real PDF-generation library turned out to be unnecessary: Electron's own
+  `webContents.printToPDF` renders a hidden window's HTML straight to PDF, so `pdfRenderer.ts`
+  is just "write the HTML to a temp file, load it in a `show:false` window, print it."
+  A custom `pageSize` (in inches, converted from the content's actual CSS pixel dimensions)
+  produces one page sized exactly to fit — used for the board export below; report PDFs
+  print at a normal A4 page and paginate naturally.
+- New **Export** tab (`ExportView.tsx`) with the checkboxes described above and a
+  format picker, wired through `window.api.export.report` (shared/api.ts, preload,
+  main/index.ts IPC handlers).
+
+**Board PDF** works differently, and lives in `BoardView.tsx` itself rather than the
+Export tab: rather than reconstructing the board's visual layout as a second HTML
+generator (risking it drifting from what the board actually looks like), it clones the
+*live* canvas DOM directly (`canvasRef`), forces its zoom transform back to `none` and
+resizes it to the board's actual full content bounding box (not the current viewport —
+always the whole board regardless of what zoom the user happens to be at), and copies the
+app's own already-parsed stylesheets (`document.styleSheets`) inline so the exported page
+looks the same without needing to locate the compiled CSS bundle on disk. Sent over IPC as
+one HTML string to `window.api.export.boardPdf`, which prints it at a custom page size
+matching that bounding box — one page, the whole board, actual size.
+
+One real bug caught along the way: `pdfRenderer.ts`'s hidden `BrowserWindow` was first
+written with `webPreferences.offscreen: true`, which switches Chromium to a separate
+off-screen-rendering pipeline (meant for continuously capturing frames, e.g. video) —
+manual testing hit real GPU-state errors from it. Removed; a plain `show: false` window
+still renders normally through the standard compositor without ever showing an OS window,
+and is what `printToPDF` is actually meant to be used against.
+
+Also added `NoteInfoModal.tsx` — the code-info window (double-click a code anywhere to see
+its usage + verbatim instances) had no equivalent for notes. Wired to the same double-click
+convention (a note card in the Workspace notes tree, or a note card on the board) via a new
+`inspectedNoteId` UI-store flag mirroring `inspectedCodeId`. Simpler than the code version —
+a note has at most one verbatim quote (the segment it's attached to, if any), not a list of
+instances — and adds what a note card's inline preview doesn't have room for: its full tag
+list and which cluster(s) it's filed under, plus the same word-of-context toggle.
+
+Verified: typecheck clean, full suite 269/269 (13 new `reportBuilders.ts` tests covering
+every section and combination; 4 new `reportModel.ts` HTML-rendering tests including HTML-
+escaping of user content; 2 new `docxRenderer.ts` tests, actually checking the produced
+buffer starts with the ZIP magic bytes a real `.docx` always has — genuine verification,
+not just "didn't throw"). `pdfRenderer.ts` itself isn't unit-tested (needs a real
+`BrowserWindow`, not just Node) — a standalone Electron-script smoke test of the
+`printToPDF` call outside the full app is what caught the `offscreen` bug above, though a
+fully conclusive independent re-run of that same standalone script proved unreliable in
+this sandboxed environment afterward. End-to-end verified instead against the real
+`LargeProjectTest.qdaproj`: a report export (`Large Test Project (500 codes).html`,
+correctly walking the notes/cluster hierarchy, including three sub-clusters dragged into
+root position during earlier board testing, each rendered as their own top-level section
+rather than nested) and a board PDF export (`Main board.pdf`, valid `%PDF-1.4`, ~2.3MB for
+the full 500-code board) both produced valid, substantial files. Production build clean
+throughout.
+
+### Board info window: right-click instead of double-click (2026-09-08)
+
+Surfaced while using the multi-case test project's board: with two code/note cards sitting
+close together (common with the auto-grid layout, or a tightly-packed cluster),
+double-clicking to open the info window would sometimes link the two cards together
+instead. Root cause: a card's `onMouseDown` always starts a drag-and-possibly-snap gesture,
+and `findSnapTarget` has no minimum drag distance — so the *first* click of an attempted
+double-click can itself register as a completed "drag" landing within snap range of the
+neighboring card, linking them, before the second click (which was supposed to complete the
+double-click) ever arrives. Double-click and the drag/snap gesture both listen on the same
+`onMouseDown`, so they can't be told apart once cards are close enough.
+
+Right-click doesn't go through `onMouseDown`/drag/snap at all, so it can't conflict with
+it by construction — swapped `BoardItemCard.tsx`'s trigger from `onDoubleClick` to
+`onContextMenu` (with `preventDefault()` to suppress the native OS context menu). Only the
+board's trigger changed; double-click still opens the info window from the source text and
+the Workspace codebook/notes trees, where there's no drag gesture on the same element to
+conflict with. Updated the board's own on-screen hint text and the relevant code comments
+(`CodeInfoModal.tsx`, `NoteInfoModal.tsx`, `workspaceUiStore.ts`) so both now correctly
+describe a mixed double-click/right-click convention instead of double-click everywhere.
+
+Verified: typecheck clean, full suite still 269/269 (no shared/pure logic touched — this
+is purely a DOM event binding change), production build clean, boot-tested cleanly.
+
+### Right-click was still leaking into the left-click drag/link/move (2026-09-08)
+
+The right-click fix above moved the info-window *trigger* to `onContextMenu`, but left one
+gap standing: `onMouseDown` fires for every mouse button by default, not just the left one
+— so a right-click was *still* starting the same drag-and-possibly-snap gesture underneath
+it. Moving the info window off `onDoubleClick` stopped a double-click's first click from
+linking two cards; it did nothing to stop a bare right-click from doing the same thing,
+since that mousedown was never checking which button was pressed either.
+
+Added `if (e.button !== 0) return` to every mousedown handler that starts a board drag —
+`BoardItemCard.tsx`'s item drag, and `ClusterFrame.tsx`'s both cluster-move (the header) and
+cluster-resize (the corner handle). Only left-button mousedowns start a drag/link/move now;
+a right-click reaches only `onContextMenu`. Also corrected `BoardItemCard.tsx`'s own comment,
+which had claimed right-click "never enters that mousedown/drag/snap path at all" — true
+only once this second fix was in, not before it.
+
+Verified: typecheck clean, full suite still 269/269 (again a pure DOM event binding change),
+production build clean, boot-tested cleanly.
+
+### Dock/undock the Workspace right sidebar (2026-09-08)
+
+Two possible implementations considered: a floating panel within the same OS window (no
+new plumbing — same React tree, same store), or a genuinely separate `BrowserWindow`
+(needed for true multi-monitor placement, but requires syncing project state across two
+renderer processes — undo/redo, every edit, window lifecycle, all of it). The floating-panel
+version was built as the right first step, since "more space to think" doesn't itself need
+a second monitor — a true separate window stays a bigger, separate undertaking if
+multi-monitor turns out to matter later.
+
+`RightSidebar.tsx` now renders one of two ways depending on `sidebarDocked`
+(`workspaceUiStore.ts`, persisted to localStorage alongside the existing `sidebarWidth`
+preference — a window-layout choice, not project data): docked is the unchanged fixed
+column; undocked is a `position: fixed` panel with its own draggable title bar and a
+resize handle, positioned/sized from `sidebarFloatPosition`/`sidebarFloatSize` (also
+persisted). Undocking needed no changes anywhere else — a `position: fixed` element
+contributes no space to its flex container, so the reader/board simply reclaims the width
+the sidebar used to occupy the moment it floats, with zero coordination required from
+`ProjectShell.tsx`. The move/resize drags reuse the same mousedown/mousemove/mouseup
+pattern already established for board dragging (including the left-button-only guard from
+the fix above, applied here too since the same right-click-leaking-into-drag risk exists
+anywhere a mousedown starts a drag). The floating position is clamped on every move so a
+grabbable corner always stays on-screen — otherwise the panel's own "Dock" button, the only
+way back, could end up unreachable off-screen with no other way to recover it.
+
+Verified: typecheck clean, full suite still 269/269 (no shared/pure logic touched — this is
+a self-contained UI/store change), production build clean, boot-tested cleanly.
+
+### Methodology check-in, and a real gap: themes had no definition field (2026-09-08)
+
+Methodology check against the app's four target methods (Reflexive TA, IPA, AQA, Kaufmann's
+comprehensive interview analysis), before starting Phase 9. Verdict: usable for all four,
+and better-aligned than expected — AQA and Kaufmann especially, since the default note
+categories (Descriptive/Linguistique/Conceptuelle) already mirror both Kaufmann's own
+three-fold remark scheme and IPA's "initial noting," and Phase 7/8's cross-case comparison
+work maps closely onto a Group Experiential Themes table. The Board's spatial clustering
+matches Reflexive TA's own recommended mind-map-style candidate-theme sorting.
+
+One real gap, not just a nice-to-have: `CategoryRecord` (a theme/cluster) had no
+`definition` field, while `CodeNode` did. Reflexive TA treats a written theme definition as
+a required deliverable, not optional, and IPA's superordinate themes need the same
+write-up — the only way to attach one before this was a workaround (a separate Note
+attached to the category), not a first-class field shown inline where the theme itself
+lives.
+
+Added `CategoryRecord.definition: string` (mirroring `CodeNode.definition` exactly),
+`setCategoryDefinition` (categoryOps.ts) and its store action, and surfaced it everywhere a
+code's own definition already shows: a "Def" toggle + inline textarea in `ClusterRowShell.tsx`
+(shared by the codebook and notes trees' cluster rows, so both got it from one change), an
+always-visible textarea in `ClustersView.tsx`'s expanded cluster cards, and in the notes
+export section (`reportBuilders.ts`) right after a cluster's heading, same placement as a
+code's definition in the codebook export section. Also fixed a related small gap: a code's
+own definition previously didn't appear in `CodeInfoModal.tsx` at all — now shown right
+under the header.
+
+Verified: typecheck clean, full suite 271/271 (2 new tests: `setCategoryDefinition` only
+touches its target, `createCategory` accepts an explicit definition at creation; extended
+the existing `normalizeProjectData` category-backfill tests to cover `definition` too; a
+new `reportBuilders.ts` test confirming a cluster's definition shows in the notes export
+when present and is omitted — not an empty paragraph — when it isn't). Re-verified backward
+compatibility directly against `LargeProjectTest.qdaproj` and `MultiCaseTest.qdaproj`, both
+genuinely pre-dating this field (confirmed `'definition' in category` was `false` on the
+raw parsed JSON before normalizing) — both load cleanly with `definition` backfilled to
+`''`. Production build clean, boot-tested cleanly.
+
+### Phase 9: packaging (icon, Windows/macOS/Linux via CI) (2026-09-08)
+
+Scope extended to include Linux alongside the original plan's Windows+macOS. Constraint:
+installation has to stay simple for non-technical end users — this is meant for possibly
+dozens of people downloading it, not just one developer.
+
+**Icon**: the app had none — every build used Electron's own default icon. Designed one in
+plain SVG (`build/icon-source.svg`, rasterized to `build/icon.png` at 1024×1024 via a
+one-time `sharp` devDependency): a dashed circle — the same cluster-boundary motif the
+board draws around a theme — containing a handful of connected, differently-colored dots in
+the app's own code-color palette, echoing the board's own linked-cards visual. Checked it
+down to a 64×64 render to confirm it still reads clearly at taskbar size, not just at full
+resolution. `electron-builder` auto-generates the platform-specific `.ico`/`.icns` from this
+one PNG — confirmed the `.ico` path works (see below); `.icns` generation itself can only be
+confirmed on the macOS CI runner, not locally.
+
+**Windows packaging hit a real, well-known environmental limitation**: `electron-builder`
+unconditionally downloads and extracts a `winCodeSign` helper archive for *any* Windows
+target (installer or portable, with or without actual code-signing configured), and that
+archive contains macOS-only symlinked files. Extracting them needs either Administrator
+rights or Windows "Developer Mode" enabled — neither available in this environment — so
+both `nsis` and `portable` targets fail at that one step. The app itself still packages
+successfully up to that point, though: confirmed `release/win-unpacked/Cadenza.exe` builds
+correctly (icon included) and actually launches as a real packaged app (not a dev-mode run)
+with no errors beyond the usual benign shared-cache warnings. Real installer builds moved to
+CI rather than a local Developer-Mode change, since CI was already required for macOS
+regardless (a `.dmg` genuinely cannot be produced outside macOS — Apple's own tooling is
+required) and produces more reliable Linux output than cross-building from Windows.
+
+**Added GitHub Actions**, two workflows:
+- `.github/workflows/ci.yml` — typecheck + the full test suite on every push/PR to `main`.
+  Fast, one Linux runner, since nothing it checks is platform-specific.
+- `.github/workflows/release.yml` — triggered by pushing a version tag (`git tag v0.1.0 &&
+  git push origin v0.1.0`) or manually. Runs the test suite first (`needs: test`), then
+  builds on a 3-way matrix — `windows-latest`/`macos-latest`/`ubuntu-latest`, each running
+  `electron-builder`'s own platform flag — so every OS builds and packages on its own native
+  platform, sidestepping the winCodeSign issue and the "can't build mac from Windows"
+  limitation at once, rather than fighting cross-compilation. `electron-builder --publish
+  always` (electron-builder's own built-in GitHub-release publishing, configured via a new
+  `publish` block in `package.json`'s `build` config) uploads each platform's output
+  straight to a GitHub Release for that tag, created automatically if it doesn't exist yet
+  — so getting the app, for anyone, is just "download the file for your OS from the
+  Releases page," no build step on their end. `package.json` also gained a `build:linux`
+  script (`nsis`/`dmg`+`zip` already existed for win/mac) and a `linux` block in the build
+  config (`AppImage` — the most portable single Linux format, picked as the safe first
+  target rather than also adding `deb`/`rpm` speculatively before even one Linux build had
+  actually been confirmed to work).
+
+Verified: typecheck clean, full suite still 271/271 (no application code touched — this
+entire phase is build configuration, CI workflows, and one new icon asset), production
+`electron-vite build` clean. Confirmed locally, as far as environment allows: the Windows
+unpacked app builds correctly with the new icon and boot-tests cleanly as a real packaged
+(non-dev) run; adding the `publish` config didn't change or break the local unpacked build
+(no network publish attempt without an explicit `--publish` flag, confirmed by re-running
+it). Not yet confirmed at this point: an actual installer file for any of the three
+platforms, and the release workflow itself end-to-end — both needed a real tag push to
+observe.
+
+### The release pipeline worked first try — the binaries were just invisible (2026-09-08)
+
+A real tag push (`v0.1.0`) and a manual workflow run both exercised the full pipeline
+end-to-end. Checked the results via the GitHub API (no `gh` CLI available in this
+environment; public, unauthenticated REST calls were enough): both runs' `test` job and all
+three `build` matrix legs (windows-latest/macos-latest/ubuntu-latest) came back `success` —
+the whole three-platform pipeline, including the Windows packaging step that couldn't be
+verified locally, worked on the first real attempt.
+
+But `GET /repos/seelebrn/cadenza/releases` came back empty — no binaries visible anywhere.
+Root cause: electron-builder's GitHub publisher defaults `releaseType` to `"draft"`
+(confirmed in `builder-util-runtime`'s own type definitions, `@default draft`) — a draft
+release is invisible on the public Releases page and to any unauthenticated request,
+visible only to the repository owner while logged in. The releases were sitting there the
+whole time, just not published. Added `"releaseType": "release"` to `package.json`'s
+`publish` block so every future tag push (or manual run) publishes immediately with no
+extra manual step — the existing `v0.1.0` draft still needed a one-time manual "Publish
+release" click on GitHub (already had the real, working binaries from the successful runs —
+no need to rebuild it) since this config change only affects releases created *after* it.
+
+Verified: package.json still valid JSON, typecheck clean — this is a one-line publish
+config change, no application code or workflow logic touched.
+
+### Documented, not fixed: macOS/Windows flag the unsigned build (2026-09-08)
+
+Symptom: the v0.1.0 macOS build got flagged as malware by Gatekeeper. Expected, not a real
+detection: since macOS Catalina, any app distributed outside the App Store without both an
+Apple Developer ID signature *and* Apple notarization gets exactly this "may be malware"
+treatment, regardless of what the app does — Windows SmartScreen does a milder version of
+the same thing for unsigned `.exe`s. Actually fixing it needs enrolling in the Apple
+Developer Program ($99/year, tied to a personal Apple ID) and wiring real code-signing +
+notarization into the release workflow, storing the certificate and an app-specific
+password as GitHub secrets.
+
+Decision: stay free and document the bypass rather than pay for signing/notarization —
+the normal state of affairs for small unsigned software.
+
+Added a "Before you tell anyone to download it" section to the release runbook (the page
+published for the "how do I publish a build" tutorial): what each OS's warning actually says,
+the exact click-through to open it anyway (right-click → Open on macOS, or `xattr -cr` in
+Terminal; "More info" → "Run anyway" on Windows SmartScreen), and a ready-to-copy blurb sized
+for pasting straight into a GitHub release description, so people seeing the warning read an
+explanation *before* they worry rather than after.
+
+Verified: visual review of the new section's markup and styling (reuses the runbook's
+existing token system and copy-button mechanism, generalized to also cover the new
+non-terminal "paste this into your release notes" block, not just shell commands).
+
+### macOS wasn't just warning, it was auto-trashing the app — root-caused via `log show` (2026-09-10)
+
+Symptom: worse than a Gatekeeper warning — right-click → Open didn't help, the app got
+deleted from disk outright. A clean VirusTotal scan (0/70 engines) ruled out a real
+malware-signature match. Diagnosed via a macOS unified-log capture:
+
+```
+log show --last 2h --predicate 'eventMessage CONTAINS[c] "Cadenza"'
+```
+
+Two lines told the whole story:
+
+```
+syspolicyd: [com.apple.syspolicy.exec:default] Attempting to move malware to trash:
+  PST: ... (team: (null)), (id: Electron), (bundle_id: com.seelebrn.cadenza)
+kernel: (AppleMobileFileIntegrity) AMFI: '.../Cadenza' has no CMS blob?
+```
+
+`syspolicyd`'s exec-time policy check (not XProtect, not a real scan) was killing and trashing
+the *running process*, ~38 seconds after launch — which is why right-click → Open (a Finder-
+level override) didn't help: the app had already been allowed to open, then got shot down at
+the OS level regardless.
+
+The `(id: Electron)` field was the key detail. Without a paid signing identity,
+electron-builder doesn't re-sign the packaged app, so it keeps whatever ad-hoc signature the
+*prebuilt* Electron binary already shipped with — an identity literally called `"Electron"`,
+generic to every unsigned Electron app, unrelated to Cadenza's own bundle id. Cross-checked
+against QualCoder, a comparable unsigned open-source QDA tool: confirmed via its official
+install docs that it's genuinely unsigned too, but built with py2app, not Electron, so it
+never carries that shared "Electron" identity — and its own docs describe only the older
+"click Open Anyway" flow, not active deletion. Working theory: Apple's Gatekeeper policy
+data treats that specific generic identity with more suspicion, plausibly because it's the
+one carried by a lot of real unsigned-Electron malware in the wild — consistent with the
+clean VirusTotal result (an identity-reputation policy decision, not a signature match on
+Cadenza's actual file).
+
+Fix attempted (before reaching for paid notarization): added `build/afterPack.cjs`, an
+electron-builder `afterPack` hook that runs `codesign --force --deep --sign -` on the packed
+`.app` on macOS only, after electron-builder assembles it but before it's wrapped into a
+`.dmg`/`.zip`. This recomputes the ad-hoc signature against the app's actual, current
+`CFBundleIdentifier` (`com.seelebrn.cadenza`), replacing the stale generic `"Electron"` identity
+with one specific to Cadenza. Still not a trusted signature — Gatekeeper still calls it
+unidentified — but it stops the bundle from sharing an identity with every other unsigned
+Electron app. Bumped to v0.1.1 and re-released for testing on real hardware.
+
+Verified so far (at release time): local `npm test`/`typecheck` unaffected (hook only
+touches the macOS CI build step); the actual Gatekeeper behavior change could only be
+verified on real hardware.
+
+**Confirmed fixed** (tested on real hardware, same day): the re-signed build is no longer
+auto-trashed. It now shows the ordinary "Apple could not verify… may contain malware"
+warning and refuses to launch by default, resolved with the standard one-time System Settings →
+Privacy & Security → "Open Anyway" — exactly the flow QualCoder's own docs describe, not the
+active-deletion behavior seen on v0.1.0. Confirms the `(id: Electron)` shared-identity theory
+was the actual root cause, not a red herring. Updated the release runbook's macOS section to
+match: it previously suggested right-click → Open / `xattr -cr` (the old-style bypass, no longer
+the reliable path on current macOS); now leads with System Settings → Privacy & Security, which
+is what actually works. Landed at the same place QualCoder and comparable unsigned open-source
+tools sit — a normal, well-documented, one-time warning — without spending anything on Apple
+Developer Program enrollment.
+
+### Results draft export (2026-09-11)
+
+A second export mode alongside the existing report inventory: reorganizes already-coded
+material into a write-up skeleton along an explicit axis — by theme (Reflexive TA/IPA), by
+case (Kaufmann), or by question (AQA) — chosen by the user rather than inferred from the
+project, since which axis fits is itself a methodological call.
+
+Two rules keep it from doing the analytic work for the writer: it never generates prose
+(only rearranges quotes and the writer's own notes), and raw quotes always render under a
+separate "Excerpts" heading, apart from the writer's own "My analytic notes" — data and
+interpretation stay visually distinct rather than blended. Each section ends with a
+bracketed interpretation prompt (e.g. "[Interpretation to write — what does this theme
+contribute to the research question?]") so the exported document reads as a draft, not a
+finished result. A plain "N excerpts · M cases" count is available per section, presented
+as a volume marker only — not a claim about validity or agreement.
+
+Scope: intentionally does not include inter-rater/double-coding comparison tooling
+(agreement scores, Cohen's kappa) — out of scope by design, not an oversight.
+
+Implementation: reuses the existing `Report`/`ReportBlock` model (`reportModel.ts`)
+unchanged — no renderer changes needed, since headings/quote-paragraphs/meta-paragraphs
+already covered everything this needed. Added `buildResultsDraftReport` next to the
+existing `buildProjectReport` in `reportBuilders.ts` as a separate builder rather than more
+checkboxes on the existing one — the existing export is an inventory of everything filed
+under whatever's checked; this is a fundamentally different per-axis reorganization.
+`ExportView.tsx` now opens on a "Standard report" vs. "Results draft" mode toggle instead of
+a single checkbox list.
+
+Verified: 13 new tests in `reportBuilders.test.ts` (all three axes — empty-state messaging,
+quote gathering from both member codes and raw segments, notes shown separately from
+excerpts, the descriptive count line, question-cluster filtering, per-case code scoping),
+full suite green (280/280), typecheck clean, production build clean.
+
+### Cluster links + thematic-map layouts (2026-09-11)
+
+A gap distinct from the results draft above but raised in the same conversation: students
+writing an article or poster often get stuck specifically on producing a figure — a
+Braun & Clarke-style thematic map (clusters/themes connected by labeled relationships) is a
+named deliverable of Reflexive TA, not an optional nice-to-have, and nothing in the app
+produced one.
+
+Scoped down from an initial "new visualization view" idea to reuse what already existed:
+a curated (non-default) board already *is* a named, freely-arranged subset of clusters —
+building a figure is just creating one and adding only the clusters that belong in it, no
+new view needed. The one genuinely missing primitive was a labeled relationship between two
+clusters; item-to-item `BoardLink`s already exist (a plain unlabeled snap-connection,
+per-board) but nothing connected clusters themselves, and nothing carried a label at all.
+
+Added `ClusterLink` (types.ts): `fromCategoryId`, `toCategoryId`, a free-text `label` (not a
+fixed vocabulary — same reasoning as `CategoryRecord.definition`, the app doesn't assume
+which relationship types matter for a given method), and `directed`. Deliberately
+project-wide, not per-board like `BoardLink` — a relationship between two themes is an
+analytic claim, not a visual arrangement choice specific to one board, so it's the same fact
+regardless of which board happens to be showing it. `getVisibleClusterLinks` (boardOps.ts)
+is the only board-specific part: a link only draws on a board that currently shows both its
+endpoint clusters.
+
+**Creating a link** needed its own interaction mode rather than a drag gesture: dragging one
+cluster onto another already means "nest it" (an existing, established gesture), so a
+drag-to-connect motion for links would collide with that. Added a "Link clusters" toggle in
+the board toolbar (non-default boards only) — while active, a cluster's header mousedown
+picks it as an endpoint (`ClusterFrame`'s `onPick`) instead of starting the normal move,
+click a second cluster, type a label in a prompt, done. Rendered as an SVG line (with an
+arrowhead marker when directed) plus the label on a small background rect, reusing the same
+SVG-overlay mechanism the existing item `BoardLink` lines already used — confirmed that
+mechanism was real and working (not dead/unwired code) before building on it.
+
+**Two alternate layouts**, one-click re-arrangements of a board's existing clusters (never
+creating/removing one, never touching links) — `computeTreeLayout` and `computeRadialLayout`
+(boardOps.ts), applied via `applyClusterPositions`:
+- **Tree**: a top-down hierarchical layout driven by `parentCategoryId` — bottom-up subtree-
+  width calculation so a parent centers over its children (rather than just starting at the
+  leftmost one), a category whose parent isn't also on this board treated as its own root.
+- **Radial**: one focus cluster (first cluster by default) stays put, everything else spreads
+  around it in a single ring at equal angular spacing.
+
+Both are explicitly scoped to non-default boards — the default board has its own auto-layout
+already (`getVisibleBoardClusters`), including "virtual" not-yet-materialized cluster shapes
+these functions aren't designed to handle, and isn't a target for this feature; a curated
+figure-board only ever has real `BoardCluster` records to begin with. Manual dragging
+afterward is unaffected (same non-destructive contract as the existing "Reset placement"
+button) — these are starting points, not a lock-in.
+
+Verified: 15 new tests (categoryOps.test.ts: link CRUD including the A→B/B→A-are-distinct
+case and no-op-on-duplicate; the existing `deleteCategory` now cleans up any link naming the
+deleted category; boardOps.test.ts: visibility filtering, both layouts including a
+wide-subtree-doesn't-overlap-its-sibling tree case and an equidistant-from-hub radial case),
+full suite green (296/296), typecheck clean, production build clean. Boot-tested a packaged
+instance (`npx electron .`) — confirmed via `tasklist` that the process actually launched (8
+electron.exe processes, normal multi-process Electron shape), no errors beyond the expected
+shared-cache warnings, then killed every PID and confirmed none remained.
+
+**Bug, caught by real use the same day**: the second click of a link never did anything.
+Cause — the label step used `window.prompt()`, which Electron's renderer doesn't implement
+(unlike `alert()`/`confirm()`, which do work and are already used elsewhere on this same
+board): it returns `null` immediately with no dialog ever shown, so the code's `label !==
+null` check always failed silently — the picked cluster's highlight just cleared with
+nothing visibly happening, which is exactly the reported "doesn't do anything on click."
+Fixed by replacing it with a plain inline input (a small bar under the toolbar, Enter to
+confirm, Escape or a Cancel button to back out) — the same kind of toolbar text input this
+file already uses for naming a new board/cluster, rather than a browser dialog API that was
+never going to work in this runtime. Re-verified: typecheck, full suite (296/296), and
+production build all still clean; boot-tested again the same way (8 electron.exe processes,
+no new errors), confirmed cleanly killed afterward.
+
+### Radial layout could push a cluster off the negative edge of the canvas (2026-09-11)
+
+Reported from real use: after clicking "Radial," one cluster ended up somewhere unreachable
+— couldn't be selected or dragged back, only fixed by undo. Root cause: the board's canvas is
+a fixed-size div inside a scrolling container; overflowing its *positive* edge is harmless
+(the container can always scroll further right/down to reach it), but a cluster placed at a
+*negative* x/y sits somewhere no scroll position can ever reach — invisible and unclickable
+by construction, not a rendering glitch. `computeRadialLayout` had no floor: a focus cluster
+starting near the canvas origin (a common case — it's roughly where a newly placed cluster
+lands) plus the layout's own radius could easily push a sibling's computed position negative.
+
+Fixed with `keepPositionsOnBoard`: after either layout computes its positions, shifts the
+*entire* set uniformly (preserving the relative arrangement exactly) so the minimum x/y is
+never below the canvas's own origin margin. Applied to both `computeTreeLayout` (safe by
+construction today, but guarded defensively against future changes) and
+`computeRadialLayout` (where the bug actually lived).
+
+Verified: 1 new dedicated test reproducing the exact reported scenario (a focus cluster near
+the origin, several others around it, asserting no resulting position goes negative) — it
+failed against the pre-fix code, confirming it actually catches the bug rather than just
+exercising already-correct behavior. Two existing radial tests had to move their fixtures
+further from the origin, since they were incidentally relying on positions the new floor now
+legitimately shifts (not a sign either test's real intent was wrong — the floor is exactly the
+new behavior). Full suite green (297/297), typecheck clean.
+
+### Alignment + distribution smart guides for dragging clusters (2026-09-11)
+
+Requested as a quality-of-life follow-up to the thematic-map work: PowerPoint/Figma-style
+guides while dragging a cluster — snapping into alignment with another cluster's edge/center,
+and highlighting when the gap to two others on either side is equal.
+
+Two independent, single-axis mechanisms in boardOps.ts, since they answer different questions
+and a drag can want either, both, or neither:
+- **`findAlignmentSnap`** — snaps a tentative position to the nearest edge/center match
+  (left/center/right on x, top/center/bottom on y) with any other cluster on the board,
+  independently per axis, the same idea as `findSnapTarget`'s existing card-to-card snapping
+  just against a box's edges/centers instead of whole-card proximity. Reports every guide
+  actually worth drawing (re-checked against the already-snapped position), not just whichever
+  one happened to win — several clusters sharing the same alignment all get a guide line.
+- **`findDistributionSnap`** — for a pair of other clusters that already roughly straddle the
+  dragged one on an axis, snaps its center to the exact midpoint (equal spacing on both sides).
+  Only considers a pair "the same row/column" when both sit within a generous band of the
+  dragged cluster's center on the *other* axis — otherwise two unrelated clusters elsewhere on
+  the board could suggest a spacing relationship that doesn't visually read as one.
+
+Combined in `computeClusterMoveSnap` (BoardView.tsx): alignment runs first, distribution only
+fills in whichever axis alignment didn't already claim. A plain function, not a hook, so it
+can be called identically from the live-drag preview (fed the in-progress delta) and from
+`handleMouseUp` (fed the final delta) — the same "recompute fresh at drop time against the
+same logic that drove the live highlight" pattern already used for nest-targets and
+resize-enclosure elsewhere in this file, so a snap shown mid-drag is never subtly different
+from where the cluster (and everything nested/clustered under it) actually ends up. Every
+place that already tracked a moving cluster's live delta (member items, cluster-link lines,
+`ClusterFrame` itself) now reads this snapped delta instead of the raw mouse delta, so nothing
+visually detaches from its frame during a snap adjustment. Rendered as dashed guide lines
+(full-canvas-spanning for alignment, matching Figma/PowerPoint convention) plus tick marks at
+each of the three centers for a distribution match, in a dedicated accent color distinct from
+every other highlight already used on the board (nest-target, enclosed-by-resize).
+
+Verified: 9 new tests (findAlignmentSnap: edge and center matches, independent per-axis
+snapping, no-match case, multiple clusters sharing one alignment each getting their own guide;
+findDistributionSnap: exact-midpoint snapping, the row/column band correctly excluding an
+unrelated pair, a too-far-to-snap case, x and y handled independently without cross-
+contamination). Full suite green (306/306), typecheck clean, production build clean.
+Boot-tested a packaged instance (no errors, confirmed via `tasklist` and cleanly killed).
+
+### v0.2.0 released; a delete-button bug on the default board reported right after (2026-09-11)
+
+Bumped to v0.2.0 and tagged — all three platform builds published cleanly (results-draft
+export, cluster links + tree/radial layouts, and smart guides are the headline additions
+since v0.1.1).
+
+Reported immediately after: a cluster's × ("remove from board") button does nothing on the
+default board, though it works fine on any other board. Root cause is the default board's own
+core design (`getVisibleBoardClusters`): *every* category always shows there automatically,
+whether or not it has an explicit `BoardCluster` shape yet — a category never individually
+moved/resized is drawn from a synthesized "virtual" fallback with an id like
+`virtual:cluster:<categoryId>`, which doesn't exist in `data.boardClusters` for `deleteCluster`
+to find and remove. Worse, even a cluster that *is* materialized can't be meaningfully removed
+from the default board either way: deleting its `BoardCluster` row just makes it fall back to
+the same virtual auto-shown state, not disappear — the default board has no concept of "hidden"
+category, by design. So the button was never going to work there, virtual or not.
+
+Fixed by disabling the button on the default board instead of leaving it silently broken —
+`ClusterFrame` takes a new `canDelete` prop (`!currentBoard.isDefault`), disabled state shown
+with an explanatory tooltip pointing at the actual ways to reduce clutter there (curate a
+different board, or delete the cluster/category itself from the Workspace/Analysis tab).
+
+Also added, requested in the same report: a confirmation dialog (`window.confirm`, not
+`window.prompt` — see the earlier fix in this log for why that distinction matters in
+Electron) before removing a cluster from a board where it's actually possible, naming the
+cluster and reiterating that only the board shape is removed, not the cluster/category itself.
+
+Separately asked what happens deleting a *superordinate* cluster (one with nested children) —
+already handled correctly and already tested: `deleteCategory` promotes its direct children to
+its own parent (or to root, if it had none) rather than deleting them — nesting collapses one
+level, every child keeps its own codes/notes/quotes intact. Also cleans up anything that would
+otherwise point at the deleted category: notes attached directly to it fall back to a
+project-level attachment, its `BoardCluster` shape on every board is removed, and (new since
+the cluster-links work above) any `ClusterLink` naming it as either endpoint is removed too.
+
+Verified: no shared/pure logic changed (this is a UI prop + a confirm dialog), typecheck
+clean, full suite still 306/306, production build clean, boot-tested (no errors, cleanly
+killed).
+
+### "Add all clusters" on a secondary board never got the masonry-layout rework (2026-09-11)
+
+Reported from real use on the 500-code/35-category test project: on a secondary (non-default)
+board, "+ Add all clusters" produced a broken layout — none of the non-overlapping masonry
+packing the default board gets, codes spilling out of their cluster's frame or reading as
+belonging to the wrong one.
+
+Root cause: the "large synthetic test project" rework earlier in this log ("Clusters defaulted
+to a single column... Rewrote it as a multi-column masonry pack") only ever touched
+`getVisibleBoardClusters` — the default board's own *live, per-render* computation. It never
+touched `addAllClustersToBoard`, the bulk-add action used on every other board, which still ran
+its original, much cruder logic: a fixed 4-column/240px-row grid (`computeClusterGridPosition`)
+with no idea how tall a cluster's real content actually was, plus single-column member stacking.
+`computeClusterSize` did scale a cluster's own height with its member count — a cluster with,
+say, 15 members needed roughly 15 × 72px ≈ 1080px, nowhere near the fixed 240px row height — so
+the *next* row's cluster box started well inside the previous, oversized one's footprint. Every
+code was still correctly filed under its real category the whole time (a pure layout bug, not
+a data one), but visually it looked exactly like the report: codes spilling into, or reading as
+members of, whichever cluster's box happened to now overlap theirs.
+
+Fixed by extracting the masonry-packed, nesting-aware, member-grid-sized algorithm out of
+`getVisibleBoardClusters` into a standalone `computeCategoryLayout(categories, explicitOverrides)`
+— a pure refactor first (verified byte-for-byte behavior-preserving: every one of
+`getVisibleBoardClusters`' existing tests, covering the specific overlap/containment/grid-column
+guarantees from that earlier rework, passed unchanged against the extracted version before
+anything else changed). `getVisibleBoardClusters` now just calls it and wraps the result back
+into real-or-virtual `BoardCluster`s; `addAllClustersToBoard` calls the same function to compute
+real, materializable positions/sizes for whatever it's about to place — same visual quality as
+the default board, not a separate, drifted-out-of-sync reimplementation. `explicitOverrides` is
+new: whatever's already really on the target board gets passed in and respected, so bulk-adding
+the *remaining* clusters to a partially-populated board lays them out relative to what's actually
+there rather than a fresh, disconnected layout. `computeClusterGridPosition` and `computeClusterSize`
+(the old fixed-grid helpers) are now dead and removed rather than left behind unused.
+
+Segments (raw quotes filed directly under a category) are deliberately no longer auto-placed by
+this action — matching `getVisibleBoardItems`' own established convention that a segment always
+keeps its own explicit position rather than being auto-homed into a cluster's grid; the old code
+tried to stack them into the single column too, inconsistently with how they're treated
+everywhere else.
+
+Verified: 3 new `addAllClustersToBoard` tests (8 clusters × 15 members apiece — the exact
+reported scale — asserting zero cluster-cluster overlap and every member genuinely inside its
+own cluster's bounds; near-square member grid confirmed via distinct-column count instead of a
+single column; a bulk-add onto a board with one cluster already real correctly lays out around
+it) plus 3 new direct `computeCategoryLayout` tests. Re-verified end-to-end against the actual
+`LargeProjectTest.qdaproj` (500 codes, 35 categories including 5 superordinates) via a
+standalone esbuild-bundled script (bundle deleted after): zero genuine sibling/unrelated
+overlaps, and every parent-child "overlap" the geometry check initially flagged was confirmed to
+be legitimate containment, not a bug, once cross-checked against the real ancestor relationships.
+Full suite green (312/312), typecheck clean, production build clean, boot-tested (no errors,
+cleanly killed).
+
+**Caught by CI, not locally**: the v0.2.1 tag's first push failed CI's typecheck step, despite
+`npm run typecheck` having been run clean locally right before committing. Cause: two of the new
+tests above called the existing `rectContains`/`rectsOverlap` test helpers (typed against
+`BoardCluster`) with `ComputedClusterLayout` values instead, which are missing `id`/`boardId`/
+`createdAt` — `npm test` (Vitest, via esbuild) doesn't type-check at all, so it ran and passed
+regardless; only `tsc --noEmit` catches this, and it hadn't been re-run after that specific
+addition. Fixed by padding the two `ComputedClusterLayout` values into full `BoardCluster` shapes
+before calling the shared helpers, rather than widening those helpers' types for everyone else's
+already-passing 90+ call sites. Re-verified clean this time, retagged.
+
+### Three more board gaps, found while testing this same fix (2026-09-11)
+
+Reported in the same sitting, testing the "Add all clusters" fix above:
+
+- **No way to delete a board at all.** `deleteBoard` (boardOps.ts) already existed and was
+  already wired into the store — just never had a button anywhere. Added one next to the board
+  picker, confirming first and explaining that only the board's own layout is removed (the
+  underlying codes/notes/clusters are untouched); deleting the *default* board is allowed too
+  (matching what the op already supported — auto-promotes another board), with the confirm
+  dialog saying so explicitly.
+- **"+ Add all clusters" always added member items too**, with no way to place just the empty
+  frames — exactly what the earlier thematic-map work actually wants for a clean figure board
+  (add clusters only, arrange them, never bring codes/notes onto that board at all). Added an
+  `includeMembers` parameter (default `true`, unchanged behavior) to `addAllClustersToBoard`,
+  and split the one button into two: "+ Add all clusters" (frames only) and "+ Add all clusters
+  and items" (the original combined behavior). A cluster's frame is still sized as if its members
+  were there either way, so it's already the right size if they get added later.
+- **The real bug**: following the workflow "Add all clusters → Link → Radial/Tree," clusters
+  visibly reorganized but their codes didn't move with them — reading as if they'd been unlinked
+  from their cluster. Cause: `applyTreeLayout`/`applyRadialLayout` only ever called
+  `applyClusterPositions`, which (by design — see its own doc comment) touches `boardClusters`
+  only, never `boardItems`. A manual cluster drag already carries member items along
+  (`getClusterMemberItems` in `BoardView`'s mousedown handler); the one-click layouts never got
+  the equivalent treatment. Added `applyClusterLayoutWithMembers`: computes each repositioned
+  cluster's delta (by *category*, since that's what a member actually belongs to — a ref in more
+  than one moving category homes on the first, matching the existing multi-membership rule) and
+  shifts every member code/note/segment on that board by the same amount. `applyTreeLayout`/
+  `applyRadialLayout` now call this instead of the bare position-only version.
+
+Verified: 7 new tests (`applyClusterLayoutWithMembers`: members move by the cluster's exact
+delta — the reported scenario directly; items on a different board or unrelated cluster
+untouched; a cluster that didn't move leaves its members alone too; `addAllClustersToBoard`
+with `includeMembers: false` places only frames, still correctly sized). Full suite green
+(316/316), typecheck clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### Radial was flattening nested clusters into its ring — real export caught it (2026-09-11)
+
+Reported with an actual exported PDF: "Add all clusters" (frames only) → Radial → export, on
+the 500-code/35-category test project (5 superordinates, 30 clusters). The result was a
+crown of massively overlapping, oddly stretched bars — not remotely the intended thematic-map
+layout.
+
+Root cause, visible directly in the image: `computeRadialLayout` treated *every* cluster on the
+board — nested ones included — as an independent point on one flat ring around a single focus.
+A superordinate's nested children got scattered into the same ring as the superordinates
+themselves, discarding the nesting entirely (their `↰` label still showed correctly — the
+underlying data was never wrong, only the layout). Worse, superordinate boxes are often very
+wide (sized by `computeCategoryLayout` to fit their own nested-children grid), and the ring
+spacing only ever accounted for the *focus*'s size, not each satellite's — so wide boxes
+landing near each other in the ring overlapped heavily on top of being in the wrong place at
+all.
+
+Fixed in two parts:
+- `computeRadialLayout` now takes `categories` (matching `computeTreeLayout`'s existing
+  signature) and only ever arranges *root* clusters in the ring — a category whose parent isn't
+  also on this board, same root definition Tree already uses. Nested clusters are left out of
+  the returned positions entirely.
+- `applyClusterLayoutWithMembers` now cascades a moved root's delta down its *whole* descendant
+  subtree — not just member codes/notes as before, but nested `BoardCluster` shapes too — so a
+  sub-cluster (and everything filed under it) moves rigidly together with its ancestor,
+  preserving whatever containment it already had rather than trying to recompute it. A category
+  not directly in `positions` (true for every nested one under Radial; never true under Tree,
+  which still positions all of them individually — a genuine branching-tree diagram is supposed
+  to, unlike hub-and-spoke) inherits its nearest positioned ancestor's delta, resolved
+  recursively through however many nesting levels sit in between.
+
+Getting the ring's radius genuinely overlap-free took two attempts. The first fix (radius
+accounting for the single largest satellite) still left 2 overlapping pairs on the real project
+— because equal *angular* spacing doesn't guarantee equal *physical* spacing once satellite
+sizes vary a lot: two large satellites can still land at adjacent angles. The actual fix solves
+for the chord length between two *adjacent* ring points (`2r·sin(π/N)`) against the two largest
+satellites' combined half-widths, the genuine worst case regardless of where in the ring they
+end up — confirmed by re-running the same real-project check after each attempt rather than
+assuming the first, more intuitive fix was sufficient.
+
+Verified: 4 new `computeRadialLayout` tests (a nested cluster excluded from the ring entirely —
+the reported bug directly; a category whose parent isn't on the board treated as its own root,
+matching `computeTreeLayout`; the ring radius clearing a single large satellite; existing tests
+updated to pass `categories`) plus 2 new `applyClusterLayoutWithMembers` tests (cascading a
+root's delta to a nested cluster not itself in `positions`; cascading transitively through
+multiple nesting levels). Re-verified end-to-end against the real `LargeProjectTest.qdaproj`
+after each attempt, via a standalone bundled script (deleted after): the exact reported
+workflow (`addAllClustersToBoard` frames-only → `computeRadialLayout` → `applyClusterLayoutWithMembers`)
+now produces zero genuine root-vs-root overlaps, zero broken parent-child containment, and no
+negative coordinates. Full suite green (321/321), typecheck clean, production build clean,
+boot-tested (no errors, cleanly killed).
+
+### Tree had the same "wrong size assumption" bug, found by checking a real project instead of moving on (2026-09-11)
+
+Asked, before any further release, to hold off and look at three real exports side by side
+(Standard / Tree / Radial) from an actual project — 6 root clusters (one, "Thèmes de codes",
+containing 17 themed sub-clusters; another, "Catégories de notes", containing 2 note-type
+sub-clusters with 33 and 35 notes each). Standard and Radial checked out clean against the
+real category structure. Tree didn't: a parent's own child row visibly ran straight through
+the parent's still-large body.
+
+Root cause, found by reproducing the exact numbers from the real project rather than guessing
+from the image: `computeTreeLayout` spaced rows using a *fixed* `TREE_LEVEL_HEIGHT` (220px),
+which assumed every node was roughly leaf-sized. A cluster arriving into Tree mode keeps
+whatever size it already had — for a parent with its own nested children (sized by
+`computeCategoryLayout`/the default board to *contain* them), that can be far taller than
+220px. "Catégories de notes" was 568px tall; its child row landed only 220px below its *top*,
+so the child sat well inside the still-568px-tall parent instead of below it. This never
+surfaced in this file's own unit tests because every one of them used same-size synthetic
+fixtures (100×100) — exactly the case a fixed row height can't distinguish from a real,
+non-uniform, containment-sized one. `computeRadialLayout`'s equivalent real-project check
+(added for the previous fix) is what caught *that* bug; Tree had gone unchecked against real
+data the same way until this report.
+
+Fixed by making each depth's row start dynamic: computed as the previous row's start plus the
+*tallest* node found anywhere at that previous depth (across every branch, not just its own),
+plus a gap — rather than a constant multiplied by depth. `TREE_LEVEL_HEIGHT` is gone, replaced
+by `TREE_ROW_GAP` (the gap between a row and the tallest node above it, not the row height
+itself). Sibling branches of very different shapes still land in the same shared horizontal
+rows, matching the existing (unchanged) side-by-side column placement — only the vertical
+spacing calculation changed.
+
+Verified: 2 new tests reproducing the exact numbers from the real project (a 568px-tall parent
+with a 500px child — asserts the child's row clears the parent's actual bottom edge, not a
+fixed offset from its top) and confirming the shared-row guarantee across branches of very
+different heights. Re-verified end-to-end against *both* real test projects this time (not
+just the one that surfaced the bug) via the same standalone bundled-script approach: zero
+overlaps for Tree and Radial on both. Full suite green (323/323), typecheck clean, production
+build clean, boot-tested (no errors, cleanly killed). Releases paused per instruction until
+this was resolved — not yet re-tagged.
+
+### "Delete board" left the New-board input unresponsive for close to a minute (2026-09-11)
+
+Reported: after deleting a board, the "New board name…" text field wouldn't take a cursor or
+accept typing for nearly a minute afterward — not visibly disabled, just unresponsive.
+
+Investigated rather than guessed: timed `getVisibleBoardClusters`/`getVisibleBoardItems`/a
+full project `JSON.stringify` against the 500-code test project — all sub-millisecond, ruling
+out "the project is just big enough to be slow" as an explanation. Searched the codebase for
+anything resembling a ~60-second timer — none exists (the only timer anywhere is the 1.5s
+autosave debounce). With both of those ruled out, the leading remaining suspect is
+`window.confirm()` itself: this session already found `window.prompt()` silently doesn't work
+in Electron's renderer (a real, confirmed bug fixed earlier in this log), and `confirm()`/
+`alert()` are the same category of synchronous native-dialog API, with their own documented
+Windows/Electron focus-restoration quirks after the dialog closes — a plausible, if not
+independently reproducible from this environment, explanation for input focus specifically
+misbehaving right after a `confirm()` prompt.
+
+Replaced "Delete board"'s `window.confirm()` with the same plain inline confirmation bar
+already used for the cluster-link labeling fix (an explicit `confirmingDeleteBoard` state, a
+red confirm bar with Delete/Cancel buttons, reset when the selected board changes) — removing
+the one concrete suspect regardless of whether the exact mechanism is fully confirmed.
+Deliberately scoped to just this one dialog rather than converting every `window.confirm()` in
+the app pre-emptively (`Reset placement` on the default board, category deletion in
+`ClusterRowShell.tsx` also use it) — asked the user to report whether those show the same
+freeze, which would confirm it's `confirm()` itself at fault rather than something specific to
+the delete-board code path, before touching call sites with no reported problem.
+
+Verified: no shared/pure logic touched (this is a UI-only change), typecheck clean, full suite
+still 323/323, production build clean, boot-tested (no errors, cleanly killed). The actual fix
+still needs the user's own hands-on confirmation that the freeze is gone, since the trigger
+couldn't be reproduced directly in this environment.
+
+### A bundled example project for first-time users (2026-09-14)
+
+Cadenza had zero onboarding: a first-time user landed on an empty project-creation screen with
+no sample data, no glossary, nothing to explore before committing to their own material — a
+real gap for the target audience of nursing/medical students who may never have used a QDA
+tool at all, alongside trained sociologists who have.
+
+Built a complete fictional example project rather than a toy: 3 interview transcripts (newly
+qualified nurses in different settings — general ward, emergency department, care home),
+coded into 195 codes and 105 analytic notes, organized into 15 clusters grouped under 3
+superclusters (`Vécu émotionnel et psychologique`, `Construction de l'identité
+professionnelle`, `Environnement et organisation du travail`). 3 of the 15 clusters are
+`kind: 'question'` categories, demonstrating the AQA workflow (a question as the category
+itself, with notes filed under it read as answers) alongside the theme-based clusters. Every
+supercluster and cluster carries a real `definition`. A second board, `Carte thématique`,
+lays out all 18 categories via the same `computeCategoryLayout` algorithm the app itself uses
+and adds 4 labeled `ClusterLink`s, so the thematic-map feature is visible in the example too,
+not just describable.
+
+Generated programmatically (a one-off Node script, not checked into the app) rather than
+hand-built line by line, given the scale: sentences from the three transcripts are extracted
+into a flat pool and assigned round-robin to codes/notes as verbatim-anchored segments, so
+every one of the 300 segments has a real, correctly-offset quote rather than a placeholder.
+Verified referentially before shipping it: every segment's `start:end` slice matches its
+stored `text`, every coding/category/note/board reference resolves, no code is orphaned or
+double-owned, zero errors — and separately opened through the app's own
+`readProjectFile`/`normalizeProjectData` path (not just re-parsed by the generator's own
+checker) to confirm it loads exactly as a real user's file would.
+
+Wired in as a genuine feature, not just a committed file: the project ships from
+`resources/sample-projects/example.qdaproj`, copied into the packaged app's `resources/`
+folder via electron-builder's `extraResources` (and read straight from the repo in dev mode).
+A new "Explore an example project" link on the project-creation screen triggers a save-dialog
+copy of the bundled file to a location the user owns — the shipped copy stays a clean
+template every time, edits go to the user's own copy — then opens it exactly like any other
+project. `.gitignore`'s blanket `*.qdaproj` rule got a `!resources/sample-projects/*.qdaproj`
+exception so the file is actually tracked.
+
+Verified: typecheck clean, full suite green (323/323, unchanged — this added no shared logic
+of its own beyond the generator script), production build clean, boot-tested (no errors,
+cleanly killed).
+
+### Removing a stale entry from Recent Projects (2026-09-14)
+
+Reported: after renaming the working folder (`Sandbox7` → `cadenza`), every entry in Recent
+Projects pointed at a path that no longer existed, and there was no way to clear them out
+short of manually editing the underlying JSON file.
+
+Added a `removeRecentProject` operation (filters the entry out of the same
+`recent-projects.json` the existing `add`/`get` operations already use, no new storage), a
+`project:remove-recent` IPC handler, and a small "✕" button that appears on hover next to each
+row in the Recent Projects list — clicking it drops just that entry, without touching (or
+needing) the file it pointed to.
+
+Verified: typecheck clean, full suite green (323/323), production build clean, boot-tested (no
+errors, cleanly killed).
+
+### Tree layout visually orphaned nested clusters from their superordinate (2026-09-14)
+
+Reported: after clicking "Tree", a cluster nested under a superordinate cluster looked
+completely disconnected from it — nothing on screen still showed the relationship.
+
+Root cause, once traced through: nesting in Cadenza is normally shown purely by geometric
+containment — a child cluster's box is drawn *inside* its parent's box, with no line needed,
+which is exactly how the default board and Radial (which deliberately cascades a moved root's
+delta down its whole subtree to preserve this) both display it. Tree's own layout deliberately
+breaks that containment on purpose: it lays parent and children out as separate, non-
+overlapping boxes in a top-down organizational-chart arrangement — itself an earlier fix (see
+the Tree row-spacing entry above), since a tall parent's box used to run straight through its
+own child row. Once children could no longer overlap their parent, nothing else on the board
+was left showing they still belonged to it — the hierarchy became genuinely illegible, not
+just differently drawn.
+
+Added `getStructuralNestingEdges` (`boardOps.ts`): for every parent/child cluster pair present
+on a board, checks whether the child's rectangle is still contained in the parent's; if not,
+emits an edge to draw. Rendered as a dashed, muted line distinct from a manually-authored
+`ClusterLink` (a labeled analytic relationship, not "this literally is a sub-theme of that
+one") — automatic, and silent wherever containment already shows the relationship (the default
+board, Radial), so it adds nothing where nothing was missing.
+
+Verified against the real `MultiCaseTest.qdaproj` (25 categories, 19 real parent/child pairs
+on a curated board): 0 edges before Tree (still contained, as expected), exactly 19 after —
+one per pair, matching the project's actual nesting exactly, with zero cluster overlaps.
+4 new unit tests added (no relationship when contained; an edge once laid out beside instead
+of inside — the exact reported bug; a category whose parent isn't on the board at all; a
+three-generation chain). Full suite green (327/327), typecheck clean, production build clean,
+boot-tested (no errors, cleanly killed).
+
+### The nesting-edge line wasn't visible enough to actually fix the reported bug (2026-09-14)
+
+Reported again after the fix above shipped (confirmed via a fresh `npm run dev` restart, so
+not a stale build): sub-clusters still looked separated/unlinked in Tree, and specifically not
+in Radial — ruling out both a stale build and a design misunderstanding, and pointing at the
+new connector itself.
+
+Two real problems, found by actually measuring against `MultiCaseTest.qdaproj` rather than
+guessing: the line was drawn **center-to-center** between the two cluster boxes, and — since
+the connector layer paints *behind* the cards — most of that line's length was hidden behind
+the boxes themselves; sampling the real project's 19 edges densely, one was over 94% covered
+this way, and the styling (`#cbd5e1`, thin, dashed) made even the visible fraction easy to
+miss on the rest.
+
+Fixed both: added `boxExitPoint` (clips each end of the line to where a ray from a box's own
+center toward the other box actually crosses that box's boundary, instead of running the line
+all the way to the center) so the whole segment sits in the open gap between the two clusters,
+never behind either one; and switched the line itself from a thin dashed `#cbd5e1` to a solid
+2px `#64748b` with an arrowhead pointing at the child — unambiguous at a glance, while staying
+visually distinct from a labeled, user-authored `ClusterLink` (which keeps its own arrow style
+and still connects box centers, since a link is a claim about two specific points, not a
+boundary-to-boundary structural edge).
+
+Verified by simulating both the old and new line against the real project's 19 edges (dense
+point sampling along each segment, checking whether it falls inside any cluster box other than
+its own two endpoints): the old center-to-center line was up to 94% hidden on the worst edge;
+the new clipped line is 0% hidden behind a third-party box on all 19. Full suite still green
+(327/327, no shared-logic tests needed changing — this was a rendering-only fix), typecheck
+clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### The real Tree bug: a parent kept its whole contains-children size once its children left it (2026-09-14)
+
+Reported a third time, with two exported PDFs (`Carte thématique - avant/après Tree.pdf`) from
+the bundled example project's own thematic-map board — the actual pixels made the real problem
+obvious in a way "it looks separated" hadn't yet: after Tree, the 3 supercluster boxes stayed
+their full original size (each ~2956×820, sized to *contain* 5 children in the pre-Tree
+containment layout) while their 15 children moved into a thin row far beneath — three
+huge, nearly empty rectangles sitting far above a sliver of tiny boxes. No connector line,
+however visible, reads as "these belong together" across so disproportionate a gap. The
+previous two fixes (the edge existing at all, then its clipped/arrowed visibility) were
+both real improvements, but neither one touched the actual cause.
+
+Root cause: `computeTreeLayout` never resizes a cluster (a deliberate choice from the original
+row-spacing fix), so a parent's box kept whatever size `computeCategoryLayout` had given it to
+*contain* its children in a normal (non-Tree) layout — a size that stops meaning anything the
+moment Tree lays those same children out separately instead.
+
+Fixed by giving a Tree "parent" node (one with a child also on the board) a resized box: its
+own header plus a grid of only its *own* directly-held codes/notes, via a newly extracted
+`computeOwnClusterSize` (the same formula `computeCategoryLayout` already used for a plain
+leaf, now shared rather than duplicated). A leaf (no children on the board) keeps its real,
+unchanged size, exactly as before. `ClusterPosition` gained optional `width`/`height` fields,
+applied by `applyClusterPositions` when present — Radial never sets them, so it's unaffected.
+
+Verified against the shipped example project's own `Carte thématique` board (the exact one in
+the reported PDFs): each supercluster shrank from 2956×820 to 280×200 (its true size — none of
+the 3 hold codes/notes directly, only nested clusters do), total canvas height dropped from
+1720 to 636, zero cluster overlaps, and all 15 structural nesting edges still draw correctly
+between the now-correctly-sized parents and their children. Also re-verified against
+`MultiCaseTest.qdaproj` (2 parent nodes, both shrank, 0 overlaps, all 19 edges intact). 2 of
+the existing `computeTreeLayout` tests were rewritten (their premise — a parent's *given* huge
+size stays load-bearing for row spacing — was exactly the assumption this fix corrects) and 3
+new ones added (a parent with no own content shrinks to a bare header; a parent that *does*
+hold its own codes/notes resizes to fit those, not to an empty minimum; a leaf is left
+untouched). Full suite green (329/329), typecheck clean, production build clean, boot-tested
+(no errors, cleanly killed).
+
+### The actual remaining cause: the connector SVG's drawing surface was a fixed 2400x1600 (2026-09-14)
+
+Reported a fourth time, with a fresh exported PDF from the same board: after the resize fix
+above, the 3 supercluster boxes were correctly small — but only some of the leftmost
+supercluster's connector lines were visible, and none at all for the other two.
+
+Traced by reading the user's own saved project file directly rather than guessing again: every
+one of the 15 structural nesting edges computed correctly (verified their exact coordinates,
+none degenerate), so the edges themselves were never the problem this time. The board's
+connector layer — the `<svg>` drawing every line on the board (structural nesting edges,
+`ClusterLink`s, item links, smart guides) plus the div wrapping the whole canvas — had always
+been sized to a fixed `CANVAS_WIDTH`/`CANVAS_HEIGHT` of 2400×1600, regardless of how far the
+actual content extended. Cluster frames are plain, absolutely-positioned divs, unaffected by
+their container's declared size, so they rendered fine anywhere; but an `<svg>` element clips
+anything drawn past its own declared width/height by default. A Tree layout with several
+children in one shared row easily exceeds that — the reported board's real content extent was
+14880×636, and 12 of its 15 children sat entirely beyond x=2400, so every connector touching
+them (their structural nesting edge included) was silently invisible from the very start,
+independent of any of the three previous fixes.
+
+Fixed by computing the canvas size dynamically from the actual bounding box of every cluster
+and item on the board (the same box computation `handleFitToView`/the PDF exporter already
+used), with `CANVAS_WIDTH`/`CANVAS_HEIGHT` kept only as the floor for a small or empty board —
+applied to the wrapper div, the `<svg>` itself, the smart-guide line spans, and the unlink-
+button overlay, the four places that had hardcoded the fixed size.
+
+Verified against the user's own saved file: actual content extent 14880×636 now yields a
+14940×1600 canvas (comfortably covering everything, versus the old fixed 2400×1600 that
+clipped 12 of 15 children's own boxes). No shared-logic changes this time — purely a
+BoardView.tsx rendering fix — so no new unit tests; full suite still green (329/329, unchanged),
+typecheck clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### "Reset placement" now works on any board — the actual missing piece, not another Tree bug (2026-09-14)
+
+Reported a fifth time — but this one wasn't actually about Tree being wrong: shown a concrete
+example ("Vécu émotionnel et psychologique" containing other clusters in the default view;
+after Tree, its clusters sit outside its box, uncontained), asked directly which behavior was
+actually wanted: keep Tree's node-link diagram (parent and children as separate, connected
+boxes — the textbook meaning of "hierarchical tree", what's shipped) or switch to always
+showing nesting as containment (boxes inside boxes, Cadenza's own convention everywhere else).
+The answer: keep the node-link diagram — the real gap was that **nothing on a curated board
+could ever put clusters back into a contained arrangement** once Tree, Radial, or manual
+dragging had moved them there; Radial's own delta-cascade only *preserves* whatever
+containment already existed; nothing *restores* it.
+
+"Reset placement" already did exactly this for the default board (recompute its automatic
+layout from scratch), but was hard-guarded to no-op on every other board, because the default
+board's reset works by *dropping* every explicit cluster shape and relying on
+`getVisibleBoardClusters`'s default-board-only fallback to recompute one — a curated board has
+no such fallback, so dropping shapes there would just empty it out.
+
+Added `computeNestedLayout`: every cluster already on a (curated) board gets a completely
+fresh position/size from `computeCategoryLayout` — the same nesting-aware masonry pack the
+default board and "+ Add all clusters" both use, where a nested cluster's box is placed
+genuinely *inside* its parent's. "Reset placement" now branches on `board.isDefault`: the
+default board keeps its existing drop-and-recompute behavior unchanged; any other board gets
+this new nested reflow instead of being a no-op, and the button (previously hidden entirely
+on non-default boards) now always shows.
+
+Verified against the user's own saved file: computed a fresh nested layout for its 18 real
+categories and confirmed every one of the 15 parent/child pairs is genuinely contained (child's
+rectangle fully inside its parent's) with zero non-containment overlaps between siblings. 3 new
+tests added, including one reproducing the exact reported scenario (a supercluster with no
+codes of its own, holding clusters that were left separated by Tree, restored to full
+containment by `computeNestedLayout`). Full suite green (332/332), typecheck clean, production
+build clean, boot-tested (no errors, cleanly killed).
+
+### Example project: codes were thematically unrelated to their quotes (2026-09-14)
+
+Reported with a concrete example: the segment "Il faut prendre des décisions cliniques très
+vite, souvent avec des informations incomplètes, et ça, ça m'a terrifié au début" — a nurse
+describing the terror of fast clinical decisions under incomplete information — was coded as
+"Plaisir de la relation de confiance" ("pleasure of the trust relationship"). Not a bug, but a
+real quality problem: the whole point of a bundled example is to model good coding practice for
+a first-time user, and a code with no real relationship to its quote actively works against
+that.
+
+Root cause: the generator (a one-off Node script, not part of the app) originally drew every
+code/note's verbatim anchor from a single flat pool of sentences extracted from the three
+transcripts in document order, assigned round-robin across all 195 codes regardless of which
+cluster they belonged to — a purely positional assignment with zero regard for content, so a
+sentence about clinical terror could land on any code in the codebook by coincidence of where
+it fell in the pool.
+
+Fixed by replacing the flat pool with an explicit, hand-picked quote list *per cluster* —
+roughly 3-10 real sentences per cluster, chosen by actually reading the transcripts for what
+each one discusses — with codes and notes *within* a cluster still cycling round-robin, but
+only ever drawing from that cluster's own on-theme pool (92 distinct quotes total across the 15
+clusters, verified to exist verbatim in the transcripts — the generator throws immediately on
+any quote that doesn't literally match, which caught one typo before it shipped). A quote
+naturally ends up carrying more than one code/note this way, which is realistic — a rich
+passage in a real interview commonly earns several codes — rather than a defect.
+
+Verified: the exact reported segment now codes as "Sentiment de dépassement" ("feeling
+overwhelmed"), a genuine fit, in its correct cluster ("Stress et charge mentale"); spot-checked
+a broader sample every 20th coding across the full set and confirmed every one lands on a
+thematically coherent cluster. Re-verified referential integrity (0 errors) and reopened
+through the app's own `readProjectFile`/`normalizeProjectData` path. No app source changed —
+this only touched the generator script and its output file
+(`resources/sample-projects/example.qdaproj`) — so the existing suite is unaffected: still
+332/332, typecheck clean.
+
+### The cluster-level fix wasn't enough either — full audit, explicit per-code mapping (2026-09-14)
+
+Followed up: "it's better but there are still a lot of hiccups... could you run a few checks?
+It's important since it's the demo project." Right — cycling *within* the correct cluster
+still isn't the same as matching the specific code: dumped every one of the 300 code/note-to-
+quote pairings and read them individually rather than spot-checking. Real problems turned up
+immediately — e.g. "Charge mentale des transmissions" landing on a sentence about handling a
+cardiac arrest (same cluster, wrong code), and, worse, several codes ("Soutien familial",
+"Soutien du conjoint", "Confidence à un ancien camarade d'école", "Écoute d'un cadre
+bienveillant") describing things the three transcripts never actually mentioned at all — no
+family, no partner, no manager, no school friend anywhere in the original interviews, so no
+quote could ever have matched them well.
+
+Fixed properly this time: extended the transcripts with new paragraphs (append-only, so no
+existing verified offset shifts) specifically covering the previously-unsupported material —
+a colleague conflict, a formal medication double-check routine, family/partner/manager support,
+material shortages, communication-channel specifics, and more — then replaced the per-cluster
+round-robin entirely with an explicit `codeQuotes` map: all 195 codes individually paired with
+the real sentence chosen by reading what that code means and what the sentence says, not by
+cycling position. A quote still legitimately supports more than one code where they're near-
+synonyms (realistic multi-coding), but every pairing is now a deliberate choice. Notes draw
+from each cluster's own deduplicated set of quotes already assigned to its codes.
+
+Verified by dumping and re-reading the *entire* mapping a second time (not sampling) — all 195
+code pairings and a spot-check of notes across 4 clusters now read as genuine, specific
+matches. Referential integrity re-checked (0 errors), reopened through the app's own
+`readProjectFile` path. Generator + output file only; existing suite unaffected (332/332),
+typecheck clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### Cluster-link arrows and labels were hidden behind code/note cards on the default board (2026-09-14)
+
+Asked directly, not reported as a broken bug: on the default board, some `ClusterLink` arrows
+were now visible (the earlier fixed-canvas clip was gone) but routinely disappeared behind
+code/note cards — and whether that was intentional.
+
+It wasn't, on inspection: the delete ("×") button for a cluster link had already been moved to
+render *after* every card specifically so it stayed clickable over them (an existing, correctly
+reasoned choice) — but the line and its label were left in the earlier, behind-everything
+layer. A `ClusterLink` typically spans a whole cluster's width, so it routinely crosses straight
+through however many code/note cards happen to sit in its path — unlike a plain item-to-item
+link (kept behind on purpose, short and local by nature) or a Tree structural edge (usually on
+a frames-only curated board with no cards to cross), a cluster link's label is the actual
+analytic content of the relationship, not decoration, and losing it under a card defeated the
+existing "stays legible over whatever it crosses" design intent for it.
+
+Fixed by moving the cluster-link line + label into their own layer rendered after every card,
+mirroring the reasoning already applied to its delete button. Item-to-item links and Tree's
+structural nesting edges are unaffected — left in their original behind-cards layer, since
+that placement's rationale (keep cards fully legible; these lines are short/local or off a
+cards-free board) still holds for them.
+
+Verified: rendering-only change (a JSX reorder, one marker def duplicated into the new layer),
+no shared logic touched — full suite still green (332/332, unchanged), typecheck clean,
+production build clean, boot-tested (no errors, cleanly killed).
+
+### ClusterLink arrows clipped to cluster edges, not drawn straight through their interiors (2026-09-14)
+
+Suggested, not reported as broken: a `ClusterLink` (the labeled thematic-map relationship,
+distinct from the automatic structural nesting edges) still connected cluster *centers*, same
+as before any of the connector work this session — meaning its line, and the arrowhead at its
+end, visibly cut across the inside of both boxes rather than stopping at their edges. The
+structural nesting edges got exactly this fix earlier (`boxExitPoint`, clipping a line to where
+a ray from a box's own center toward the other box crosses that box's boundary); `ClusterLink`
+had simply never been updated to use it.
+
+Fixed by reusing `boxExitPoint` for `clusterLinkGeometries` too: both endpoints now clip to
+each cluster's own edge, and the label's midpoint is recomputed from the *clipped* segment
+(not the full center-to-center span), so it lands in the actual gap between two clusters
+instead of potentially inside one of them.
+
+(Also confirmed, not a bug: an arrow without a head is a `ClusterLink` explicitly marked
+un-directed — the link-creation UI defaults to a directed arrow but has its own toggle for a
+plain undirected line, since a named relationship like "contrasts with" doesn't always read
+one-way.)
+
+Verified: rendering-only change reusing an already-tested function; full suite still green
+(332/332, unchanged), typecheck clean, production build clean, boot-tested (no errors, cleanly
+killed).
+
+### Thematic-map polish: curved edges around obstructions, parallel-link offsets, undirected dashing, cluster focus (2026-09-14)
+
+Follow-up brainstorm from the arrow-clipping fix above, worked through as a set: undirected
+`ClusterLink`s having no arrowhead was confirmed as intended (there's a UI toggle for it), and
+three real ideas turned into features —
+
+**Curved edges around an unrelated cluster.** A `ClusterLink`'s straight, edge-clipped path
+could still cut straight through some *third* cluster's box that has nothing to do with the
+relationship — the previous fix only stopped it from cutting through its own two endpoints.
+Added `computeClusterLinkPath` (`boardOps.ts`): detects whether the straight path intersects
+any other cluster on the board (`segmentIntersectsBox`, a standard segment-vs-rectangle test)
+and, if so, bows the line into a quadratic Bézier curve, offset away from the obstruction by
+enough to clear it. Checked against the shipped example project's own `Carte thématique` board:
+all 5 real `ClusterLink`s there turn out to already cross at least one other cluster in its
+current masonry layout, confirmed by running the actual detection against it rather than
+assuming — every one of them now curves.
+
+**Parallel-link spreading.** Two different `ClusterLink`s between the very same pair of
+clusters would previously draw as one indistinguishable line. `computeClusterLinkPath` also
+takes a stable index/count within its own pair's group and offsets each parallel link to a
+different side, symmetric around the straight line — obstruction avoidance always wins over
+this smaller cosmetic offset when a link needs both. Demonstrated in the example project by
+adding a second, undirected relationship ("coexiste avec") between the same two clusters the
+existing "aggrave" link already connects.
+
+**Dashed undirected links.** A `ClusterLink` with no arrowhead now also draws dashed, so "this
+relationship is deliberately non-directional" reads as a positive design choice rather than
+something that just looks like a missing feature.
+
+**Cluster focus.** Hovering a cluster's header now dims every other cluster frame and every
+`ClusterLink` that doesn't directly touch it, leaving just that cluster and its own
+relationships at full opacity — a fade (`ClusterFrame`'s new `isDimmed` prop, `transition-
+opacity`), not a hide, so the rest of the map stays visible as context. Scoped to clusters and
+cluster links only, not the (much busier) item-card layer, and hover-only for now — the
+header's mousedown already starts a move-drag, so reliably distinguishing a plain click for a
+click-to-pin variant would need its own gesture tracking, left as a possible follow-up rather
+than built speculatively.
+
+Verified: 12 new unit tests for `segmentIntersectsBox`/`computeClusterLinkPath` (straight when
+nothing obstructs; bows around a real obstruction; ignores one the path never actually
+crosses; symmetric parallel offsets; obstruction avoidance overriding a smaller parallel
+offset; a same-position degenerate case never produces `NaN`) plus re-verification against the
+real, regenerated example project (all 5 `ClusterLink`s resolve to `curved: true`, matching
+independently-confirmed geometry; the new pair resolves to a 2-member parallel group). Full
+suite green (342/342), typecheck clean, production build clean, boot-tested (no errors,
+cleanly killed).
+
+### A curved ClusterLink could bow off the top of the canvas (2026-09-14)
+
+Reported right after the curve feature above shipped: on the example project's own thematic
+map, some arrows were cut off — invisible above the top of the visible board.
+
+Root cause: a curve's bow is a signed offset with no ceiling relative to the canvas's own
+edges — it only had to be big enough to clear an obstruction, never checked whether that took
+it past y=0 (or x=0), where there's nothing to render into (no negative scroll position, and
+an `<svg>` with explicit width/height clips anything before its own origin). A link near the
+top row of a board — not a rare case, since there's naturally little headroom above whatever's
+already at the top — needing to bow *up* to clear an obstruction had nowhere to bow into.
+Checked directly against the shipped example project: 3 of its 5 real links were computing a
+negative control-point Y before this fix, an exact match for the report.
+
+Fixed with a floor: `computeClusterLinkPath` now clamps its control point to never go below a
+small margin (20px) on either axis — trading a slightly tighter curve right at the very edge
+of the board for the curve always actually being visible, which matters far more than the
+last few pixels of ideal clearance. Also moved `canvasSize`'s computation (which grows the
+drawing surface to fit real content — see the earlier fixed-2400×1600-canvas entry) to run
+*after* the cluster-link geometry and include every curve's own points, so a curve bowing
+outward on the opposite (high/right) side now grows the canvas to fit it too, the same
+protection the low/left side gets from the clamp.
+
+Verified: re-ran the exact computation against the real example project — the 3 previously-
+negative control points now clamp to y=20, and the whole board's connector geometry (including
+every curve) stays within non-negative bounds. One existing test relocated away from the
+canvas origin (it was about curving in general, not the edge case) and a new dedicated
+regression test added reproducing the exact reported scenario. Full suite green (343/343),
+typecheck clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### PDF export was cloning interactive UI chrome into the figure (2026-09-14)
+
+Asked for a design/readability review of an exported thematic map, not a bug report — but one
+turned up on inspection: `handleExportBoardPdf` clones `canvasRef.current` verbatim
+(`cloneNode(true)`), which is the *live, interactive* canvas — every cluster's delete "×",
+its color-swatch `<input type="color">`, its resize handle, every `ClusterLink`'s own delete
+"×", and an item card's remove "×" all rode along into what's meant to be a clean, printable
+figure.
+
+Fixed by giving each of those a `board-export-hide` class and injecting a `.board-export-hide
+{ display: none !important; }` rule into the *exported* HTML only — the live, interactive
+board is completely unchanged; the rule only exists in the cloned snapshot handed to the PDF
+renderer.
+
+Also bumped the `ClusterLink` label's legibility while looking at the same figure: 11px,
+default-weight text in a thin pale-bordered pill reads fine at 100% on screen, but a board
+spanning several thousand px (ordinary once more than a couple of superclusters are on it)
+gets shrunk a lot to fit one exported page, and a label that small all but disappears at that
+scale. Bumped to 13px/semibold with a darker, slightly thicker rect border.
+
+Verified: every intended element confirmed to carry the new class (`grep` across the three
+components involved); the export path itself needs a live `BrowserWindow` to fully re-render
+(Electron's `printToPDF`, not reproducible standalone the way this session's other geometry
+fixes were), so this relied on the established boot-test + build discipline rather than a
+full re-export. Full suite green (343/343, unchanged — no shared logic touched), typecheck
+clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### Curved-vs-straight ClusterLinks as a per-board choice, and compact frames-only sizing (2026-09-14)
+
+Two follow-ups from the design review above, both requested directly: "I can see the appeal
+of curved arrows, but it can also make the whole thing harder to read" — asked for a way to
+choose — plus a straight yes to the compact-sizing idea floated in that same review.
+
+**Curved vs. straight, per board.** Added `BoardRecord.clusterLinkStyle: 'curved' | 'straight'`
+(optional; missing = `'curved'`, so every existing board keeps today's behavior unless changed).
+`computeClusterLinkPath` takes the style as its last argument — `'straight'` skips all
+obstruction-avoidance and parallel-offset logic and always returns a plain edge-to-edge line,
+accepting that a crossing or an overlapping parallel pair can happen, in exchange for a
+simpler figure to read at a glance. A `Curved | Straight` segmented toggle sits next to Tree/
+Radial in the toolbar, next to a new `setClusterLinkStyle` store action.
+
+**Compact frames-only sizing.** `computeCategoryLayout` gained a `compact` parameter: every
+category's own member-card space is ignored regardless of how many codes/notes it actually
+holds, so a leaf sizes down to just its header (`COMPACT_LEAF_WIDTH`/`HEIGHT`, 220×48) instead
+of the item-reserving default (280×200) — directly answering the review's observation that a
+frames-only board's boxes read as large and mostly empty. `addAllClustersToBoard` takes a
+matching `compact` argument (only meaningful alongside `includeMembers: false`), and "+ Add
+all clusters" now has a "Compact" checkbox next to it, on by default. Writing the test for
+this caught a real bug in the same commit: `placeCategory`'s own inner-child positioning was
+still calling the non-compact `ownMemberGridSize` directly, so a compact parent's box shrank
+but its children were still placed as if it hadn't — fixed the same way `computeSize` already
+was.
+
+**Test project**: the example project's `Carte thématique` board now ships with
+`clusterLinkStyle: 'straight'` (all 5 links verified to resolve `curved: false`) and compact
+cluster sizing (every leaf cluster confirmed 220×48, down from 950×356; each supercluster
+760×204, down from 2956×820) — demonstrating both new options directly rather than just
+shipping the code for them unused.
+
+Verified: 2 new `computeCategoryLayout` compact tests, 2 new `computeClusterLinkPath` style
+tests, 1 new `setBoardClusterLinkStyle` test (all passing, one catching the `placeCategory`
+bug above before it shipped). Regenerated example project re-verified for referential
+integrity (0 errors) and reopened through the app's own `readProjectFile`/
+`normalizeProjectData` path, confirming `clusterLinkStyle` survives normalization intact. Full
+suite green (348/348), typecheck clean, production build clean, boot-tested (no errors,
+cleanly killed).
+
+### Compact/Full made live, and Link clusters/Curved-Straight unhidden on the default board (2026-09-14)
+
+Two follow-ups. First: "the Compact tick box would allow to resize on the fly... possible to
+resize/return to normal size by ticking the checkbox" — the checkbox from the previous entry
+only affected *future* "+ Add all clusters" clicks, doing nothing for clusters already on the
+board. Replaced it with a persisted `BoardRecord.clusterFrameSize: 'compact' | 'full'` (a
+`Compact | Full` toggle, matching `Curved | Straight`'s own style) — switching it now also
+re-lays-out (via `computeNestedLayout`, now itself taking a `compact` parameter) and resizes
+every cluster already on the board, the same way "Reset placement" already resets a curated
+board's arrangement. Round-tripped Full→Compact→Full against the real example project's own
+board: sizes changed exactly as expected both directions, zero unwanted overlaps either way.
+
+Second: "the button controls for arrows aren't here [on the main board]... is that normal?" —
+first pass only un-hid the `Curved | Straight` display toggle there; the user then clarified
+they meant the *whole* group, "the possibility to link clusters" included. On inspection,
+`createClusterLink` never had any board-type restriction at all — `ClusterLink` is a
+project-wide relationship between categories (not a per-board thing), so there was never a
+real reason "Link clusters" mode had to be hidden on the default board, only that it happened
+to live inside the same gated toolbar block as Tree/Radial. Un-gated "Link clusters" (+ its
+"Arrow" directed toggle) alongside `Curved | Straight`; left Tree/Radial gated to non-default
+boards, since those *do* have a real reason — their own store actions no-op on the default
+board's own automatic layout, unlike this pair.
+
+Verified: 1 new `computeNestedLayout` compact-resize test, 1 new `setBoardClusterFrameSize`
+test. Full suite green (350/350), typecheck clean, production build clean, boot-tested (no
+errors, cleanly killed).

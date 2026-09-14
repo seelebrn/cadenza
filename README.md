@@ -1744,3 +1744,29 @@ code pairings and a spot-check of notes across 4 clusters now read as genuine, s
 matches. Referential integrity re-checked (0 errors), reopened through the app's own
 `readProjectFile` path. Generator + output file only; existing suite unaffected (332/332),
 typecheck clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### Cluster-link arrows and labels were hidden behind code/note cards on the default board (2026-09-14)
+
+Asked directly, not reported as a broken bug: on the default board, some `ClusterLink` arrows
+were now visible (the earlier fixed-canvas clip was gone) but routinely disappeared behind
+code/note cards — and whether that was intentional.
+
+It wasn't, on inspection: the delete ("×") button for a cluster link had already been moved to
+render *after* every card specifically so it stayed clickable over them (an existing, correctly
+reasoned choice) — but the line and its label were left in the earlier, behind-everything
+layer. A `ClusterLink` typically spans a whole cluster's width, so it routinely crosses straight
+through however many code/note cards happen to sit in its path — unlike a plain item-to-item
+link (kept behind on purpose, short and local by nature) or a Tree structural edge (usually on
+a frames-only curated board with no cards to cross), a cluster link's label is the actual
+analytic content of the relationship, not decoration, and losing it under a card defeated the
+existing "stays legible over whatever it crosses" design intent for it.
+
+Fixed by moving the cluster-link line + label into their own layer rendered after every card,
+mirroring the reasoning already applied to its delete button. Item-to-item links and Tree's
+structural nesting edges are unaffected — left in their original behind-cards layer, since
+that placement's rationale (keep cards fully legible; these lines are short/local or off a
+cards-free board) still holds for them.
+
+Verified: rendering-only change (a JSX reorder, one marker def duplicated into the new layer),
+no shared logic touched — full suite still green (332/332, unchanged), typecheck clean,
+production build clean, boot-tested (no errors, cleanly killed).

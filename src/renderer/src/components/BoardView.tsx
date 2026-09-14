@@ -1238,17 +1238,6 @@ function BoardView(): JSX.Element {
             <svg className="pointer-events-none absolute left-0 top-0" width={canvasSize.width} height={canvasSize.height}>
               <defs>
                 <marker
-                  id="cluster-link-arrow"
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="7"
-                  markerHeight="7"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
-                </marker>
-                <marker
                   id="nesting-edge-arrow"
                   viewBox="0 0 10 10"
                   refX="9"
@@ -1282,41 +1271,6 @@ function BoardView(): JSX.Element {
                   markerEnd="url(#nesting-edge-arrow)"
                 />
               ))}
-              {/* Thematic-map cluster links — a labeled relationship between two
-                  clusters (see ClusterLink in types.ts), distinct from the plain
-                  item-link lines above. Drawn with an optional arrowhead for a
-                  directed relationship, and the label on a small background
-                  rect so it stays legible over whatever it crosses. */}
-              {clusterLinkGeometries.map(({ link, ax, ay, bx, by, midX, midY }) => (
-                <g key={link.id}>
-                  <line
-                    x1={ax}
-                    y1={ay}
-                    x2={bx}
-                    y2={by}
-                    stroke="#475569"
-                    strokeWidth={2}
-                    markerEnd={link.directed ? 'url(#cluster-link-arrow)' : undefined}
-                  />
-                  {link.label && (
-                    <>
-                      <rect
-                        x={midX - (link.label.length * 3.2 + 6)}
-                        y={midY - 9}
-                        width={link.label.length * 6.4 + 12}
-                        height={18}
-                        rx={4}
-                        fill="white"
-                        stroke="#cbd5e1"
-                      />
-                      <text x={midX} y={midY + 4} textAnchor="middle" fontSize={11} fill="#334155">
-                        {link.label}
-                      </text>
-                    </>
-                  )}
-                </g>
-              ))}
-
               {/* Smart guides — only while actually dragging a cluster (see
                   clusterMoveSnap). Alignment guides span the full canvas on
                   their axis, PowerPoint/Figma-style; distribution guides
@@ -1526,6 +1480,62 @@ function BoardView(): JSX.Element {
                 />
               )
             })}
+
+            {/* Thematic-map cluster links render in their own layer *after*
+                every card, not behind them like the plain item links and
+                structural edges above — a cluster link routinely spans a
+                whole cluster's width, crossing straight through however
+                many code/note cards sit in its path; kept behind cards
+                (the original placement) meant both the line and, worse,
+                its label — the actual analytic content of the
+                relationship — regularly vanished under whichever card
+                happened to be in the way. Same reasoning as the delete
+                button just below, which already had to move here for
+                exactly this reason. */}
+            <svg className="pointer-events-none absolute left-0 top-0" width={canvasSize.width} height={canvasSize.height}>
+              <defs>
+                <marker
+                  id="cluster-link-arrow"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+                </marker>
+              </defs>
+              {clusterLinkGeometries.map(({ link, ax, ay, bx, by, midX, midY }) => (
+                <g key={link.id}>
+                  <line
+                    x1={ax}
+                    y1={ay}
+                    x2={bx}
+                    y2={by}
+                    stroke="#475569"
+                    strokeWidth={2}
+                    markerEnd={link.directed ? 'url(#cluster-link-arrow)' : undefined}
+                  />
+                  {link.label && (
+                    <>
+                      <rect
+                        x={midX - (link.label.length * 3.2 + 6)}
+                        y={midY - 9}
+                        width={link.label.length * 6.4 + 12}
+                        height={18}
+                        rx={4}
+                        fill="white"
+                        stroke="#cbd5e1"
+                      />
+                      <text x={midX} y={midY + 4} textAnchor="middle" fontSize={11} fill="#334155">
+                        {link.label}
+                      </text>
+                    </>
+                  )}
+                </g>
+              ))}
+            </svg>
 
             {/* Unlink buttons render last (on top of every card) so a link's
                 midpoint — which sits in a snap gap narrower than the button

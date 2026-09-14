@@ -1645,3 +1645,38 @@ Verified against the user's own saved file: actual content extent 14880×636 now
 clipped 12 of 15 children's own boxes). No shared-logic changes this time — purely a
 BoardView.tsx rendering fix — so no new unit tests; full suite still green (329/329, unchanged),
 typecheck clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### "Reset placement" now works on any board — the actual missing piece, not another Tree bug (2026-09-14)
+
+Reported a fifth time — but this one wasn't actually about Tree being wrong: shown a concrete
+example ("Vécu émotionnel et psychologique" containing other clusters in the default view;
+after Tree, its clusters sit outside its box, uncontained), asked directly which behavior was
+actually wanted: keep Tree's node-link diagram (parent and children as separate, connected
+boxes — the textbook meaning of "hierarchical tree", what's shipped) or switch to always
+showing nesting as containment (boxes inside boxes, Cadenza's own convention everywhere else).
+The answer: keep the node-link diagram — the real gap was that **nothing on a curated board
+could ever put clusters back into a contained arrangement** once Tree, Radial, or manual
+dragging had moved them there; Radial's own delta-cascade only *preserves* whatever
+containment already existed; nothing *restores* it.
+
+"Reset placement" already did exactly this for the default board (recompute its automatic
+layout from scratch), but was hard-guarded to no-op on every other board, because the default
+board's reset works by *dropping* every explicit cluster shape and relying on
+`getVisibleBoardClusters`'s default-board-only fallback to recompute one — a curated board has
+no such fallback, so dropping shapes there would just empty it out.
+
+Added `computeNestedLayout`: every cluster already on a (curated) board gets a completely
+fresh position/size from `computeCategoryLayout` — the same nesting-aware masonry pack the
+default board and "+ Add all clusters" both use, where a nested cluster's box is placed
+genuinely *inside* its parent's. "Reset placement" now branches on `board.isDefault`: the
+default board keeps its existing drop-and-recompute behavior unchanged; any other board gets
+this new nested reflow instead of being a no-op, and the button (previously hidden entirely
+on non-default boards) now always shows.
+
+Verified against the user's own saved file: computed a fresh nested layout for its 18 real
+categories and confirmed every one of the 15 parent/child pairs is genuinely contained (child's
+rectangle fully inside its parent's) with zero non-containment overlaps between siblings. 3 new
+tests added, including one reproducing the exact reported scenario (a supercluster with no
+codes of its own, holding clusters that were left separated by Tree, restored to full
+containment by `computeNestedLayout`). Full suite green (332/332), typecheck clean, production
+build clean, boot-tested (no errors, cleanly killed).

@@ -56,6 +56,7 @@ import {
   addItemToBoard as addItemToBoardOp,
   applyClusterLayoutWithMembers as applyClusterLayoutWithMembersOp,
   assignItemToCluster as assignItemToClusterOp,
+  computeNestedLayout,
   computeRadialLayout,
   computeTreeLayout,
   createBoard as createBoardOp,
@@ -251,13 +252,17 @@ interface ProjectState {
   addAllClustersToBoard: (boardId: string, includeMembers?: boolean) => void
   linkItems: (boardId: string, itemAId: string, itemBId: string) => void
   unlinkItems: (linkId: string) => void
-  /** Drops every explicit cluster shape and clustered item position on this
-   * board, so it recomputes fresh from the current category structure —
-   * the "Reset placement" button. Deliberately a no-op on any board that
-   * isn't the default one: resetDefaultBoardClusterLayout doesn't itself
-   * check board.isDefault (it just drops explicit shapes for whatever id
-   * it's given), and a non-default board has no auto-layout fallback to
-   * recompute *to* — running it there would just empty the board out. */
+  /** The "Reset placement" button. On the default board: drops every
+   * explicit cluster shape and clustered item position, so it recomputes
+   * fresh from the current category structure (resetDefaultBoardClusterLayout
+   * doesn't itself check board.isDefault, and a non-default board has no
+   * auto-layout fallback to recompute *to* — dropping shapes there would
+   * just empty the board out, so that path is default-board-only). On any
+   * other board: repositions every cluster already there back into the
+   * same nested/contained masonry pack via computeNestedLayout — the only
+   * way back to a contained arrangement once Tree, Radial, or manual
+   * dragging has moved things, since none of those restore containment on
+   * their own. */
   resetBoardLayout: (boardId: string) => void
 
   // Cluster links (labeled thematic-map relationships) + alternate layouts
@@ -749,9 +754,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   unlinkItems: (linkId) => get().updateProject((data) => unlinkItemsOp(data, linkId)),
 
   resetBoardLayout: (boardId) => {
-    const board = get().data?.boards.find((b) => b.id === boardId)
-    if (!board?.isDefault) return
-    get().updateProject((data) => resetDefaultBoardClusterLayoutOp(data, boardId))
+    const { data } = get()
+    const board = data?.boards.find((b) => b.id === boardId)
+    if (!data || !board) return
+    if (board.isDefault) {
+      get().updateProject((current) => resetDefaultBoardClusterLayoutOp(current, boardId))
+      return
+    }
+    const clusters = data.boardClusters.filter((c) => c.boardId === boardId)
+    const positions = computeNestedLayout(clusters, data.categories)
+    get().updateProject((current) => applyClusterLayoutWithMembersOp(current, boardId, positions))
   },
 
   createClusterLink: (fromCategoryId, toCategoryId, label, directed) => {

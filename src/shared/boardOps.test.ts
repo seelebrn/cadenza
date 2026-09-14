@@ -9,7 +9,9 @@ import {
   assignItemToCluster,
   computeAccommodatingSize,
   computeCategoryLayout,
+  type ClusterPosition,
   computeGridPosition,
+  computeNestedLayout,
   computeOwnClusterSize,
   computeRadialLayout,
   computeTreeLayout,
@@ -1228,6 +1230,63 @@ describe('applyClusterLayoutWithMembers', () => {
     })
     const next = applyClusterLayoutWithMembers(data, 'b1', [{ id: 'rootC', x: 1000, y: 1000 }])
     expect(next.boardClusters.find((c) => c.id === 'grandchildC')).toMatchObject({ x: 1040, y: 1120 })
+  })
+})
+
+describe('computeNestedLayout', () => {
+  function cluster(id: string, categoryId: string, x = 0, y = 0, width = 100, height = 100): BoardCluster {
+    return { id, boardId: 'b1', categoryId, x, y, width, height, createdAt: '0' }
+  }
+
+  it("restores containment after Tree separated a parent from its children — the reported follow-up bug", () => {
+    // Exactly the scenario reported: a supercluster with no codes/notes of
+    // its own, holding 2 clusters that DO have codes — after Tree, they sit
+    // in a separate row, disconnected; computeNestedLayout should put the
+    // child back genuinely *inside* the parent's box, not just move it near.
+    const categories: CategoryRecord[] = [
+      makeCategory('super'),
+      makeCategory('c1', { parentCategoryId: 'super', codeIds: ['x1', 'x2'] }),
+      makeCategory('c2', { parentCategoryId: 'super', codeIds: ['x3'] })
+    ]
+    // Positions as Tree would have left them: parent small and far above,
+    // children in a separate row far below — nothing here is contained.
+    const clusters = [
+      cluster('super', 'super', 2000, 40, 280, 200),
+      cluster('c1', 'c1', 0, 500, 300, 200),
+      cluster('c2', 'c2', 400, 500, 300, 200)
+    ]
+    const positions = computeNestedLayout(clusters, categories)
+    const byId = new Map(positions.map((p) => [p.id, p]))
+    // computeNestedLayout always sets width/height (it's driven entirely by
+    // a fresh computeCategoryLayout pass) — non-null assertions are safe here.
+    const superPos = byId.get('super')!
+    const c1Pos = byId.get('c1')!
+    const c2Pos = byId.get('c2')!
+
+    function contains(outer: ClusterPosition, inner: ClusterPosition): boolean {
+      return (
+        inner.x >= outer.x &&
+        inner.y >= outer.y &&
+        inner.x + inner.width! <= outer.x + outer.width! &&
+        inner.y + inner.height! <= outer.y + outer.height!
+      )
+    }
+    expect(contains(superPos, c1Pos)).toBe(true)
+    expect(contains(superPos, c2Pos)).toBe(true)
+  })
+
+  it('positions every cluster on the board, root and nested alike, same contract as computeTreeLayout', () => {
+    const categories: CategoryRecord[] = [makeCategory('A'), makeCategory('B', { parentCategoryId: 'A' })]
+    const clusters = [cluster('a', 'A', 900, 900), cluster('b', 'B', 900, 900)]
+    const positions = computeNestedLayout(clusters, categories)
+    expect(positions.map((p) => p.id).sort()).toEqual(['a', 'b'])
+  })
+
+  it('ignores a category not actually present on this board', () => {
+    const categories: CategoryRecord[] = [makeCategory('A'), makeCategory('B')]
+    const clusters = [cluster('a', 'A')]
+    const positions = computeNestedLayout(clusters, categories)
+    expect(positions.map((p) => p.id)).toEqual(['a'])
   })
 })
 

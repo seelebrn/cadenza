@@ -1101,16 +1101,19 @@ function BoardView(): JSX.Element {
         )}
 
         <div className="ml-auto flex items-center gap-1 text-xs text-slate-500">
-          {currentBoard?.isDefault && (
+          {currentBoard && (
             <button
               className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
-              title="Drop every dragged/resized position on this board and recompute the default grid layout from scratch"
+              title={
+                currentBoard.isDefault
+                  ? 'Drop every dragged/resized position on this board and recompute the default grid layout from scratch'
+                  : 'Put every cluster back into a nested/contained arrangement — undoes whatever Tree, Radial, or manual dragging left behind'
+              }
               onClick={() => {
-                if (
-                  window.confirm(
-                    'Reset every cluster and item on this board back to its automatic default layout? Any positions you\'ve dragged or resized here will be lost — the underlying codes, notes, and clusters themselves are not affected.'
-                  )
-                ) {
+                const message = currentBoard.isDefault
+                  ? 'Reset every cluster and item on this board back to its automatic default layout? Any positions you\'ve dragged or resized here will be lost — the underlying codes, notes, and clusters themselves are not affected.'
+                  : 'Put every cluster on this board back into a nested, contained arrangement (like the default board\'s own layout)? Any positions from Tree, Radial, or manual dragging will be lost — the underlying codes, notes, and clusters themselves are not affected.'
+                if (window.confirm(message)) {
                   resetBoardLayout(currentBoard.id)
                 }
               }}

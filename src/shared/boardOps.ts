@@ -1133,6 +1133,35 @@ function keepPositionsOnBoard(positions: ClusterPosition[]): ClusterPosition[] {
   return positions.map((p) => ({ ...p, x: p.x + shiftX, y: p.y + shiftY }))
 }
 
+/**
+ * A "put it back to the nice arrangement" layout for a curated board: every
+ * cluster already on the board gets a completely fresh position/size from
+ * computeCategoryLayout — the same nesting-aware masonry pack the default
+ * board and "+ Add all clusters" both use, where a nested cluster's box is
+ * drawn genuinely *inside* its parent's (containment, not a separate row).
+ *
+ * Unlike Tree/Radial (which only ever move clusters that are already
+ * there), this exists specifically to *undo* whatever Tree or Radial (or
+ * manual dragging) left behind — there was previously no way back to a
+ * contained/nested arrangement once either had run, since neither of them,
+ * nor plain dragging, ever restores containment on its own. Every category
+ * present on the board gets a position here (root or nested alike, same as
+ * Tree), so apply with applyClusterLayoutWithMembers.
+ */
+export function computeNestedLayout(clusters: BoardCluster[], categories: CategoryRecord[]): ClusterPosition[] {
+  const categoryIdsOnBoard = new Set(clusters.map((c) => c.categoryId))
+  const categoriesOnBoard = categories.filter((c) => categoryIdsOnBoard.has(c.id))
+  const layout = computeCategoryLayout(categoriesOnBoard)
+  const clusterByCategoryId = new Map(clusters.map((c) => [c.categoryId, c]))
+  return layout
+    .map((l): ClusterPosition | null => {
+      const cluster = clusterByCategoryId.get(l.categoryId)
+      if (!cluster) return null
+      return { id: cluster.id, x: l.x, y: l.y, width: l.width, height: l.height }
+    })
+    .filter((p): p is ClusterPosition => p !== null)
+}
+
 const TREE_ROW_GAP = 40
 const TREE_NODE_GAP = 40
 

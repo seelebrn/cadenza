@@ -128,6 +128,7 @@ function BoardView(): JSX.Element {
   const addAllCodesToBoard = useProjectStore((s) => s.addAllCodesToBoard)
   const addAllNotesToBoard = useProjectStore((s) => s.addAllNotesToBoard)
   const addAllClustersToBoard = useProjectStore((s) => s.addAllClustersToBoard)
+  const setClusterLinkStyle = useProjectStore((s) => s.setClusterLinkStyle)
   const moveItem = useProjectStore((s) => s.moveItem)
   const moveCluster = useProjectStore((s) => s.moveCluster)
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
@@ -172,6 +173,13 @@ function BoardView(): JSX.Element {
   // usually reads one way; toggled off for a plain undirected line.
   const [linkMode, setLinkMode] = useState(false)
   const [linkDirected, setLinkDirected] = useState(true)
+  // Whether "+ Add all clusters" (frames only — see the button just below)
+  // sizes each new frame down to just its header instead of reserving
+  // space for codes/notes it will never actually show here. Defaults on:
+  // that's normally exactly what a frames-only thematic-map board wants,
+  // and the box next to it makes it easy to turn off for the rare case of
+  // wanting item-sized frames without the items.
+  const [addClustersCompact, setAddClustersCompact] = useState(true)
   const [linkFromCategoryId, setLinkFromCategoryId] = useState<string | null>(null)
   // Both endpoints picked, waiting on a label — a plain inline input rather
   // than window.prompt(), which Electron's renderer doesn't implement
@@ -758,6 +766,8 @@ function BoardView(): JSX.Element {
   // (following live-drag delta, same as every other connector geometry in
   // this file) and grouping links that share the same unordered pair of
   // clusters so each gets a stable index within that group.
+  const clusterLinkStyle = currentBoard?.clusterLinkStyle ?? 'curved'
+
   const clusterLinkGeometries = useMemo(() => {
     if (!data) return []
     const visible = getVisibleClusterLinks(data.clusterLinks, clusters)
@@ -798,11 +808,18 @@ function BoardView(): JSX.Element {
           .map((c) => resolveBox(c))
         const group = byPair.get(pairKey(link)) ?? [link]
         const parallelIndex = group.findIndex((l) => l.id === link.id)
-        const path = computeClusterLinkPath(aBox, bBox, obstructingBoxes, Math.max(0, parallelIndex), group.length)
+        const path = computeClusterLinkPath(
+          aBox,
+          bBox,
+          obstructingBoxes,
+          Math.max(0, parallelIndex),
+          group.length,
+          clusterLinkStyle
+        )
         return { link, ...path }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)
-  }, [data, clusters, dragState, clusterMoveDelta])
+  }, [data, clusters, dragState, clusterMoveDelta, clusterLinkStyle])
 
   // The actual drawing surface, grown to fit whatever's really on the board
   // instead of a fixed 2400x1600 — CANVAS_WIDTH/HEIGHT stay the floor for a
@@ -1090,6 +1107,27 @@ function BoardView(): JSX.Element {
                 >
                   Radial
                 </button>
+                <div
+                  className="flex overflow-hidden rounded border border-slate-300"
+                  title="How ClusterLink relationships are drawn on this board: curved bows a link around an obstructing cluster and spreads parallel links apart; straight always draws a plain line, simpler to read but can cross another cluster or overlap a parallel link"
+                >
+                  <button
+                    className={`px-2 py-1 text-xs ${
+                      clusterLinkStyle === 'curved' ? 'bg-slate-700 text-white' : 'hover:bg-slate-100'
+                    }`}
+                    onClick={() => setClusterLinkStyle(currentBoard.id, 'curved')}
+                  >
+                    Curved
+                  </button>
+                  <button
+                    className={`border-l border-slate-300 px-2 py-1 text-xs ${
+                      clusterLinkStyle === 'straight' ? 'bg-slate-700 text-white' : 'hover:bg-slate-100'
+                    }`}
+                    onClick={() => setClusterLinkStyle(currentBoard.id, 'straight')}
+                  >
+                    Straight
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1136,10 +1174,21 @@ function BoardView(): JSX.Element {
             <button
               className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
               title="Places every cluster's empty frame, without its codes/notes — for building a clean thematic-map figure"
-              onClick={() => addAllClustersToBoard(currentBoard.id, false)}
+              onClick={() => addAllClustersToBoard(currentBoard.id, false, addClustersCompact)}
             >
               + Add all clusters
             </button>
+            <label
+              className="flex items-center gap-1 text-xs text-slate-500"
+              title="Size each newly-placed frame down to just its header, ignoring how many codes/notes it holds — a board that only ever shows cluster frames doesn't need room reserved for cards it'll never display. Only applies to “+ Add all clusters” above, not “…and items”."
+            >
+              <input
+                type="checkbox"
+                checked={addClustersCompact}
+                onChange={(e) => setAddClustersCompact(e.target.checked)}
+              />
+              Compact
+            </label>
             <button
               className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
               title="Places every cluster along with its codes/notes, same as this board's normal working view"

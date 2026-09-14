@@ -41,6 +41,7 @@ import {
   removeItemFromBoard,
   renameBoard,
   resetDefaultBoardClusterLayout,
+  setBoardClusterLinkStyle,
   resizeCluster,
   segmentIntersectsBox,
   unassignItemFromCluster,
@@ -241,6 +242,13 @@ describe('board CRUD', () => {
     const next = renameBoard(data, 'b', 'Renamed')
     expect(next.boards.find((x) => x.id === 'a')?.name).toBe('A')
     expect(next.boards.find((x) => x.id === 'b')?.name).toBe('Renamed')
+  })
+
+  it('setBoardClusterLinkStyle only touches the target board', () => {
+    const data = makeData({ boards: [{ id: 'a', name: 'A', isDefault: true }, { id: 'b', name: 'B', isDefault: false }] })
+    const next = setBoardClusterLinkStyle(data, 'b', 'straight')
+    expect(next.boards.find((x) => x.id === 'a')?.clusterLinkStyle).toBeUndefined()
+    expect(next.boards.find((x) => x.id === 'b')?.clusterLinkStyle).toBe('straight')
   })
 
   it('deleteBoard removes the board and everything placed on it, leaving other boards alone', () => {
@@ -901,6 +909,23 @@ describe('computeCategoryLayout', () => {
   it('returns an empty array for no categories', () => {
     expect(computeCategoryLayout([])).toEqual([])
   })
+
+  it("compact mode sizes a leaf down to its header, ignoring how many codes/notes it holds", () => {
+    const rich = makeCategory('A', { codeIds: Array.from({ length: 40 }, (_, i) => `c${i}`) })
+    const normal = computeCategoryLayout([rich]).find((l) => l.categoryId === 'A')!
+    const compact = computeCategoryLayout([rich], new Map(), true).find((l) => l.categoryId === 'A')!
+    expect(compact.width).toBeLessThan(normal.width)
+    expect(compact.height).toBeLessThan(normal.height)
+  })
+
+  it('compact mode still contains a compact parent\'s compact children, just at the smaller scale', () => {
+    const parent = makeCategory('A', { codeIds: ['c1'] })
+    const child = makeCategory('B', { parentCategoryId: 'A', codeIds: ['c2'] })
+    const layout = computeCategoryLayout([parent, child], new Map(), true)
+    const a = layout.find((l) => l.categoryId === 'A')!
+    const b = layout.find((l) => l.categoryId === 'B')!
+    expect(rectContains(asCluster(a), asCluster(b))).toBe(true)
+  })
 })
 
 // --- Clusters (category shapes) -------------------------------------------
@@ -1208,6 +1233,22 @@ describe('computeClusterLinkPath', () => {
     expect(path.curved).toBe(true)
     expect(path.controlY).toBeGreaterThanOrEqual(0)
     expect(path.midY).toBeGreaterThanOrEqual(0)
+  })
+
+  it("style: 'straight' never curves, even with an obstruction that would otherwise force it", () => {
+    const obstruction = { x: 200, y: 20, width: 100, height: 60 }
+    const path = computeClusterLinkPath(left, right, [obstruction], 0, 1, 'straight')
+    expect(path.curved).toBe(false)
+    expect(path.midX).toBeCloseTo(250, 5)
+    expect(path.midY).toBeCloseTo(50, 5)
+  })
+
+  it("style: 'straight' never offsets a parallel pair either — a deliberate, simpler tradeoff", () => {
+    const first = computeClusterLinkPath(left, right, [], 0, 2, 'straight')
+    const second = computeClusterLinkPath(left, right, [], 1, 2, 'straight')
+    expect(first.curved).toBe(false)
+    expect(second.curved).toBe(false)
+    expect(first.midY).toBeCloseTo(second.midY, 5)
   })
 
   it('ignores an obstruction the straight path never actually crosses', () => {

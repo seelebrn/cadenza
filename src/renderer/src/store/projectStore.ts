@@ -72,6 +72,7 @@ import {
   renameBoard as renameBoardOp,
   resetDefaultBoardClusterLayout as resetDefaultBoardClusterLayoutOp,
   resizeCluster as resizeClusterOp,
+  setBoardClusterLinkStyle as setBoardClusterLinkStyleOp,
   unassignItemFromCluster as unassignItemFromClusterOp,
   unlinkItems as unlinkItemsOp
 } from '@shared/boardOps'
@@ -214,6 +215,8 @@ interface ProjectState {
   // Visual grouping board
   createBoard: (name: string) => string | null
   renameBoard: (boardId: string, name: string) => void
+  /** How this board's ClusterLinks are drawn — see BoardRecord.clusterLinkStyle. */
+  setClusterLinkStyle: (boardId: string, style: 'curved' | 'straight') => void
   deleteBoard: (boardId: string) => void
   addItemToBoard: (boardId: string, refType: BoardItem['refType'], refId: string, x: number, y: number) => string | null
   moveItem: (itemId: string, x: number, y: number) => void
@@ -248,8 +251,11 @@ interface ProjectState {
   addAllNotesToBoard: (boardId: string) => void
   /** includeMembers (default true): also place each cluster's member
    * codes/notes, or just the empty cluster frames — "+ Add all clusters"
-   * vs. "+ Add all clusters and items" in the toolbar. */
-  addAllClustersToBoard: (boardId: string, includeMembers?: boolean) => void
+   * vs. "+ Add all clusters and items" in the toolbar. compact (default
+   * false, only meaningful alongside includeMembers: false): size every
+   * frame down to just its header, ignoring how many codes/notes it
+   * holds — see computeCategoryLayout's own compact option. */
+  addAllClustersToBoard: (boardId: string, includeMembers?: boolean, compact?: boolean) => void
   linkItems: (boardId: string, itemAId: string, itemBId: string) => void
   unlinkItems: (linkId: string) => void
   /** The "Reset placement" button. On the default board: drops every
@@ -698,6 +704,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   renameBoard: (boardId, name) => get().updateProject((data) => renameBoardOp(data, boardId, name)),
 
+  setClusterLinkStyle: (boardId, style) =>
+    get().updateProject((data) => setBoardClusterLinkStyleOp(data, boardId, style)),
+
   deleteBoard: (boardId) => get().updateProject((data) => deleteBoardOp(data, boardId)),
 
   addItemToBoard: (boardId, refType, refId, x, y) => {
@@ -745,8 +754,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   addAllNotesToBoard: (boardId) => get().updateProject((data) => addAllNotesToBoardOp(data, boardId)),
 
-  addAllClustersToBoard: (boardId, includeMembers = true) =>
-    get().updateProject((data) => addAllClustersToBoardOp(data, boardId, includeMembers)),
+  addAllClustersToBoard: (boardId, includeMembers = true, compact = false) =>
+    get().updateProject((data) => addAllClustersToBoardOp(data, boardId, includeMembers, compact)),
 
   linkItems: (boardId, itemAId, itemBId) =>
     get().updateProject((data) => linkItemsOp(data, boardId, itemAId, itemBId)),

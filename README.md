@@ -1898,3 +1898,43 @@ components involved); the export path itself needs a live `BrowserWindow` to ful
 fixes were), so this relied on the established boot-test + build discipline rather than a
 full re-export. Full suite green (343/343, unchanged — no shared logic touched), typecheck
 clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### Curved-vs-straight ClusterLinks as a per-board choice, and compact frames-only sizing (2026-09-14)
+
+Two follow-ups from the design review above, both requested directly: "I can see the appeal
+of curved arrows, but it can also make the whole thing harder to read" — asked for a way to
+choose — plus a straight yes to the compact-sizing idea floated in that same review.
+
+**Curved vs. straight, per board.** Added `BoardRecord.clusterLinkStyle: 'curved' | 'straight'`
+(optional; missing = `'curved'`, so every existing board keeps today's behavior unless changed).
+`computeClusterLinkPath` takes the style as its last argument — `'straight'` skips all
+obstruction-avoidance and parallel-offset logic and always returns a plain edge-to-edge line,
+accepting that a crossing or an overlapping parallel pair can happen, in exchange for a
+simpler figure to read at a glance. A `Curved | Straight` segmented toggle sits next to Tree/
+Radial in the toolbar, next to a new `setClusterLinkStyle` store action.
+
+**Compact frames-only sizing.** `computeCategoryLayout` gained a `compact` parameter: every
+category's own member-card space is ignored regardless of how many codes/notes it actually
+holds, so a leaf sizes down to just its header (`COMPACT_LEAF_WIDTH`/`HEIGHT`, 220×48) instead
+of the item-reserving default (280×200) — directly answering the review's observation that a
+frames-only board's boxes read as large and mostly empty. `addAllClustersToBoard` takes a
+matching `compact` argument (only meaningful alongside `includeMembers: false`), and "+ Add
+all clusters" now has a "Compact" checkbox next to it, on by default. Writing the test for
+this caught a real bug in the same commit: `placeCategory`'s own inner-child positioning was
+still calling the non-compact `ownMemberGridSize` directly, so a compact parent's box shrank
+but its children were still placed as if it hadn't — fixed the same way `computeSize` already
+was.
+
+**Test project**: the example project's `Carte thématique` board now ships with
+`clusterLinkStyle: 'straight'` (all 5 links verified to resolve `curved: false`) and compact
+cluster sizing (every leaf cluster confirmed 220×48, down from 950×356; each supercluster
+760×204, down from 2956×820) — demonstrating both new options directly rather than just
+shipping the code for them unused.
+
+Verified: 2 new `computeCategoryLayout` compact tests, 2 new `computeClusterLinkPath` style
+tests, 1 new `setBoardClusterLinkStyle` test (all passing, one catching the `placeCategory`
+bug above before it shipped). Regenerated example project re-verified for referential
+integrity (0 errors) and reopened through the app's own `readProjectFile`/
+`normalizeProjectData` path, confirming `clusterLinkStyle` survives normalization intact. Full
+suite green (348/348), typecheck clean, production build clean, boot-tested (no errors,
+cleanly killed).

@@ -202,6 +202,14 @@ export interface BoardRecord {
    * exactly one board should have this set at a time. Other boards are
    * opt-in/curated: codes/notes/clusters only appear once explicitly added. */
   isDefault: boolean
+  /** How every ClusterLink on this board is drawn — 'curved' (the
+   * default when unset) bows a link around an unrelated cluster it would
+   * otherwise cut through, and spreads parallel links between the same
+   * pair; 'straight' always draws a plain edge-to-edge line, accepting
+   * that a crossing or an overlapping parallel pair can happen, in
+   * exchange for a simpler line to read at a glance. A per-board choice,
+   * not per-link, since a whole figure reads more consistently one way. */
+  clusterLinkStyle?: 'curved' | 'straight'
 }
 
 export const PROJECT_SCHEMA_VERSION = 2

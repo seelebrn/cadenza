@@ -136,6 +136,19 @@ export function renameBoard(data: ProjectData, boardId: string, name: string): P
   return { ...data, boards: data.boards.map((b) => (b.id === boardId ? { ...b, name } : b)) }
 }
 
+/** Sets how this board's ClusterLinks are drawn — see BoardRecord.
+ * clusterLinkStyle. */
+export function setBoardClusterLinkStyle(
+  data: ProjectData,
+  boardId: string,
+  style: 'curved' | 'straight'
+): ProjectData {
+  return {
+    ...data,
+    boards: data.boards.map((b) => (b.id === boardId ? { ...b, clusterLinkStyle: style } : b))
+  }
+}
+
 /** Deletes a board and everything on it (items + clusters + links) — other
  * boards untouched. If it was the default board, promotes another board to
  * default so there's always exactly one (when any boards remain). */
@@ -215,6 +228,13 @@ export function computeGridPosition(index: number, originY: number = GRID_ORIGIN
 
 const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
+// A "compact" leaf cluster (see computeCategoryLayout's own `compact` option)
+// reserves no space for member cards at all, even if the category holds
+// codes/notes — meant for a board that only ever shows cluster frames
+// (never actually places the items on it), where the item-sized default
+// above just reads as a large, mostly-empty box.
+const COMPACT_LEAF_WIDTH = 220
+const COMPACT_LEAF_HEIGHT = 48
 const CLUSTER_GAP = 40
 const CLUSTER_HEADER_HEIGHT = 28
 // Also the margin a nested cluster's box is indented by within its
@@ -326,10 +346,19 @@ export interface ComputedClusterLayout {
  * much room it needs for its children's grid until their own sizes are
  * known — and a grid's *width* requirement depends on its children too,
  * not just height.
+ *
+ * `compact` (default false): every category's own member-card space is
+ * ignored, even if it holds codes/notes — a leaf sizes down to just its
+ * header (COMPACT_LEAF_WIDTH/HEIGHT). Meant for a board that only ever
+ * shows cluster frames, never the items themselves (addAllClustersToBoard's
+ * `includeMembers: false`) — sizing those boxes as if they needed to hold
+ * a grid of cards they'll never actually show just reads as large, mostly
+ * empty rectangles.
  */
 export function computeCategoryLayout(
   categories: CategoryRecord[],
-  explicitOverrides: Map<string, { x: number; y: number; width: number; height: number }> = new Map()
+  explicitOverrides: Map<string, { x: number; y: number; width: number; height: number }> = new Map(),
+  compact = false
 ): ComputedClusterLayout[] {
   const childrenByParentId = new Map<string, CategoryRecord[]>()
   for (const category of categories) {
@@ -346,7 +375,7 @@ export function computeCategoryLayout(
   // unused space next to a narrower sibling in the same column. A single
   // child by itself still just gets its own natural width, no grid needed.
   function gridColumnWidth(childSizes: Array<{ width: number }>): number {
-    return Math.max(DEFAULT_CLUSTER_WIDTH, ...childSizes.map((s) => s.width))
+    return Math.max(compact ? COMPACT_LEAF_WIDTH : DEFAULT_CLUSTER_WIDTH, ...childSizes.map((s) => s.width))
   }
 
   // Bottom-up: the size a category's box needs to fit its own member cards
@@ -366,14 +395,14 @@ export function computeCategoryLayout(
     if (existing) return { width: existing.width, height: existing.height }
 
     const children = childrenByParentId.get(category.id) ?? []
-    const ownGrid = ownMemberGridSize(category)
+    const ownGrid = compact ? { width: 0, height: 0 } : ownMemberGridSize(category)
     const ownContentHeight = CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + ownGrid.height
     // + CLUSTER_PADDING once: the same one-sided inset used everywhere else
     // in this function (see childX/innerX below), not a margin on both sides.
     const ownContentWidth = ownGrid.width > 0 ? ownGrid.width + CLUSTER_PADDING : 0
 
     if (children.length === 0) {
-      return computeOwnClusterSize(category)
+      return compact ? { width: COMPACT_LEAF_WIDTH, height: COMPACT_LEAF_HEIGHT } : computeOwnClusterSize(category)
     }
 
     const childSizes = children.map((child) => computeSize(child))
@@ -391,8 +420,8 @@ export function computeCategoryLayout(
     const childGridHeight = Math.max(...columnHeights) - CLUSTER_GAP // no trailing gap after the last child in the tallest column
 
     return {
-      width: Math.max(DEFAULT_CLUSTER_WIDTH, ownContentWidth, childGridWidth),
-      height: Math.max(DEFAULT_CLUSTER_HEIGHT, ownContentHeight + childGridHeight)
+      width: Math.max(compact ? COMPACT_LEAF_WIDTH : DEFAULT_CLUSTER_WIDTH, ownContentWidth, childGridWidth),
+      height: Math.max(compact ? COMPACT_LEAF_HEIGHT : DEFAULT_CLUSTER_HEIGHT, ownContentHeight + childGridHeight)
     }
   }
 
@@ -417,7 +446,8 @@ export function computeCategoryLayout(
       const columnCount = packGridColumnCount(children.length)
       const columnWidth = gridColumnWidth(childSizes)
       const innerX = actualX + CLUSTER_PADDING
-      const innerY = actualY + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + ownMemberGridSize(category).height
+      const innerY =
+        actualY + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + (compact ? 0 : ownMemberGridSize(category).height)
       const columnBottoms = new Array<number>(columnCount).fill(innerY)
       for (const child of children) {
         let column = 0
@@ -697,7 +727,13 @@ export function addAllNotesToBoard(data: ProjectData, boardId: string): ProjectD
 export function addAllClustersToBoard(
   data: ProjectData,
   boardId: string,
-  includeMembers: boolean = true
+  includeMembers: boolean = true,
+  /** Size every newly-placed cluster down to just its header, ignoring how
+   * many codes/notes it holds — see computeCategoryLayout's own `compact`
+   * option. Only meaningful alongside `includeMembers: false`: reserving
+   * zero member-card space while also actually placing those cards would
+   * just make them overflow their frame. */
+  compact: boolean = false
 ): ProjectData {
   const existingOnBoard = data.boardClusters.filter((c) => c.boardId === boardId)
   const existingCategoryIds = new Set(existingOnBoard.map((c) => c.categoryId))
@@ -706,7 +742,10 @@ export function addAllClustersToBoard(
 
   const explicitOverrides = new Map(existingOnBoard.map((c) => [c.categoryId, c]))
   const layoutByCategoryId = new Map(
-    computeCategoryLayout(data.categories, explicitOverrides).map((l) => [l.categoryId, l])
+    computeCategoryLayout(data.categories, explicitOverrides, compact && !includeMembers).map((l) => [
+      l.categoryId,
+      l
+    ])
   )
 
   let next = data
@@ -1108,13 +1147,21 @@ const CLUSTER_LINK_MIN_COORD = 20
  * `parallelCount` describe this link's position within its own pair's
  * group (assign a stable index per pair, e.g. by creation order) — pass
  * `0, 1` for a link that's the only one between its pair.
+ *
+ * `style: 'straight'` (a per-board user choice — see BoardRecord.
+ * clusterLinkStyle) skips all of the above and always returns a plain
+ * edge-to-edge line: a crossing or an overlapping parallel pair can still
+ * happen, but some readers find a page of curves harder to follow at a
+ * glance than a page of straight lines with the occasional crossing, and
+ * that's a legitimate call to leave to whoever's building the figure.
  */
 export function computeClusterLinkPath(
   aBox: BoxLike,
   bBox: BoxLike,
   obstructingBoxes: BoxLike[],
   parallelIndex: number,
-  parallelCount: number
+  parallelCount: number,
+  style: 'curved' | 'straight' = 'curved'
 ): ClusterLinkPath {
   const aCenter = { x: aBox.x + aBox.width / 2, y: aBox.y + aBox.height / 2 }
   const bCenter = { x: bBox.x + bBox.width / 2, y: bBox.y + bBox.height / 2 }
@@ -1128,7 +1175,9 @@ export function computeClusterLinkPath(
   const midY0 = (start.y + end.y) / 2
   // A degenerate (near-zero-length) segment has no meaningful direction to
   // bow away from — draw it straight rather than risk a divide-by-zero.
-  if (length < 1) {
+  // Also always true (never even considers curving) when the board is set
+  // to plain straight lines.
+  if (length < 1 || style === 'straight') {
     return { ax: start.x, ay: start.y, bx: end.x, by: end.y, midX: midX0, midY: midY0, curved: false, controlX: midX0, controlY: midY0 }
   }
   // Perpendicular unit vector — the axis a curve bows along.

@@ -6,14 +6,13 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
-### Fixed
-- All text fields could become briefly unresponsive (1-2 minutes) after confirming a
-  delete or a "Reset placement" — replaced every remaining native confirm/alert dialog
-  with an in-page confirmation bar.
-- On the default board, removing an item just reset its position instead of doing
-  anything visible; a cluster's own remove button is disabled there for the same
-  reason (every code/note/cluster always shows on that board) but now says so more
-  clearly instead of looking broken.
+## [0.4.0] - 2026-09-14
+
+### Changed
+- On the Main board, deleting an item or cluster now actually deletes the underlying
+  code/note/cluster from the whole project (same as deleting it from the Workspace),
+  rather than only ever affecting this board's own layout — a clearly distinct (red)
+  confirmation explains what will happen before it does.
 
 ### Added
 - A theme/question choice when creating a cluster from the Workspace sidebar or from
@@ -23,11 +22,10 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   note's own analytic question into a formal question-cluster and files the note
   under it.
 
-### Changed
-- On the Main board, deleting an item or cluster now actually deletes the underlying
-  code/note/cluster from the whole project (same as deleting it from the Workspace),
-  instead of being disabled there. A clearly distinct (red) confirmation explains
-  what will happen before it does.
+### Fixed
+- All text fields could become briefly unresponsive (1-2 minutes) after confirming a
+  delete or a "Reset placement" — replaced every remaining native confirm/alert dialog
+  with an in-page confirmation bar.
 
 ## [0.3.1] - 2026-09-14
 

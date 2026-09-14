@@ -1576,3 +1576,40 @@ its own two endpoints): the old center-to-center line was up to 94% hidden on th
 the new clipped line is 0% hidden behind a third-party box on all 19. Full suite still green
 (327/327, no shared-logic tests needed changing — this was a rendering-only fix), typecheck
 clean, production build clean, boot-tested (no errors, cleanly killed).
+
+### The real Tree bug: a parent kept its whole contains-children size once its children left it (2026-09-14)
+
+Reported a third time, with two exported PDFs (`Carte thématique - avant/après Tree.pdf`) from
+the bundled example project's own thematic-map board — the actual pixels made the real problem
+obvious in a way "it looks separated" hadn't yet: after Tree, the 3 supercluster boxes stayed
+their full original size (each ~2956×820, sized to *contain* 5 children in the pre-Tree
+containment layout) while their 15 children moved into a thin row far beneath — three
+huge, nearly empty rectangles sitting far above a sliver of tiny boxes. No connector line,
+however visible, reads as "these belong together" across so disproportionate a gap. The
+previous two fixes (the edge existing at all, then its clipped/arrowed visibility) were
+both real improvements, but neither one touched the actual cause.
+
+Root cause: `computeTreeLayout` never resizes a cluster (a deliberate choice from the original
+row-spacing fix), so a parent's box kept whatever size `computeCategoryLayout` had given it to
+*contain* its children in a normal (non-Tree) layout — a size that stops meaning anything the
+moment Tree lays those same children out separately instead.
+
+Fixed by giving a Tree "parent" node (one with a child also on the board) a resized box: its
+own header plus a grid of only its *own* directly-held codes/notes, via a newly extracted
+`computeOwnClusterSize` (the same formula `computeCategoryLayout` already used for a plain
+leaf, now shared rather than duplicated). A leaf (no children on the board) keeps its real,
+unchanged size, exactly as before. `ClusterPosition` gained optional `width`/`height` fields,
+applied by `applyClusterPositions` when present — Radial never sets them, so it's unaffected.
+
+Verified against the shipped example project's own `Carte thématique` board (the exact one in
+the reported PDFs): each supercluster shrank from 2956×820 to 280×200 (its true size — none of
+the 3 hold codes/notes directly, only nested clusters do), total canvas height dropped from
+1720 to 636, zero cluster overlaps, and all 15 structural nesting edges still draw correctly
+between the now-correctly-sized parents and their children. Also re-verified against
+`MultiCaseTest.qdaproj` (2 parent nodes, both shrank, 0 overlaps, all 19 edges intact). 2 of
+the existing `computeTreeLayout` tests were rewritten (their premise — a parent's *given* huge
+size stays load-bearing for row spacing — was exactly the assumption this fix corrects) and 3
+new ones added (a parent with no own content shrinks to a bare header; a parent that *does*
+hold its own codes/notes resizes to fit those, not to an empty minimum; a leaf is left
+untouched). Full suite green (329/329), typecheck clean, production build clean, boot-tested
+(no errors, cleanly killed).

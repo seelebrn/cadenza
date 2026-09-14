@@ -242,6 +242,46 @@ function packGridColumnCount(siblingCount: number): number {
   return Math.max(1, Math.min(GRID_MAX_COLUMNS, Math.ceil(Math.sqrt(siblingCount))))
 }
 
+// Only codes and notes are auto-arranged as member cards inside a cluster's
+// own content area (see getVisibleBoardItems below) — a segment/quote filed
+// directly under a category always keeps its own explicit position instead,
+// so it doesn't factor into how much room a cluster's own content needs.
+function ownMemberGridSize(category: CategoryRecord): { width: number; height: number } {
+  const memberCount = category.codeIds.length + category.noteIds.length
+  if (memberCount === 0) return { width: 0, height: 0 }
+  const columnCount = packGridColumnCount(memberCount)
+  const rows = Math.ceil(memberCount / columnCount)
+  return {
+    width: columnCount * MEMBER_CARD_WIDTH + (columnCount - 1) * MEMBER_CARD_GAP,
+    height: rows * CLUSTER_MEMBER_ROW_HEIGHT
+  }
+}
+
+/**
+ * A category's own box size — its header plus a grid of its own directly-
+ * held codes/notes — deliberately ignoring any nested children entirely.
+ * This is what computeCategoryLayout gives a leaf (no-children) category;
+ * exported separately so computeTreeLayout can also use it for a "parent"
+ * node once that node's children are laid out as their own separate boxes
+ * rather than contained inside it (Tree's whole point) — the much larger
+ * size computeCategoryLayout gave that same category *to contain* those
+ * children stops meaning anything once they're pulled out, and left
+ * unchanged makes a parent with several children a towering, mostly empty
+ * box (found via a real exported board: a childless-of-its-own supercluster
+ * kept its full contains-5-children height while those children moved to
+ * their own row far below it, reading as broken rather than "arranged as a
+ * tree").
+ */
+export function computeOwnClusterSize(category: CategoryRecord): { width: number; height: number } {
+  const ownGrid = ownMemberGridSize(category)
+  const ownContentWidth = ownGrid.width > 0 ? ownGrid.width + CLUSTER_PADDING : 0
+  const ownContentHeight = CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + ownGrid.height
+  return {
+    width: Math.max(DEFAULT_CLUSTER_WIDTH, ownContentWidth),
+    height: Math.max(DEFAULT_CLUSTER_HEIGHT, ownContentHeight)
+  }
+}
+
 export interface ComputedClusterLayout {
   categoryId: string
   x: number
@@ -299,22 +339,6 @@ export function computeCategoryLayout(
     childrenByParentId.set(category.parentCategoryId, list)
   }
 
-  // Only codes and notes are auto-arranged as member cards inside a
-  // cluster's own content area (see getVisibleBoardItems below) — a
-  // segment/quote filed directly under a category always keeps its own
-  // explicit position instead, so it doesn't factor into how much room a
-  // cluster's own content needs here.
-  function ownMemberGridSize(category: CategoryRecord): { width: number; height: number } {
-    const memberCount = category.codeIds.length + category.noteIds.length
-    if (memberCount === 0) return { width: 0, height: 0 }
-    const columnCount = packGridColumnCount(memberCount)
-    const rows = Math.ceil(memberCount / columnCount)
-    return {
-      width: columnCount * MEMBER_CARD_WIDTH + (columnCount - 1) * MEMBER_CARD_GAP,
-      height: rows * CLUSTER_MEMBER_ROW_HEIGHT
-    }
-  }
-
   // Every column in a children-grid shares one width, wide enough for the
   // widest child — simpler than letting each column take its narrowest
   // occupant's width (which would risk two adjacent columns' children
@@ -349,10 +373,7 @@ export function computeCategoryLayout(
     const ownContentWidth = ownGrid.width > 0 ? ownGrid.width + CLUSTER_PADDING : 0
 
     if (children.length === 0) {
-      return {
-        width: Math.max(DEFAULT_CLUSTER_WIDTH, ownContentWidth),
-        height: Math.max(DEFAULT_CLUSTER_HEIGHT, ownContentHeight)
-      }
+      return computeOwnClusterSize(category)
     }
 
     const childSizes = children.map((child) => computeSize(child))
@@ -968,20 +989,37 @@ export interface ClusterPosition {
   id: string
   x: number
   y: number
+  /** Set only by computeTreeLayout, for a node acting as a parent whose
+   * own size needs to shrink from "contains its children" down to "just
+   * its own content" now that those children are laid out separately —
+   * see computeOwnClusterSize. Omitted (and left untouched) everywhere
+   * else, including a Tree leaf and every computeRadialLayout position. */
+  width?: number
+  height?: number
 }
 
 /** Writes back a set of computed positions (from computeTreeLayout /
  * computeRadialLayout below) onto the matching BoardClusters — the one
  * place either layout actually touches ProjectData, so the layouts
  * themselves can stay pure geometry. A cluster with no entry in `positions`
- * (not part of this layout pass) is left untouched. */
+ * (not part of this layout pass) is left untouched. A position that also
+ * carries width/height (only computeTreeLayout ever sets these — see
+ * ClusterPosition) resizes the cluster too; otherwise its existing size is
+ * kept exactly as before. */
 export function applyClusterPositions(data: ProjectData, positions: ClusterPosition[]): ProjectData {
   const byId = new Map(positions.map((p) => [p.id, p]))
   return {
     ...data,
     boardClusters: data.boardClusters.map((c) => {
       const pos = byId.get(c.id)
-      return pos ? { ...c, x: pos.x, y: pos.y } : c
+      if (!pos) return c
+      return {
+        ...c,
+        x: pos.x,
+        y: pos.y,
+        width: pos.width ?? c.width,
+        height: pos.height ?? c.height
+      }
     })
   }
 }
@@ -1102,21 +1140,31 @@ const TREE_NODE_GAP = 40
  * A top-down hierarchical-tree arrangement of a board's own clusters,
  * driven by the category hierarchy (parentCategoryId) — a cluster whose
  * parent category isn't *also* on this board is treated as its own root,
- * since there's nothing here to hang it under. Purely computes new x/y for
- * the clusters already passed in (never creates, removes, or resizes one);
- * apply with applyClusterPositions. Meant for a curated (non-default)
- * board built specifically as a figure — the default board has its own
- * auto-layout (see getVisibleBoardClusters) and isn't a target for this.
+ * since there's nothing here to hang it under. Meant for a curated
+ * (non-default) board built specifically as a figure — the default board
+ * has its own auto-layout (see getVisibleBoardClusters) and isn't a target
+ * for this.
  *
- * Each depth's row starts below the *tallest* node anywhere in the row
- * above it, computed per depth rather than assumed — a cluster arriving
- * into Tree mode keeps whatever size it already had (this never resizes
- * one), and a node with its own nested children can already be sized to
- * contain them (much taller than a plain leaf), inherited from wherever it
- * was laid out before. A fixed per-row height doesn't know that, and lets
- * a tall parent's box run straight through its own child row underneath
- * it — confirmed against real project data with actual nested,
- * containment-sized parents, not just synthetic same-size fixtures.
+ * A node acting as a *parent* here (it has at least one child also on this
+ * board) is sized via computeOwnClusterSize — its own header plus its own
+ * directly-held codes/notes, ignoring whatever it needed to *contain*
+ * those children before. A leaf keeps whatever size it already had. Without
+ * this, a category whose only size ever came from containing its children
+ * (the very common case: a superordinate theme with no codes of its own,
+ * just sub-themes) keeps that same large, now-empty box once Tree pulls its
+ * children out into their own row — found via a real exported board, where
+ * a childless-of-its-own supercluster stayed hundreds of pixels tall while
+ * its actual children sat in a thin strip far beneath it, reading as
+ * completely disconnected rather than "arranged as a tree" (a plain
+ * connector line, however visible, can't bridge a gap that large and still
+ * read as "these belong together"). Positions are still only ever computed
+ * fresh here for the clusters passed in; apply with applyClusterPositions,
+ * which now also writes back a computed size when one is given.
+ *
+ * Each depth's row starts below the *tallest effective* node anywhere in
+ * the row above it, computed per depth rather than assumed — confirmed
+ * against real project data with actual nested, containment-sized parents,
+ * not just synthetic same-size fixtures.
  */
 export function computeTreeLayout(clusters: BoardCluster[], categories: CategoryRecord[]): ClusterPosition[] {
   const categoryById = new Map(categories.map((c) => [c.id, c]))
@@ -1135,12 +1183,29 @@ export function computeTreeLayout(clusters: BoardCluster[], categories: Category
     }
   }
 
+  // A parent's box for tree-diagram purposes is its own content only —
+  // whatever size it needed to contain its children (now laid out
+  // separately) no longer applies. A leaf keeps its real, unchanged size.
+  const sizeCache = new Map<string, { width: number; height: number }>()
+  function effectiveSize(cluster: BoardCluster): { width: number; height: number } {
+    const cached = sizeCache.get(cluster.id)
+    if (cached) return cached
+    const hasChildrenOnBoard = (childrenByParentCategoryId.get(cluster.categoryId)?.length ?? 0) > 0
+    const category = categoryById.get(cluster.categoryId)
+    const size =
+      hasChildrenOnBoard && category
+        ? computeOwnClusterSize(category)
+        : { width: cluster.width, height: cluster.height }
+    sizeCache.set(cluster.id, size)
+    return size
+  }
+
   // Tallest node at each depth, across every branch — a shared row Y per
   // depth (not one per branch) keeps sibling subtrees of different shapes
   // visually aligned into the same horizontal rows, same as before.
   const maxHeightByDepth: number[] = []
   function recordHeights(cluster: BoardCluster, depth: number): void {
-    maxHeightByDepth[depth] = Math.max(maxHeightByDepth[depth] ?? 0, cluster.height)
+    maxHeightByDepth[depth] = Math.max(maxHeightByDepth[depth] ?? 0, effectiveSize(cluster).height)
     for (const child of childrenByParentCategoryId.get(cluster.categoryId) ?? []) recordHeights(child, depth + 1)
   }
   for (const root of roots) recordHeights(root, 0)
@@ -1157,18 +1222,20 @@ export function computeTreeLayout(clusters: BoardCluster[], categories: Category
   // (combined) than itself centers over them rather than the reverse.
   function subtreeWidth(cluster: BoardCluster): number {
     const children = childrenByParentCategoryId.get(cluster.categoryId) ?? []
-    if (children.length === 0) return cluster.width
+    const ownWidth = effectiveSize(cluster).width
+    if (children.length === 0) return ownWidth
     const childrenWidth =
       children.reduce((sum, child) => sum + subtreeWidth(child), 0) + TREE_NODE_GAP * (children.length - 1)
-    return Math.max(cluster.width, childrenWidth)
+    return Math.max(ownWidth, childrenWidth)
   }
 
   // Top-down: places `cluster` centered within the span [left, left +
   // subtreeWidth(cluster)) at its depth's row, then lays out its children
   // left-to-right immediately below, each within its own subtree's span.
   function place(cluster: BoardCluster, left: number, depth: number): void {
-    const width = subtreeWidth(cluster)
-    result.push({ id: cluster.id, x: left + (width - cluster.width) / 2, y: rowY[depth] })
+    const { width, height } = effectiveSize(cluster)
+    const span = subtreeWidth(cluster)
+    result.push({ id: cluster.id, x: left + (span - width) / 2, y: rowY[depth], width, height })
 
     const children = childrenByParentCategoryId.get(cluster.categoryId) ?? []
     let childLeft = left

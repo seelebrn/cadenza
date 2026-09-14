@@ -10,6 +10,7 @@ import {
   computeAccommodatingSize,
   computeCategoryLayout,
   computeGridPosition,
+  computeOwnClusterSize,
   computeRadialLayout,
   computeTreeLayout,
   createBoard,
@@ -1277,41 +1278,82 @@ describe('computeTreeLayout', () => {
     expect(byId.get('rootD')!.x).toBeGreaterThanOrEqual(byId.get('childA1')!.x + 300)
   })
 
-  it('a parent much taller than a plain leaf does not let its own child row overlap it — the exact reported bug', () => {
-    // A parent already sized to contain its own children from a prior
-    // Standard/default-board layout (568px tall — real-world dimensions
-    // from the project that surfaced this) chained into Tree mode; a fixed
-    // per-row height (the old bug) put the child row only 220px below the
-    // parent's *top*, well inside its still-tall body.
-    const parent = cluster('parent', 'A', 2340, 568)
+  it("a parent with children on the board is resized to its own content, not the size it needed to contain them — the exact reported bug", () => {
+    // The real bug, found via a real exported board: a supercluster with no
+    // codes/notes of its own (all its "size" came from containing its 5
+    // children in a prior Standard/default-board layout) kept that huge
+    // contains-children box in Tree mode even once its children moved to
+    // their own row far below — reading as completely disconnected, not
+    // "arranged as a tree". A parent must shrink to computeOwnClusterSize
+    // once its children are laid out separately.
+    const parent = cluster('parent', 'A', 2340, 568) // real dimensions from the project that surfaced this
     const child = cluster('child', 'B', 1140, 500)
     const categories: CategoryRecord[] = [
-      { id: 'A', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
-      { id: 'B', kind: 'theme', name: 'B', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'A', createdAt: '0' }
+      makeCategory('A'), // no own codeIds/noteIds — its old size was purely for containment
+      makeCategory('B', { parentCategoryId: 'A' })
     ]
     const positions = computeTreeLayout([parent, child], categories)
     const byId = new Map(positions.map((p) => [p.id, p]))
-    const parentBottom = byId.get('parent')!.y + parent.height
+    const expectedParentSize = computeOwnClusterSize(categories[0])
+    expect(byId.get('parent')).toMatchObject(expectedParentSize)
+    // ...and the child's row clears the *resized* (small) parent, not the
+    // original 568px-tall containment box.
+    const parentBottom = byId.get('parent')!.y + expectedParentSize.height
     expect(byId.get('child')!.y).toBeGreaterThanOrEqual(parentBottom)
   })
 
-  it('a shared row per depth clears the tallest node in any branch, not just its own', () => {
+  it('a parent that also has its own codes/notes is resized to fit those, not shrunk to an empty header', () => {
+    // A mixed case: 'A' holds 20 codes of its own *and* has a child on the
+    // board — its Tree-mode size should reflect its own 20 codes, not
+    // collapse to the bare-header minimum the previous test's childless
+    // parent gets.
+    const categories: CategoryRecord[] = [
+      makeCategory('A', { codeIds: Array.from({ length: 20 }, (_, i) => `code${i}`) }),
+      makeCategory('B', { parentCategoryId: 'A' })
+    ]
+    const parent = cluster('parent', 'A', 280, 200)
+    const child = cluster('child', 'B', 100, 100)
+    const positions = computeTreeLayout([parent, child], categories)
+    const byId = new Map(positions.map((p) => [p.id, p]))
+    const expectedParentSize = computeOwnClusterSize(categories[0])
+    expect(expectedParentSize.height).toBeGreaterThan(200) // taller than the bare-header minimum
+    expect(byId.get('parent')).toMatchObject(expectedParentSize)
+  })
+
+  it('a leaf (no children on the board) keeps its own real size untouched', () => {
+    const categories: CategoryRecord[] = [makeCategory('A'), makeCategory('B', { parentCategoryId: 'A' })]
+    const parent = cluster('parent', 'A', 2340, 568)
+    const child = cluster('child', 'B', 1140, 500)
+    const positions = computeTreeLayout([parent, child], categories)
+    const byId = new Map(positions.map((p) => [p.id, p]))
+    // 'B' has no children of its own on this board — a plain leaf, unresized.
+    expect(byId.get('child')).toMatchObject({ width: 1140, height: 500 })
+  })
+
+  it('a shared row per depth clears the tallest *effective* node in any branch, not its original size', () => {
+    // 'tallRoot' had a huge original height purely from containing its
+    // child in some earlier layout, but has no codes/notes of its own —
+    // once resized for Tree, its effective height is small, and the shared
+    // depth-1 row only needs to clear *that*, not the stale 600px value.
     const tallRoot = cluster('tallRoot', 'A', 100, 600)
     const tallChild = cluster('tallChild', 'B', 100, 100)
     const shortRoot = cluster('shortRoot', 'C', 100, 100)
     const shortChild = cluster('shortChild', 'D', 100, 100)
     const categories: CategoryRecord[] = [
-      { id: 'A', kind: 'theme', name: 'A', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
-      { id: 'B', kind: 'theme', name: 'B', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'A', createdAt: '0' },
-      { id: 'C', kind: 'theme', name: 'C', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
-      { id: 'D', kind: 'theme', name: 'D', color: '#fff', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'C', createdAt: '0' }
+      makeCategory('A'),
+      makeCategory('B', { parentCategoryId: 'A' }),
+      makeCategory('C'),
+      makeCategory('D', { parentCategoryId: 'C' })
     ]
     const positions = computeTreeLayout([tallRoot, tallChild, shortRoot, shortChild], categories)
     const byId = new Map(positions.map((p) => [p.id, p]))
+    const effectiveTallRootHeight = computeOwnClusterSize(categories[0]).height
     // Both depth-1 children land on the same shared row...
     expect(byId.get('tallChild')!.y).toBe(byId.get('shortChild')!.y)
-    // ...and that row clears the tall root's bottom, even for the short branch.
-    expect(byId.get('shortChild')!.y).toBeGreaterThanOrEqual(byId.get('tallRoot')!.y + tallRoot.height)
+    // ...and that row clears the *resized* tall root's bottom, not its
+    // stale 600px original height.
+    expect(byId.get('shortChild')!.y).toBeGreaterThanOrEqual(byId.get('tallRoot')!.y + effectiveTallRootHeight)
+    expect(effectiveTallRootHeight).toBeLessThan(600)
   })
 })
 

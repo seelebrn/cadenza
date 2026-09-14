@@ -1715,3 +1715,32 @@ through the app's own `readProjectFile`/`normalizeProjectData` path. No app sour
 this only touched the generator script and its output file
 (`resources/sample-projects/example.qdaproj`) — so the existing suite is unaffected: still
 332/332, typecheck clean.
+
+### The cluster-level fix wasn't enough either — full audit, explicit per-code mapping (2026-09-14)
+
+Followed up: "it's better but there are still a lot of hiccups... could you run a few checks?
+It's important since it's the demo project." Right — cycling *within* the correct cluster
+still isn't the same as matching the specific code: dumped every one of the 300 code/note-to-
+quote pairings and read them individually rather than spot-checking. Real problems turned up
+immediately — e.g. "Charge mentale des transmissions" landing on a sentence about handling a
+cardiac arrest (same cluster, wrong code), and, worse, several codes ("Soutien familial",
+"Soutien du conjoint", "Confidence à un ancien camarade d'école", "Écoute d'un cadre
+bienveillant") describing things the three transcripts never actually mentioned at all — no
+family, no partner, no manager, no school friend anywhere in the original interviews, so no
+quote could ever have matched them well.
+
+Fixed properly this time: extended the transcripts with new paragraphs (append-only, so no
+existing verified offset shifts) specifically covering the previously-unsupported material —
+a colleague conflict, a formal medication double-check routine, family/partner/manager support,
+material shortages, communication-channel specifics, and more — then replaced the per-cluster
+round-robin entirely with an explicit `codeQuotes` map: all 195 codes individually paired with
+the real sentence chosen by reading what that code means and what the sentence says, not by
+cycling position. A quote still legitimately supports more than one code where they're near-
+synonyms (realistic multi-coding), but every pairing is now a deliberate choice. Notes draw
+from each cluster's own deduplicated set of quotes already assigned to its codes.
+
+Verified by dumping and re-reading the *entire* mapping a second time (not sampling) — all 195
+code pairings and a spot-check of notes across 4 clusters now read as genuine, specific
+matches. Referential integrity re-checked (0 errors), reopened through the app's own
+`readProjectFile` path. Generator + output file only; existing suite unaffected (332/332),
+typecheck clean, production build clean, boot-tested (no errors, cleanly killed).

@@ -741,11 +741,38 @@ function BoardView(): JSX.Element {
       .filter((g): g is NonNullable<typeof g> => g !== null)
   }, [data, clusters, dragState, clusterMoveDelta])
 
+  // Where a ray from `box`'s own center toward (towardX, towardY) crosses
+  // the box's boundary — used below to clip a structural nesting edge to
+  // each box's actual edge rather than drawing center-to-center. Without
+  // this, most of a long edge (e.g. a child laid out well to the side of a
+  // wide subtree, per computeTreeLayout's centering) would run *behind*
+  // whichever boxes its straight center-to-center path happens to cross,
+  // since the connector layer paints below the cards — clipping to the
+  // boundary keeps the whole visible line in the open gap between clusters.
+  function boxExitPoint(
+    box: { x: number; y: number; width: number; height: number },
+    towardX: number,
+    towardY: number
+  ): { x: number; y: number } {
+    const cx = box.x + box.width / 2
+    const cy = box.y + box.height / 2
+    const dx = towardX - cx
+    const dy = towardY - cy
+    if (dx === 0 && dy === 0) return { x: cx, y: cy }
+    const tx = dx !== 0 ? box.width / 2 / Math.abs(dx) : Infinity
+    const ty = dy !== 0 ? box.height / 2 / Math.abs(dy) : Infinity
+    const t = Math.min(tx, ty)
+    return { x: cx + dx * t, y: cy + dy * t }
+  }
+
   // Structural parent/child edges — automatic, not user-authored (contrast
   // clusterLinkGeometries above): only needed where nesting is no longer
   // shown by plain containment, which Tree's layout deliberately breaks
-  // (see getStructuralNestingEdges). Same live-drag delta handling as the
-  // cluster links.
+  // (see getStructuralNestingEdges). Clipped to each box's own edge (see
+  // boxExitPoint) rather than center-to-center, and drawn with an
+  // arrowhead, so the whole connector — including where it points — sits
+  // in the open gap between the two clusters instead of partly hidden
+  // behind either one. Same live-drag delta handling as the cluster links.
   const nestingEdgeGeometries = useMemo(() => {
     if (!data) return []
     const edges = getStructuralNestingEdges(clusters, data.categories)
@@ -756,11 +783,29 @@ function BoardView(): JSX.Element {
         if (!a || !b) return null
         const aMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(a.id)
         const bMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(b.id)
-        const ax = a.x + (aMoving ? clusterMoveDelta.dx : 0) + a.width / 2
-        const ay = a.y + (aMoving ? clusterMoveDelta.dy : 0) + a.height / 2
-        const bx = b.x + (bMoving ? clusterMoveDelta.dx : 0) + b.width / 2
-        const by = b.y + (bMoving ? clusterMoveDelta.dy : 0) + b.height / 2
-        return { key: `${edge.parentClusterId}:${edge.childClusterId}`, ax, ay, bx, by }
+        const aBox = {
+          x: a.x + (aMoving ? clusterMoveDelta.dx : 0),
+          y: a.y + (aMoving ? clusterMoveDelta.dy : 0),
+          width: a.width,
+          height: a.height
+        }
+        const bBox = {
+          x: b.x + (bMoving ? clusterMoveDelta.dx : 0),
+          y: b.y + (bMoving ? clusterMoveDelta.dy : 0),
+          width: b.width,
+          height: b.height
+        }
+        const aCenter = { x: aBox.x + aBox.width / 2, y: aBox.y + aBox.height / 2 }
+        const bCenter = { x: bBox.x + bBox.width / 2, y: bBox.y + bBox.height / 2 }
+        const start = boxExitPoint(aBox, bCenter.x, bCenter.y)
+        const end = boxExitPoint(bBox, aCenter.x, aCenter.y)
+        return {
+          key: `${edge.parentClusterId}:${edge.childClusterId}`,
+          ax: start.x,
+          ay: start.y,
+          bx: end.x,
+          by: end.y
+        }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)
   }, [data, clusters, dragState, clusterMoveDelta])
@@ -1176,16 +1221,39 @@ function BoardView(): JSX.Element {
                 >
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
                 </marker>
+                <marker
+                  id="nesting-edge-arrow"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+                </marker>
               </defs>
               {linkGeometries.map(({ link, ax, ay, bx, by }) => (
                 <line key={link.id} x1={ax} y1={ay} x2={bx} y2={by} stroke="#94a3b8" strokeWidth={2} />
               ))}
               {/* Structural parent/child edges — drawn only where the layout
                   (Tree) has broken plain visual containment; see
-                  getStructuralNestingEdges. Dashed and muted so it never
-                  competes with a labeled, user-authored cluster link. */}
+                  getStructuralNestingEdges. Solid, with an arrowhead, and
+                  clipped to each box's own edge (see boxExitPoint above) so
+                  it reads unambiguously as "still nested" — distinct from a
+                  labeled, user-authored ClusterLink, which keeps its own
+                  arrow style and connects box *centers*. */}
               {nestingEdgeGeometries.map(({ key, ax, ay, bx, by }) => (
-                <line key={key} x1={ax} y1={ay} x2={bx} y2={by} stroke="#cbd5e1" strokeWidth={1.5} strokeDasharray="5 4" />
+                <line
+                  key={key}
+                  x1={ax}
+                  y1={ay}
+                  x2={bx}
+                  y2={by}
+                  stroke="#64748b"
+                  strokeWidth={2}
+                  markerEnd="url(#nesting-edge-arrow)"
+                />
               ))}
               {/* Thematic-map cluster links — a labeled relationship between two
                   clusters (see ClusterLink in types.ts), distinct from the plain

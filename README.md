@@ -1546,3 +1546,33 @@ one per pair, matching the project's actual nesting exactly, with zero cluster o
 of inside — the exact reported bug; a category whose parent isn't on the board at all; a
 three-generation chain). Full suite green (327/327), typecheck clean, production build clean,
 boot-tested (no errors, cleanly killed).
+
+### The nesting-edge line wasn't visible enough to actually fix the reported bug (2026-09-14)
+
+Reported again after the fix above shipped (confirmed via a fresh `npm run dev` restart, so
+not a stale build): sub-clusters still looked separated/unlinked in Tree, and specifically not
+in Radial — ruling out both a stale build and a design misunderstanding, and pointing at the
+new connector itself.
+
+Two real problems, found by actually measuring against `MultiCaseTest.qdaproj` rather than
+guessing: the line was drawn **center-to-center** between the two cluster boxes, and — since
+the connector layer paints *behind* the cards — most of that line's length was hidden behind
+the boxes themselves; sampling the real project's 19 edges densely, one was over 94% covered
+this way, and the styling (`#cbd5e1`, thin, dashed) made even the visible fraction easy to
+miss on the rest.
+
+Fixed both: added `boxExitPoint` (clips each end of the line to where a ray from a box's own
+center toward the other box actually crosses that box's boundary, instead of running the line
+all the way to the center) so the whole segment sits in the open gap between the two clusters,
+never behind either one; and switched the line itself from a thin dashed `#cbd5e1` to a solid
+2px `#64748b` with an arrowhead pointing at the child — unambiguous at a glance, while staying
+visually distinct from a labeled, user-authored `ClusterLink` (which keeps its own arrow style
+and still connects box centers, since a link is a claim about two specific points, not a
+boundary-to-boundary structural edge).
+
+Verified by simulating both the old and new line against the real project's 19 edges (dense
+point sampling along each segment, checking whether it falls inside any cluster box other than
+its own two endpoints): the old center-to-center line was up to 94% hidden on the worst edge;
+the new clipped line is 0% hidden behind a third-party box on all 19. Full suite still green
+(327/327, no shared-logic tests needed changing — this was a rendering-only fix), typecheck
+clean, production build clean, boot-tested (no errors, cleanly killed).

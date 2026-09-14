@@ -6,7 +6,7 @@ import { buildClusterTree, DRAG_KIND_MIME, SOURCE_CLUSTER_MIME } from '../lib/cl
 import type { ClusterTreeNode } from '../lib/clusterTree'
 import { buildTree, filterClusterTree, filterTreeByQuery, findTreeNode, pruneClaimed } from '../lib/codebookTree'
 import type { TreeNode } from '../lib/codebookTree'
-import type { CodeNode, TagKind } from '@shared/types'
+import type { CategoryKind, CodeNode, TagKind } from '@shared/types'
 import ClusterRowShell from './ClusterRowShell'
 
 const PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899']
@@ -44,6 +44,11 @@ function CodebookPanel(): JSX.Element {
 
   const [newName, setNewName] = useState('')
   const [newKind, setNewKind] = useState<TagKind | 'cluster'>('code')
+  // Only shown/used when newKind === 'cluster' — same theme/question choice
+  // Analysis > Clusters and the board's own "+ New cluster" already offer;
+  // this form used to hardcode 'theme', making it impossible to create an
+  // AQA-style question-cluster from the Workspace sidebar.
+  const [newClusterKind, setNewClusterKind] = useState<CategoryKind>('theme')
   const [isRootDragOver, setIsRootDragOver] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -89,7 +94,7 @@ function CodebookPanel(): JSX.Element {
     if (!name) return
     if (newKind === 'cluster') {
       withBatch(() => {
-        const clusterId = createCategory(name, 'theme', nextColor(codes.length + clusters.length))
+        const clusterId = createCategory(name, newClusterKind, nextColor(codes.length + clusters.length))
         if (clusterId && activeSpan) {
           fileSpanUnderCategory(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, clusterId)
         }
@@ -148,9 +153,26 @@ function CodebookPanel(): JSX.Element {
           <option value="code">Code</option>
           <option value="cluster">Cluster</option>
         </select>
+        {newKind === 'cluster' && (
+          <select
+            className="rounded border border-slate-300 text-xs"
+            value={newClusterKind}
+            title="A theme is an emergent grouping; a question is itself the analytic question (AQA-style) — whatever's filed under it reads as evidence/answers."
+            onChange={(e) => setNewClusterKind(e.target.value as CategoryKind)}
+          >
+            <option value="theme">Theme</option>
+            <option value="question">Question</option>
+          </select>
+        )}
         <input
           className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
-          placeholder={`New ${newKind}…`}
+          placeholder={
+            newKind === 'cluster'
+              ? newClusterKind === 'question'
+                ? 'New analytic question…'
+                : 'New theme…'
+              : `New ${newKind}…`
+          }
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleCreate()}

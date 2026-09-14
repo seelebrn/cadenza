@@ -5,7 +5,7 @@ import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { buildClusterTree, DRAG_KIND_MIME, SOURCE_CLUSTER_MIME } from '../lib/clusterTree'
 import type { ClusterTreeNode } from '../lib/clusterTree'
 import { describeNoteAttachment } from '@shared/notesOps'
-import type { NoteCategoryDef, NoteRecord } from '@shared/types'
+import type { CategoryKind, NoteCategoryDef, NoteRecord } from '@shared/types'
 import ClusterRowShell from './ClusterRowShell'
 
 const PALETTE = ['#3b82f6', '#f97316', '#8b5cf6', '#22c55e', '#ef4444', '#14b8a6', '#eab308', '#ec4899']
@@ -53,6 +53,10 @@ function NotesPanel(): JSX.Element {
   const [filterMode, setFilterMode] = useState<'document' | 'all'>('document')
   const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
   const [newClusterName, setNewClusterName] = useState('')
+  // Same theme/question choice Analysis > Clusters and the board's own
+  // "+ New cluster" already offer — this form used to hardcode 'theme',
+  // making it impossible to create an AQA-style question-cluster from here.
+  const [newClusterKind, setNewClusterKind] = useState<CategoryKind>('theme')
   const [isRootDragOver, setIsRootDragOver] = useState(false)
 
   const categories = data?.noteCategories ?? []
@@ -133,7 +137,7 @@ function NotesPanel(): JSX.Element {
   function handleCreateCluster(): void {
     const name = newClusterName.trim()
     if (!name) return
-    createCategory(name, 'theme', nextClusterColor(clusters.length))
+    createCategory(name, newClusterKind, nextClusterColor(clusters.length))
     setNewClusterName('')
   }
 
@@ -262,9 +266,18 @@ function NotesPanel(): JSX.Element {
       </div>
 
       <div className="flex gap-1.5 border-b border-slate-200 p-2">
+        <select
+          className="rounded border border-slate-300 text-xs"
+          value={newClusterKind}
+          title="A theme is an emergent grouping; a question is itself the analytic question (AQA-style) — whatever's filed under it reads as evidence/answers."
+          onChange={(e) => setNewClusterKind(e.target.value as CategoryKind)}
+        >
+          <option value="theme">Theme</option>
+          <option value="question">Question</option>
+        </select>
         <input
           className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
-          placeholder="New cluster…"
+          placeholder={newClusterKind === 'question' ? 'New analytic question…' : 'New cluster…'}
           value={newClusterName}
           onChange={(e) => setNewClusterName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleCreateCluster()}
@@ -504,6 +517,9 @@ function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Elem
   const updateNote = useProjectStore((s) => s.updateNote)
   const deleteNote = useProjectStore((s) => s.deleteNote)
   const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategoryAndReflowBoard)
+  const createCategory = useProjectStore((s) => s.createCategory)
+  const addNoteToCategory = useProjectStore((s) => s.addNoteToCategoryAndReflowBoard)
+  const withBatch = useProjectStore((s) => s.withBatch)
   const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
   const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const setSuggestedCodeName = useWorkspaceUiStore((s) => s.setSuggestedCodeName)
@@ -544,6 +560,22 @@ function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Elem
     })
     setSuggestedCodeName(note.question?.trim() || note.answer.slice(0, 40))
     setActiveSidebarTab('codes')
+  }
+
+  // Same idea as "Promote to code", for the other half of AQA: turns this
+  // note's own question into a formal question-Category (an analytic
+  // question that organizes evidence under it, not just one note's memo)
+  // and files this note under it as its first piece of evidence. Doesn't
+  // need a segment attachment the way "Promote to code" does — a
+  // project/document-level note can pose an analytic question too.
+  function handlePromoteToQuestionCluster(): void {
+    if (!data) return
+    const name = note.question?.trim() || note.answer.slice(0, 40)
+    if (!name) return
+    withBatch(() => {
+      const categoryId = createCategory(name, 'question', nextClusterColor(data.categories.length))
+      if (categoryId) addNoteToCategory(categoryId, note.id)
+    })
   }
 
   return (
@@ -645,6 +677,15 @@ function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Elem
             {note.attachedTo.kind === 'segment' && (
               <button className="text-slate-500 hover:underline" onClick={handlePromote}>
                 Promote to code
+              </button>
+            )}
+            {(note.question?.trim() || note.answer.trim()) && (
+              <button
+                className="text-slate-500 hover:underline"
+                title="Create a question-cluster from this note's question (or its answer, if it has none) and file this note under it as evidence"
+                onClick={handlePromoteToQuestionCluster}
+              >
+                Promote to question-cluster
               </button>
             )}
             {sourceClusterId && (

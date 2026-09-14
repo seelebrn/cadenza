@@ -2000,3 +2000,27 @@ rather than broken.
 
 Verified: typecheck clean, full suite green (359/359 — UI-only, nothing new to unit-test),
 production build clean, boot-tested.
+
+### Question-cluster creation was stuck to the board and Analysis tab only (2026-09-14)
+
+User asked whether creating an AQA-style question-cluster is board-only, since typing into
+Notes' own "Analytic question" field just makes a more structured note, not a question-
+cluster. Checked: Analysis > Clusters already has the same theme/question selector the board
+does, so it wasn't actually board-only — but two other creation spots really were stuck to
+`'theme'`: the Workspace sidebar's "+ New Cluster" (`CodebookPanel`) and Notes' own inline
+"+ Add cluster" (`NotesPanel`), both hardcoded `createCategory(name, 'theme', ...)`. Also
+missing: notes already have "Promote to code" (turns a note's own suggested name into a new
+code, applied to the note's segment) but nothing equivalent for the other half of AQA —
+turning a note's own question into a formal question-Category.
+
+Added a Theme/Question `<select>` to both hardcoded creation forms, matching Analysis >
+Clusters' own wording and tooltip. Added "Promote to question-cluster" next to "Promote to
+code" on each note: creates a `kind: 'question'` category named from the note's own question
+(falling back to the start of its answer, same fallback "Promote to code" already uses) and
+files the note under it as its first piece of evidence — shown whenever the note has a
+question or an answer to name it from, unlike "Promote to code" which needs a segment
+attachment (a project/document-level note has no passage to apply a code to, but can still
+pose a question).
+
+Verified: typecheck clean, full suite green (359/359 — UI-only), production build clean,
+boot-tested.

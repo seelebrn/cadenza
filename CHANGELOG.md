@@ -15,6 +15,14 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   reason (every code/note/cluster always shows on that board) but now says so more
   clearly instead of looking broken.
 
+### Added
+- A theme/question choice when creating a cluster from the Workspace sidebar or from
+  Notes' own "+ Add cluster" (previously theme-only there; the board and Analysis >
+  Clusters already had it).
+- "Promote to question-cluster" on each note, next to "Promote to code" — turns the
+  note's own analytic question into a formal question-cluster and files the note
+  under it.
+
 ## [0.3.1] - 2026-09-14
 
 ### Added

@@ -10,6 +10,7 @@ import {
   computeAccommodatingSize,
   computeCategoryLayout,
   type ClusterPosition,
+  computeClusterLinkPath,
   computeGridPosition,
   computeNestedLayout,
   computeOwnClusterSize,
@@ -41,6 +42,7 @@ import {
   renameBoard,
   resetDefaultBoardClusterLayout,
   resizeCluster,
+  segmentIntersectsBox,
   unassignItemFromCluster,
   unlinkItems
 } from './boardOps'
@@ -1133,6 +1135,89 @@ describe('getStructuralNestingEdges', () => {
       { parentClusterId: 'gp', childClusterId: 'p' },
       { parentClusterId: 'p', childClusterId: 'c' }
     ])
+  })
+})
+
+describe('segmentIntersectsBox', () => {
+  const box = { x: 100, y: 100, width: 100, height: 100 } // spans (100,100)-(200,200)
+
+  it('detects a segment passing straight through the box', () => {
+    expect(segmentIntersectsBox(0, 150, 300, 150, box)).toBe(true)
+  })
+
+  it('detects a segment entirely missing the box', () => {
+    expect(segmentIntersectsBox(0, 0, 300, 50, box)).toBe(false)
+  })
+
+  it('detects a segment whose endpoint sits inside the box', () => {
+    expect(segmentIntersectsBox(150, 150, 400, 400, box)).toBe(true)
+  })
+
+  it('does not flag a segment that only passes near, not through, the box', () => {
+    expect(segmentIntersectsBox(0, 0, 300, 90, box)).toBe(false)
+  })
+})
+
+describe('computeClusterLinkPath', () => {
+  const left = { x: 0, y: 0, width: 100, height: 100 } // center (50,50)
+  const right = { x: 400, y: 0, width: 100, height: 100 } // center (450,50)
+
+  it('draws a plain straight line when nothing obstructs and there is no parallel sibling', () => {
+    const path = computeClusterLinkPath(left, right, [], 0, 1)
+    expect(path.curved).toBe(false)
+    // Endpoints clipped to each box's own edge (the boxes are horizontally
+    // aligned, so the exit points sit on their facing vertical edges).
+    expect(path.ax).toBeCloseTo(100, 5)
+    expect(path.ay).toBeCloseTo(50, 5)
+    expect(path.bx).toBeCloseTo(400, 5)
+    expect(path.by).toBeCloseTo(50, 5)
+  })
+
+  it('bows around a third cluster sitting directly between the two endpoints', () => {
+    const obstruction = { x: 200, y: 20, width: 100, height: 60 } // straddles the straight path's y=50 line
+    const path = computeClusterLinkPath(left, right, [obstruction], 0, 1)
+    expect(path.curved).toBe(true)
+    // Bows perpendicular to a horizontal line, i.e. vertically, away from
+    // the obstruction — some non-zero vertical displacement at the curve's
+    // own midpoint (a quadratic Bézier's t=0.5 point sits halfway between
+    // the straight midpoint and the control point, so this is smaller than
+    // the raw clearing offset computed internally — a real, visible bow,
+    // not the full computed clearance), while endpoints stay anchored to
+    // the boxes themselves.
+    expect(Math.abs(path.midY - 50)).toBeGreaterThan(20)
+    expect(path.ax).toBeCloseTo(100, 5)
+    expect(path.bx).toBeCloseTo(400, 5)
+  })
+
+  it('ignores an obstruction the straight path never actually crosses', () => {
+    const farAway = { x: 200, y: 500, width: 50, height: 50 }
+    const path = computeClusterLinkPath(left, right, [farAway], 0, 1)
+    expect(path.curved).toBe(false)
+  })
+
+  it('offsets parallel links between the same pair to opposite sides, symmetrically', () => {
+    const first = computeClusterLinkPath(left, right, [], 0, 2)
+    const second = computeClusterLinkPath(left, right, [], 1, 2)
+    expect(first.curved).toBe(true)
+    expect(second.curved).toBe(true)
+    // Opposite sides of the straight midpoint, equal distance from it.
+    expect(first.midY - 50).toBeCloseTo(-(second.midY - 50), 5)
+    expect(Math.abs(first.midY - 50)).toBeGreaterThan(0)
+  })
+
+  it('lets a real obstruction override a smaller parallel offset', () => {
+    const obstruction = { x: 200, y: 20, width: 200, height: 200 } // large — needs a big clearance
+    const withoutObstruction = computeClusterLinkPath(left, right, [], 0, 2)
+    const withObstruction = computeClusterLinkPath(left, right, [obstruction], 0, 2)
+    expect(Math.abs(withObstruction.midY - 50)).toBeGreaterThan(Math.abs(withoutObstruction.midY - 50))
+  })
+
+  it('never produces NaN for two boxes at the exact same position (degenerate case)', () => {
+    const same = { x: 0, y: 0, width: 100, height: 100 }
+    const path = computeClusterLinkPath(same, same, [], 0, 1)
+    expect(Number.isNaN(path.ax)).toBe(false)
+    expect(Number.isNaN(path.midX)).toBe(false)
+    expect(path.curved).toBe(false)
   })
 })
 

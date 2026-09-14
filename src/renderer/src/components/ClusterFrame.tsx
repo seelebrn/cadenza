@@ -62,9 +62,18 @@ interface ClusterFrameProps {
    * rather than offered and silently doing nothing (or something
    * confusing) when clicked. */
   canDelete: boolean
+  /** True while a *different* cluster is focused (hovered) and this one
+   * isn't it and isn't directly linked to it — see focusConnectedCategoryIds
+   * in BoardView. Fades this frame out rather than hiding it, so the rest
+   * of the map's layout stays legible as context while attention narrows
+   * to one cluster and its own relationships. */
+  isDimmed: boolean
   onStartMove: (e: React.MouseEvent) => void
   onStartResize: (e: React.MouseEvent) => void
   onPick: () => void
+  /** Fires true on hovering this frame, false on leaving it — drives the
+   * thematic-map "focus" preview in BoardView. */
+  onHoverChange: (hovering: boolean) => void
 }
 
 function ClusterFrame({
@@ -79,9 +88,11 @@ function ClusterFrame({
   isLinkMode,
   isLinkPicked,
   canDelete,
+  isDimmed,
   onStartMove,
   onStartResize,
-  onPick
+  onPick,
+  onHoverChange
 }: ClusterFrameProps): JSX.Element {
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
@@ -119,7 +130,7 @@ function ClusterFrame({
         />
       )}
       <div
-        className={`absolute select-none rounded-lg border-2 ${
+        className={`absolute select-none rounded-lg border-2 transition-opacity duration-150 ${
           isNestTarget || isEnclosedByResize ? 'border-solid' : 'border-dashed'
         }`}
         style={{
@@ -136,8 +147,11 @@ function ClusterFrame({
               : isLinkPicked
                 ? `0 0 0 3px #0ea5e9`
                 : undefined,
-          cursor: isLinkMode ? 'crosshair' : undefined
+          cursor: isLinkMode ? 'crosshair' : undefined,
+          opacity: isDimmed ? 0.3 : 1
         }}
+        onMouseEnter={() => onHoverChange(true)}
+        onMouseLeave={() => onHoverChange(false)}
       >
         {isLinkPicked && (
           <span className="pointer-events-none absolute -top-2.5 left-1 whitespace-nowrap rounded bg-sky-500 px-1.5 py-0.5 text-[9px] font-medium text-white shadow">

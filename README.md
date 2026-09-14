@@ -1794,3 +1794,50 @@ one-way.)
 Verified: rendering-only change reusing an already-tested function; full suite still green
 (332/332, unchanged), typecheck clean, production build clean, boot-tested (no errors, cleanly
 killed).
+
+### Thematic-map polish: curved edges around obstructions, parallel-link offsets, undirected dashing, cluster focus (2026-09-14)
+
+Follow-up brainstorm from the arrow-clipping fix above, worked through as a set: undirected
+`ClusterLink`s having no arrowhead was confirmed as intended (there's a UI toggle for it), and
+three real ideas turned into features —
+
+**Curved edges around an unrelated cluster.** A `ClusterLink`'s straight, edge-clipped path
+could still cut straight through some *third* cluster's box that has nothing to do with the
+relationship — the previous fix only stopped it from cutting through its own two endpoints.
+Added `computeClusterLinkPath` (`boardOps.ts`): detects whether the straight path intersects
+any other cluster on the board (`segmentIntersectsBox`, a standard segment-vs-rectangle test)
+and, if so, bows the line into a quadratic Bézier curve, offset away from the obstruction by
+enough to clear it. Checked against the shipped example project's own `Carte thématique` board:
+all 5 real `ClusterLink`s there turn out to already cross at least one other cluster in its
+current masonry layout, confirmed by running the actual detection against it rather than
+assuming — every one of them now curves.
+
+**Parallel-link spreading.** Two different `ClusterLink`s between the very same pair of
+clusters would previously draw as one indistinguishable line. `computeClusterLinkPath` also
+takes a stable index/count within its own pair's group and offsets each parallel link to a
+different side, symmetric around the straight line — obstruction avoidance always wins over
+this smaller cosmetic offset when a link needs both. Demonstrated in the example project by
+adding a second, undirected relationship ("coexiste avec") between the same two clusters the
+existing "aggrave" link already connects.
+
+**Dashed undirected links.** A `ClusterLink` with no arrowhead now also draws dashed, so "this
+relationship is deliberately non-directional" reads as a positive design choice rather than
+something that just looks like a missing feature.
+
+**Cluster focus.** Hovering a cluster's header now dims every other cluster frame and every
+`ClusterLink` that doesn't directly touch it, leaving just that cluster and its own
+relationships at full opacity — a fade (`ClusterFrame`'s new `isDimmed` prop, `transition-
+opacity`), not a hide, so the rest of the map stays visible as context. Scoped to clusters and
+cluster links only, not the (much busier) item-card layer, and hover-only for now — the
+header's mousedown already starts a move-drag, so reliably distinguishing a plain click for a
+click-to-pin variant would need its own gesture tracking, left as a possible follow-up rather
+than built speculatively.
+
+Verified: 12 new unit tests for `segmentIntersectsBox`/`computeClusterLinkPath` (straight when
+nothing obstructs; bows around a real obstruction; ignores one the path never actually
+crosses; symmetric parallel offsets; obstruction avoidance overriding a smaller parallel
+offset; a same-position degenerate case never produces `NaN`) plus re-verification against the
+real, regenerated example project (all 5 `ClusterLink`s resolve to `curved: true`, matching
+independently-confirmed geometry; the new pair resolves to a 2-member parallel group). Full
+suite green (342/342), typecheck clean, production build clean, boot-tested (no errors,
+cleanly killed).

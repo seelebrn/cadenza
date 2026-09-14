@@ -985,6 +985,179 @@ export function getStructuralNestingEdges(
   return edges
 }
 
+// --- Cluster-link connector geometry (used by both the structural nesting
+// edges above and BoardView's manually-authored ClusterLink rendering) ---
+
+interface BoxLike {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** Where a ray from `box`'s own center toward (towardX, towardY) crosses the
+ * box's boundary — clips a connector to the box's actual edge instead of
+ * running it all the way to the center, so the visible line (and wherever
+ * it points) never cuts across the box's own interior. */
+export function boxExitPoint(box: BoxLike, towardX: number, towardY: number): { x: number; y: number } {
+  const cx = box.x + box.width / 2
+  const cy = box.y + box.height / 2
+  const dx = towardX - cx
+  const dy = towardY - cy
+  if (dx === 0 && dy === 0) return { x: cx, y: cy }
+  const tx = dx !== 0 ? box.width / 2 / Math.abs(dx) : Infinity
+  const ty = dy !== 0 ? box.height / 2 / Math.abs(dy) : Infinity
+  const t = Math.min(tx, ty)
+  return { x: cx + dx * t, y: cy + dy * t }
+}
+
+function cross(ox: number, oy: number, ax: number, ay: number, bx: number, by: number): number {
+  return (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
+}
+
+function segmentsIntersect(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+  dx: number,
+  dy: number
+): boolean {
+  const d1 = cross(cx, cy, dx, dy, ax, ay)
+  const d2 = cross(cx, cy, dx, dy, bx, by)
+  const d3 = cross(ax, ay, bx, by, cx, cy)
+  const d4 = cross(ax, ay, bx, by, dx, dy)
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+}
+
+/** Whether the segment a→b passes through, or starts/ends inside, `box` —
+ * used to detect a ClusterLink whose straight path would cut across some
+ * cluster that isn't one of its own two endpoints. */
+export function segmentIntersectsBox(ax: number, ay: number, bx: number, by: number, box: BoxLike): boolean {
+  const left = box.x
+  const right = box.x + box.width
+  const top = box.y
+  const bottom = box.y + box.height
+  // Quick reject: the segment's own bounding box doesn't even reach the
+  // cluster's bounding box, so a full edge-by-edge check can't be needed.
+  if (Math.max(ax, bx) < left || Math.min(ax, bx) > right || Math.max(ay, by) < top || Math.min(ay, by) > bottom) {
+    return false
+  }
+  if (ax >= left && ax <= right && ay >= top && ay <= bottom) return true
+  if (bx >= left && bx <= right && by >= top && by <= bottom) return true
+  return (
+    segmentsIntersect(ax, ay, bx, by, left, top, right, top) ||
+    segmentsIntersect(ax, ay, bx, by, right, top, right, bottom) ||
+    segmentsIntersect(ax, ay, bx, by, right, bottom, left, bottom) ||
+    segmentsIntersect(ax, ay, bx, by, left, bottom, left, top)
+  )
+}
+
+export interface ClusterLinkPath {
+  ax: number
+  ay: number
+  bx: number
+  by: number
+  /** Where a label should sit — the midpoint of the *visible* path (the
+   * curve's own midpoint when curved, not the straight ax/bx,ay/by span). */
+  midX: number
+  midY: number
+  curved: boolean
+  /** Quadratic Bézier control point — meaningful only when curved is true;
+   * equal to the straight midpoint otherwise, so callers that build a path
+   * string unconditionally (`M ax,ay Q controlX,controlY bx,by`) still get
+   * a correct straight line out of it. */
+  controlX: number
+  controlY: number
+}
+
+const CLUSTER_LINK_PARALLEL_STEP = 28
+const CLUSTER_LINK_OBSTRUCTION_MARGIN = 30
+
+/**
+ * The path one ClusterLink should actually draw: clipped to each cluster's
+ * own edge (boxExitPoint), then bowed into a quadratic curve instead of a
+ * straight line whenever either —
+ *
+ * (a) the straight path would cut across some unrelated third cluster's
+ *     box, which the relationship has no business crossing (a real
+ *     clutter source on a busy map: nothing previously stopped a link
+ *     between two clusters from running straight through a completely
+ *     different one sitting in between), or
+ * (b) this is one of several parallel ClusterLinks between the very same
+ *     pair of clusters, which would otherwise draw as one indistinguishable
+ *     line no matter how many separate relationships exist between that
+ *     pair.
+ *
+ * Obstruction avoidance always wins over a plain parallel offset when both
+ * apply — actually clearing the obstruction matters more than the
+ * (smaller, purely cosmetic) parallel spacing. `parallelIndex`/
+ * `parallelCount` describe this link's position within its own pair's
+ * group (assign a stable index per pair, e.g. by creation order) — pass
+ * `0, 1` for a link that's the only one between its pair.
+ */
+export function computeClusterLinkPath(
+  aBox: BoxLike,
+  bBox: BoxLike,
+  obstructingBoxes: BoxLike[],
+  parallelIndex: number,
+  parallelCount: number
+): ClusterLinkPath {
+  const aCenter = { x: aBox.x + aBox.width / 2, y: aBox.y + aBox.height / 2 }
+  const bCenter = { x: bBox.x + bBox.width / 2, y: bBox.y + bBox.height / 2 }
+  const start = boxExitPoint(aBox, bCenter.x, bCenter.y)
+  const end = boxExitPoint(bBox, aCenter.x, aCenter.y)
+
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const length = Math.hypot(dx, dy)
+  const midX0 = (start.x + end.x) / 2
+  const midY0 = (start.y + end.y) / 2
+  // A degenerate (near-zero-length) segment has no meaningful direction to
+  // bow away from — draw it straight rather than risk a divide-by-zero.
+  if (length < 1) {
+    return { ax: start.x, ay: start.y, bx: end.x, by: end.y, midX: midX0, midY: midY0, curved: false, controlX: midX0, controlY: midY0 }
+  }
+  // Perpendicular unit vector — the axis a curve bows along.
+  const px = -dy / length
+  const py = dx / length
+
+  let offset = parallelCount > 1 ? (parallelIndex - (parallelCount - 1) / 2) * CLUSTER_LINK_PARALLEL_STEP : 0
+
+  let worstNeeded = 0
+  let worstSign = 0
+  for (const box of obstructingBoxes) {
+    if (!segmentIntersectsBox(start.x, start.y, end.x, end.y, box)) continue
+    const centerX = box.x + box.width / 2
+    const centerY = box.y + box.height / 2
+    // Signed distance of the obstruction's center from the line, along the
+    // perpendicular axis — bow to the *opposite* side, away from wherever
+    // the obstruction actually sits.
+    const proj = (centerX - midX0) * px + (centerY - midY0) * py
+    const halfExtent = (box.width + box.height) / 4 // ~ average half-extent, a simple but effective clearing radius
+    const needed = Math.abs(proj) + halfExtent + CLUSTER_LINK_OBSTRUCTION_MARGIN
+    if (needed > worstNeeded) {
+      worstNeeded = needed
+      worstSign = proj >= 0 ? -1 : 1
+    }
+  }
+  if (worstNeeded > 0) offset = worstSign * worstNeeded
+
+  if (offset === 0) {
+    return { ax: start.x, ay: start.y, bx: end.x, by: end.y, midX: midX0, midY: midY0, curved: false, controlX: midX0, controlY: midY0 }
+  }
+
+  const controlX = midX0 + px * offset
+  const controlY = midY0 + py * offset
+  // Midpoint of a quadratic Bézier at t=0.5 is the average of the control
+  // point and the straight midpoint (0.25*start + 0.5*control + 0.25*end).
+  const midX = 0.5 * midX0 + 0.5 * controlX
+  const midY = 0.5 * midY0 + 0.5 * controlY
+  return { ax: start.x, ay: start.y, bx: end.x, by: end.y, midX, midY, curved: true, controlX, controlY }
+}
+
 export interface ClusterPosition {
   id: string
   x: number

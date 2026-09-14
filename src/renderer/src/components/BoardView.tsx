@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import {
+  boxExitPoint,
   computeAccommodatingSize,
+  computeClusterLinkPath,
   computeGridPosition,
   findAlignmentSnap,
   findClusterAtPoint,
@@ -178,6 +180,17 @@ function BoardView(): JSX.Element {
   // did nothing at all.
   const [linkPendingTarget, setLinkPendingTarget] = useState<{ from: string; to: string } | null>(null)
   const [linkLabelDraft, setLinkLabelDraft] = useState('')
+  // Thematic-map "focus" — hovering a cluster's header dims every other
+  // cluster and cluster link, leaving just that one and whatever it's
+  // directly connected to at full opacity. Purely a hover preview (no
+  // click-to-pin yet): the header's mousedown already starts a move-drag,
+  // and reliably telling a plain click from the start of a drag on the
+  // same gesture would need its own tracking, so this stays hover-only for
+  // now. Scoped to clusters and cluster links, not item cards underneath —
+  // the busiest case (the default board, every code/note always visible)
+  // is also the one where dimming hundreds of cards would fight the
+  // existing containment-based readability rather than help it.
+  const [focusedCategoryId, setFocusedCategoryId] = useState<string | null>(null)
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   // The actual content layer (holds every cluster/item, sized to the full
@@ -740,79 +753,74 @@ function BoardView(): JSX.Element {
       .filter((g): g is NonNullable<typeof g> => g !== null)
   }, [links, items, displayPositions])
 
+  // Category ids that should stay at full opacity while focusedCategoryId
+  // is set: the focused cluster itself, plus every cluster directly joined
+  // to it by a ClusterLink (either direction). null (not an empty set)
+  // when nothing is focused, so callers can tell "no focus active" apart
+  // from "focused on something with zero connections" with a single check.
+  const focusConnectedCategoryIds = useMemo(() => {
+    if (!data || !focusedCategoryId) return null
+    const ids = new Set<string>([focusedCategoryId])
+    for (const link of data.clusterLinks) {
+      if (link.fromCategoryId === focusedCategoryId) ids.add(link.toCategoryId)
+      if (link.toCategoryId === focusedCategoryId) ids.add(link.fromCategoryId)
+    }
+    return ids
+  }, [data, focusedCategoryId])
+
   // Thematic-map cluster links visible on this board (both endpoints
-  // present here — see getVisibleClusterLinks) — clipped to each cluster's
-  // own edge via boxExitPoint (defined below; hoisted, so usable here)
-  // rather than drawn center-to-center, so the line and its arrowhead sit
-  // in the open gap between the two clusters instead of visibly cutting
-  // across their interiors — the same reasoning already applied to
-  // nestingEdgeGeometries just below. midX/midY (where the label sits) is
-  // the midpoint of that *clipped* segment, not the full center-to-center
-  // span, so a label between two large clusters lands in the actual gap
-  // between them rather than potentially inside one of the boxes. Same
-  // live-drag-following treatment as the item-link geometries above: an
-  // endpoint currently being dragged as part of a cluster-move follows
-  // liveDelta so the line doesn't lag a frame behind the frame it's
-  // attached to.
+  // present here — see getVisibleClusterLinks). Geometry (edge-clipping,
+  // curving around an unrelated cluster in the way, spreading parallel
+  // links between the same pair) is computed by computeClusterLinkPath —
+  // this memo's job is just resolving each link's two cluster boxes
+  // (following live-drag delta, same as every other connector geometry in
+  // this file) and grouping links that share the same unordered pair of
+  // clusters so each gets a stable index within that group.
   const clusterLinkGeometries = useMemo(() => {
     if (!data) return []
     const visible = getVisibleClusterLinks(data.clusterLinks, clusters)
+
+    function resolveBox(cluster: BoardCluster): { x: number; y: number; width: number; height: number } {
+      const moving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(cluster.id)
+      return {
+        x: cluster.x + (moving ? clusterMoveDelta.dx : 0),
+        y: cluster.y + (moving ? clusterMoveDelta.dy : 0),
+        width: cluster.width,
+        height: cluster.height
+      }
+    }
+
+    // Stable per-pair ordering (not creation order, which can reshuffle as
+    // links are added/removed) — sorted by id, so two parallel links keep
+    // the same relative index, and so the same offset side, across renders.
+    const pairKey = (l: (typeof visible)[number]): string =>
+      [l.fromCategoryId, l.toCategoryId].sort().join('|')
+    const byPair = new Map<string, typeof visible>()
+    for (const link of visible) {
+      const key = pairKey(link)
+      const group = byPair.get(key) ?? []
+      group.push(link)
+      byPair.set(key, group)
+    }
+    for (const group of byPair.values()) group.sort((a, b) => a.id.localeCompare(b.id))
+
     return visible
       .map((link) => {
         const a = clusters.find((c) => c.categoryId === link.fromCategoryId)
         const b = clusters.find((c) => c.categoryId === link.toCategoryId)
         if (!a || !b) return null
-        const aMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(a.id)
-        const bMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(b.id)
-        const aBox = {
-          x: a.x + (aMoving ? clusterMoveDelta.dx : 0),
-          y: a.y + (aMoving ? clusterMoveDelta.dy : 0),
-          width: a.width,
-          height: a.height
-        }
-        const bBox = {
-          x: b.x + (bMoving ? clusterMoveDelta.dx : 0),
-          y: b.y + (bMoving ? clusterMoveDelta.dy : 0),
-          width: b.width,
-          height: b.height
-        }
-        const aCenter = { x: aBox.x + aBox.width / 2, y: aBox.y + aBox.height / 2 }
-        const bCenter = { x: bBox.x + bBox.width / 2, y: bBox.y + bBox.height / 2 }
-        const start = boxExitPoint(aBox, bCenter.x, bCenter.y)
-        const end = boxExitPoint(bBox, aCenter.x, aCenter.y)
-        return {
-          link,
-          ax: start.x,
-          ay: start.y,
-          bx: end.x,
-          by: end.y,
-          midX: (start.x + end.x) / 2,
-          midY: (start.y + end.y) / 2
-        }
+        const aBox = resolveBox(a)
+        const bBox = resolveBox(b)
+        const obstructingBoxes = clusters
+          .filter((c) => c.id !== a.id && c.id !== b.id)
+          .map((c) => resolveBox(c))
+        const group = byPair.get(pairKey(link)) ?? [link]
+        const parallelIndex = group.findIndex((l) => l.id === link.id)
+        const path = computeClusterLinkPath(aBox, bBox, obstructingBoxes, Math.max(0, parallelIndex), group.length)
+        return { link, ...path }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)
   }, [data, clusters, dragState, clusterMoveDelta])
-
-  // Where a ray from `box`'s own center toward (towardX, towardY) crosses
-  // the box's boundary — used both above (clusterLinkGeometries) and below
-  // (nestingEdgeGeometries) to clip a connector to each box's actual edge
-  // rather than drawing it center-to-center, so a line/arrowhead never
-  // visibly cuts across a cluster's interior on its way to the other end.
-  function boxExitPoint(
-    box: { x: number; y: number; width: number; height: number },
-    towardX: number,
-    towardY: number
-  ): { x: number; y: number } {
-    const cx = box.x + box.width / 2
-    const cy = box.y + box.height / 2
-    const dx = towardX - cx
-    const dy = towardY - cy
-    if (dx === 0 && dy === 0) return { x: cx, y: cy }
-    const tx = dx !== 0 ? box.width / 2 / Math.abs(dx) : Infinity
-    const ty = dy !== 0 ? box.height / 2 / Math.abs(dy) : Infinity
-    const t = Math.min(tx, ty)
-    return { x: cx + dx * t, y: cy + dy * t }
-  }
 
   // Structural parent/child edges — automatic, not user-authored (contrast
   // clusterLinkGeometries above): only needed where nesting is no longer
@@ -1388,8 +1396,18 @@ function BoardView(): JSX.Element {
                   isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}
                   isLinkMode={linkMode}
                   isLinkPicked={linkFromCategoryId === category.id}
+                  isDimmed={focusConnectedCategoryIds !== null && !focusConnectedCategoryIds.has(category.id)}
                   canDelete={!currentBoard.isDefault}
                   onPick={() => handlePickClusterForLink(category.id)}
+                  onHoverChange={(hovering) => {
+                    // On leave, only clear if this cluster is still the
+                    // one focused — the mouse entering a new cluster's
+                    // frame commonly fires *before* leaving the old one,
+                    // and unconditionally clearing on leave would wipe out
+                    // the new hover that already landed.
+                    if (hovering) setFocusedCategoryId(category.id)
+                    else setFocusedCategoryId((prev) => (prev === category.id ? null : prev))
+                  }}
                   onStartMove={(e) => {
                     const descendantCategoryIds = getDescendantCategoryIds(data.categories, category.id)
                     const groupCategoryIds = [category.id, ...descendantCategoryIds]
@@ -1532,35 +1550,67 @@ function BoardView(): JSX.Element {
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
                 </marker>
               </defs>
-              {clusterLinkGeometries.map(({ link, ax, ay, bx, by, midX, midY }) => (
-                <g key={link.id}>
-                  <line
-                    x1={ax}
-                    y1={ay}
-                    x2={bx}
-                    y2={by}
-                    stroke="#475569"
-                    strokeWidth={2}
-                    markerEnd={link.directed ? 'url(#cluster-link-arrow)' : undefined}
-                  />
-                  {link.label && (
-                    <>
-                      <rect
-                        x={midX - (link.label.length * 3.2 + 6)}
-                        y={midY - 9}
-                        width={link.label.length * 6.4 + 12}
-                        height={18}
-                        rx={4}
-                        fill="white"
-                        stroke="#cbd5e1"
+              {clusterLinkGeometries.map(({ link, ax, ay, bx, by, midX, midY, curved, controlX, controlY }) => {
+                // Dimmed alongside the clusters (see focusConnectedCategoryIds)
+                // when a focus is active and this link doesn't directly touch
+                // the focused cluster — a link between two *other* clusters
+                // that both happen to be neighbors of the focused one is
+                // still not itself a relationship of the focused cluster, so
+                // this checks the link's own endpoints, not just membership
+                // in the neighbor set.
+                const isDimmed =
+                  focusConnectedCategoryIds !== null &&
+                  link.fromCategoryId !== focusedCategoryId &&
+                  link.toCategoryId !== focusedCategoryId
+                const opacity = isDimmed ? 0.25 : 1
+                // An undirected link (no arrowhead) is otherwise visually
+                // identical to a directed one whose arrowhead just isn't
+                // showing for some other reason — dashing it makes "this is
+                // deliberately non-directional" legible on its own, not just
+                // inferred from an absence.
+                const dashArray = link.directed ? undefined : '7 5'
+                return (
+                  <g key={link.id} className="transition-opacity duration-150" style={{ opacity }}>
+                    {curved ? (
+                      <path
+                        d={`M ${ax} ${ay} Q ${controlX} ${controlY} ${bx} ${by}`}
+                        fill="none"
+                        stroke="#475569"
+                        strokeWidth={2}
+                        strokeDasharray={dashArray}
+                        markerEnd={link.directed ? 'url(#cluster-link-arrow)' : undefined}
                       />
-                      <text x={midX} y={midY + 4} textAnchor="middle" fontSize={11} fill="#334155">
-                        {link.label}
-                      </text>
-                    </>
-                  )}
-                </g>
-              ))}
+                    ) : (
+                      <line
+                        x1={ax}
+                        y1={ay}
+                        x2={bx}
+                        y2={by}
+                        stroke="#475569"
+                        strokeWidth={2}
+                        strokeDasharray={dashArray}
+                        markerEnd={link.directed ? 'url(#cluster-link-arrow)' : undefined}
+                      />
+                    )}
+                    {link.label && (
+                      <>
+                        <rect
+                          x={midX - (link.label.length * 3.2 + 6)}
+                          y={midY - 9}
+                          width={link.label.length * 6.4 + 12}
+                          height={18}
+                          rx={4}
+                          fill="white"
+                          stroke="#cbd5e1"
+                        />
+                        <text x={midX} y={midY + 4} textAnchor="middle" fontSize={11} fill="#334155">
+                          {link.label}
+                        </text>
+                      </>
+                    )}
+                  </g>
+                )
+              })}
             </svg>
 
             {/* Unlink buttons render last (on top of every card) so a link's

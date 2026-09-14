@@ -257,6 +257,30 @@ function BoardView(): JSX.Element {
     return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes, data.categories, clusters)
   }, [data, currentBoard, explicitItems, clusters])
 
+  // The actual drawing surface, grown to fit whatever's really on the board
+  // instead of a fixed 2400x1600 — CANVAS_WIDTH/HEIGHT stay the floor for a
+  // small/empty board. Without this, a wide arrangement (Tree with several
+  // siblings in one row easily passes several thousand px) still rendered
+  // its cluster *frames* fine (plain divs, unclipped by their own size) but
+  // silently clipped every SVG-drawn connector — structural nesting edges,
+  // ClusterLinks, item links — past x=2400/y=1600, since the <svg> element
+  // itself was pinned to that fixed size regardless of actual content
+  // extent (found via a real exported board where only the leftmost
+  // supercluster's connectors, and only some of those, survived the clip).
+  const canvasSize = useMemo(() => {
+    const boxes = [
+      ...clusters.map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
+      ...items.map((i) => ({ x: i.x, y: i.y, width: CARD_WIDTH, height: CARD_HEIGHT }))
+    ]
+    if (boxes.length === 0) return { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }
+    const maxX = Math.max(...boxes.map((b) => b.x + b.width))
+    const maxY = Math.max(...boxes.map((b) => b.y + b.height))
+    return {
+      width: Math.max(CANVAS_WIDTH, maxX + FIT_VIEW_PADDING),
+      height: Math.max(CANVAS_HEIGHT, maxY + FIT_VIEW_PADDING)
+    }
+  }, [clusters, items])
+
   /** Turns a possibly-virtual cluster into a real, persisted BoardCluster
    * (a no-op returning the same id if it already is one) — needed before
    * any operation that looks a cluster up by id in data.boardClusters
@@ -1197,8 +1221,8 @@ function BoardView(): JSX.Element {
             ref={canvasRef}
             className="relative"
             style={{
-              width: CANVAS_WIDTH,
-              height: CANVAS_HEIGHT,
+              width: canvasSize.width,
+              height: canvasSize.height,
               transform: `scale(${zoom})`,
               transformOrigin: '0 0'
             }}
@@ -1208,7 +1232,7 @@ function BoardView(): JSX.Element {
                 (below) so it's never covered by one: a link's midpoint sits
                 in the snap gap between two cards, which is narrower than the
                 button itself, so it always overlaps both cards a little. */}
-            <svg className="pointer-events-none absolute left-0 top-0" width={CANVAS_WIDTH} height={CANVAS_HEIGHT}>
+            <svg className="pointer-events-none absolute left-0 top-0" width={canvasSize.width} height={canvasSize.height}>
               <defs>
                 <marker
                   id="cluster-link-arrow"
@@ -1303,7 +1327,7 @@ function BoardView(): JSX.Element {
                       x1={guide.position}
                       y1={0}
                       x2={guide.position}
-                      y2={CANVAS_HEIGHT}
+                      y2={canvasSize.height}
                       stroke={GUIDE_COLOR}
                       strokeWidth={1}
                       strokeDasharray="4 4"
@@ -1313,7 +1337,7 @@ function BoardView(): JSX.Element {
                       key={`align-${i}`}
                       x1={0}
                       y1={guide.position}
-                      x2={CANVAS_WIDTH}
+                      x2={canvasSize.width}
                       y2={guide.position}
                       stroke={GUIDE_COLOR}
                       strokeWidth={1}
@@ -1505,7 +1529,7 @@ function BoardView(): JSX.Element {
                 itself — is never covered by the cards it overlaps. */}
             <div
               className="pointer-events-none absolute left-0 top-0"
-              style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+              style={{ width: canvasSize.width, height: canvasSize.height }}
             >
               {linkGeometries.map(({ link, midX, midY }) => (
                 <button

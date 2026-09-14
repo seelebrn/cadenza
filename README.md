@@ -1613,3 +1613,35 @@ new ones added (a parent with no own content shrinks to a bare header; a parent 
 hold its own codes/notes resizes to fit those, not to an empty minimum; a leaf is left
 untouched). Full suite green (329/329), typecheck clean, production build clean, boot-tested
 (no errors, cleanly killed).
+
+### The actual remaining cause: the connector SVG's drawing surface was a fixed 2400x1600 (2026-09-14)
+
+Reported a fourth time, with a fresh exported PDF from the same board: after the resize fix
+above, the 3 supercluster boxes were correctly small — but only some of the leftmost
+supercluster's connector lines were visible, and none at all for the other two.
+
+Traced by reading the user's own saved project file directly rather than guessing again: every
+one of the 15 structural nesting edges computed correctly (verified their exact coordinates,
+none degenerate), so the edges themselves were never the problem this time. The board's
+connector layer — the `<svg>` drawing every line on the board (structural nesting edges,
+`ClusterLink`s, item links, smart guides) plus the div wrapping the whole canvas — had always
+been sized to a fixed `CANVAS_WIDTH`/`CANVAS_HEIGHT` of 2400×1600, regardless of how far the
+actual content extended. Cluster frames are plain, absolutely-positioned divs, unaffected by
+their container's declared size, so they rendered fine anywhere; but an `<svg>` element clips
+anything drawn past its own declared width/height by default. A Tree layout with several
+children in one shared row easily exceeds that — the reported board's real content extent was
+14880×636, and 12 of its 15 children sat entirely beyond x=2400, so every connector touching
+them (their structural nesting edge included) was silently invisible from the very start,
+independent of any of the three previous fixes.
+
+Fixed by computing the canvas size dynamically from the actual bounding box of every cluster
+and item on the board (the same box computation `handleFitToView`/the PDF exporter already
+used), with `CANVAS_WIDTH`/`CANVAS_HEIGHT` kept only as the floor for a small or empty board —
+applied to the wrapper div, the `<svg>` itself, the smart-guide line spans, and the unlink-
+button overlay, the four places that had hardcoded the fixed size.
+
+Verified against the user's own saved file: actual content extent 14880×636 now yields a
+14940×1600 canvas (comfortably covering everything, versus the old fixed 2400×1600 that
+clipped 12 of 15 children's own boxes). No shared-logic changes this time — purely a
+BoardView.tsx rendering fix — so no new unit tests; full suite still green (329/329, unchanged),
+typecheck clean, production build clean, boot-tested (no errors, cleanly killed).

@@ -23,6 +23,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   note's own analytic question into a formal question-cluster and files the note
   under it.
 
+### Changed
+- On the Main board, deleting an item or cluster now actually deletes the underlying
+  code/note/cluster from the whole project (same as deleting it from the Workspace),
+  instead of being disabled there. A clearly distinct (red) confirmation explains
+  what will happen before it does.
+
 ## [0.3.1] - 2026-09-14
 
 ### Added

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { describeBoardItem, MEMBER_CARD_HEIGHT, MEMBER_CARD_WIDTH } from '@shared/boardOps'
@@ -33,8 +34,11 @@ function BoardItemCard({
   const data = useProjectStore((s) => s.data)
   const removeItemFromBoard = useProjectStore((s) => s.removeItemFromBoard)
   const addItemToBoard = useProjectStore((s) => s.addItemToBoard)
+  const deleteCode = useProjectStore((s) => s.deleteCode)
+  const deleteNote = useProjectStore((s) => s.deleteNote)
   const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)
   const setInspectedNoteId = useWorkspaceUiStore((s) => s.setInspectedNoteId)
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
 
   if (!data) return null
   const description = describeBoardItem(data, item)
@@ -42,14 +46,17 @@ function BoardItemCard({
 
   const isVirtual = item.id.startsWith('virtual:')
   // On the default board every code/note always shows (see
-  // getVisibleBoardItems) — even a materialized (non-virtual) item's "×"
-  // can only ever delete its own explicit position, which just falls back
-  // to the same auto-placed default spot rather than actually
-  // disappearing. Same reasoning as ClusterFrame's own canDelete: offer
-  // the action only where it can do what its label says, rather than
-  // letting a click silently do something other than what it claims.
+  // getVisibleBoardItems) — "remove from board" can't mean anything there
+  // (a materialized item's × would just delete its own explicit position,
+  // which falls right back to the same auto-placed default spot rather
+  // than actually disappearing). So there, × means something more useful
+  // instead: delete the code/note from the whole project. A raw quote
+  // (segment) has no such whole-project delete to offer, so it keeps the
+  // plain "remove from board" behavior even on the default board — which
+  // works correctly there since segments are never auto-shown/virtual
+  // (see getVisibleBoardItems).
   const isDefaultBoard = data.boards.find((b) => b.id === boardId)?.isDefault ?? false
-  const canDelete = !isDefaultBoard
+  const isDeleteFromProject = isDefaultBoard && item.refType !== 'segment'
 
   return (
     <div
@@ -108,26 +115,48 @@ function BoardItemCard({
           {description.sublabel}
         </span>
         <button
-          className={
-            canDelete
-              ? 'board-export-hide hidden flex-shrink-0 text-slate-300 hover:text-red-500 group-hover:block'
-              : 'board-export-hide hidden flex-shrink-0 cursor-not-allowed text-slate-200 group-hover:block'
-          }
-          disabled={!canDelete}
-          title={
-            canDelete
-              ? 'Remove from board'
-              : 'Every code and note always shows on the default board — use a different board to curate a subset'
-          }
+          className="board-export-hide hidden flex-shrink-0 text-slate-300 hover:text-red-500 group-hover:block"
+          title={isDeleteFromProject ? `Delete this ${item.refType} from the whole project` : 'Remove from board'}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => {
-            if (canDelete && !isVirtual) removeItemFromBoard(item.id)
+            if (isDeleteFromProject) setIsConfirmingDelete(true)
+            else if (!isVirtual) removeItemFromBoard(item.id)
           }}
         >
           ×
         </button>
       </div>
       <p className="line-clamp-3 text-slate-700">{description.label}</p>
+
+      {isConfirmingDelete && (
+        <div
+          className="board-export-hide absolute left-0 top-full z-10 mt-1 w-48 rounded border border-red-300 bg-red-50 p-2 text-[10px] text-red-900 shadow-lg"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <p className="mb-1.5">
+            Delete &quot;{description.label}&quot; ({item.refType}) from the whole project? This also removes every
+            place it's coded/filed, not just this board.
+          </p>
+          <div className="flex justify-end gap-1.5">
+            <button
+              className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-600 hover:bg-slate-100"
+              onClick={() => setIsConfirmingDelete(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded bg-red-600 px-1.5 py-0.5 font-medium text-white hover:bg-red-500"
+              onClick={() => {
+                if (item.refType === 'code') deleteCode(item.refId)
+                else if (item.refType === 'note') deleteNote(item.refId)
+                setIsConfirmingDelete(false)
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

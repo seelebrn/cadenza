@@ -54,14 +54,14 @@ interface ClusterFrameProps {
    * being drawn — highlighted so it's clear which one a second click will
    * connect to. */
   isLinkPicked: boolean
-  /** False on the default board, where every category always shows as a
+  /** True on the default board, where every category always shows as a
    * cluster frame automatically (see getVisibleBoardClusters) — there's no
    * "remove from this board" to do there: deleting the underlying
    * BoardCluster shape would just make it reappear at its computed
-   * fallback position, not disappear, so the delete button is disabled
-   * rather than offered and silently doing nothing (or something
-   * confusing) when clicked. */
-  canDelete: boolean
+   * fallback position, not disappear. So the × means something different
+   * there: delete the category itself from the whole project (its codes/
+   * notes are kept, just unfiled) rather than just this board's shape. */
+  isDefaultBoard: boolean
   /** True while a *different* cluster is focused (hovered) and this one
    * isn't it and isn't directly linked to it — see focusConnectedCategoryIds
    * in BoardView. Fades this frame out rather than hiding it, so the rest
@@ -87,7 +87,7 @@ function ClusterFrame({
   isEnclosedByResize,
   isLinkMode,
   isLinkPicked,
-  canDelete,
+  isDefaultBoard,
   isDimmed,
   onStartMove,
   onStartResize,
@@ -97,6 +97,7 @@ function ClusterFrame({
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCluster = useProjectStore((s) => s.deleteCluster)
+  const deleteCategory = useProjectStore((s) => s.deleteCategory)
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(category.name)
@@ -247,48 +248,54 @@ function ClusterFrame({
             {category.parentCategoryId ? ' ↰' : ''}
           </button>
         )}
-        {isConfirmingRemove ? (
-          <span className="board-export-hide flex flex-shrink-0 items-center gap-1">
+        <button
+          className="board-export-hide flex-shrink-0 text-white/80 hover:text-white"
+          title={
+            isDefaultBoard
+              ? 'Delete this cluster from the whole project (its codes and notes are kept, just unfiled)'
+              : 'Remove from this board (the cluster itself is kept)'
+          }
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => setIsConfirmingRemove(true)}
+        >
+          ×
+        </button>
+      </div>
+
+      {isConfirmingRemove && (
+        <div
+          className={`board-export-hide absolute left-0 top-full z-10 mt-1 w-56 rounded border p-2 text-[10px] shadow-lg ${
+            isDefaultBoard ? 'border-red-300 bg-red-50 text-red-900' : 'border-slate-300 bg-white text-slate-700'
+          }`}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <p className="mb-1.5">
+            {isDefaultBoard
+              ? `Delete "${category.name}" from the whole project? Its codes, notes, and quotes are NOT deleted — they just stop being grouped here. This also removes it from every other board.`
+              : `Remove "${category.name}" from this board? The cluster itself — and its codes, notes, and quotes — will be kept; this only removes it from this board's layout.`}
+          </p>
+          <div className="flex justify-end gap-1.5">
             <button
-              className="text-white/90 hover:text-white"
-              title={`Remove "${category.name}" from this board? The cluster itself — and its codes, notes, and quotes — will be kept; this only removes it from this board's layout.`}
-              onMouseDown={(e) => e.stopPropagation()}
+              className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-slate-600 hover:bg-slate-100"
+              onClick={() => setIsConfirmingRemove(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className={`rounded px-1.5 py-0.5 font-medium text-white ${
+                isDefaultBoard ? 'bg-red-600 hover:bg-red-500' : 'bg-slate-700 hover:bg-slate-600'
+              }`}
               onClick={() => {
-                deleteCluster(cluster.id)
+                if (isDefaultBoard) deleteCategory(category.id)
+                else deleteCluster(cluster.id)
                 setIsConfirmingRemove(false)
               }}
             >
-              ✓
+              {isDefaultBoard ? 'Delete cluster' : 'Remove'}
             </button>
-            <button
-              className="text-white/60 hover:text-white"
-              title="Cancel"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => setIsConfirmingRemove(false)}
-            >
-              ✕
-            </button>
-          </span>
-        ) : (
-          <button
-            className={
-              canDelete
-                ? 'board-export-hide flex-shrink-0 text-white/80 hover:text-white'
-                : 'board-export-hide flex-shrink-0 cursor-not-allowed text-white/40'
-            }
-            disabled={!canDelete}
-            title={
-              canDelete
-                ? 'Remove from this board (the cluster itself is kept)'
-                : 'Every cluster always shows on the default board — use a different board to curate a subset, or delete the cluster itself from the Workspace/Analysis tab'
-            }
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => setIsConfirmingRemove(true)}
-          >
-            ×
-          </button>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
       <div
         className="board-export-hide absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
         style={{ backgroundColor: category.color }}

@@ -1517,7 +1517,7 @@ function BoardView(): JSX.Element {
                   isLinkMode={linkMode}
                   isLinkPicked={linkFromCategoryId === category.id}
                   isDimmed={focusConnectedCategoryIds !== null && !focusConnectedCategoryIds.has(category.id)}
-                  canDelete={!currentBoard.isDefault}
+                  isDefaultBoard={currentBoard.isDefault}
                   onPick={() => handlePickClusterForLink(category.id)}
                   onHoverChange={(hovering) => {
                     // On leave, only clear if this cluster is still the

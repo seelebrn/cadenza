@@ -2024,3 +2024,29 @@ pose a question).
 
 Verified: typecheck clean, full suite green (359/359 — UI-only), production build clean,
 boot-tested.
+
+### The Main board's × becomes a real, project-wide delete (2026-09-14)
+
+Follow-up to the previous "default board delete looked broken" fix: the user's actual goal
+was to be able to delete things from the board itself and have it reflect in the Workspace —
+disabling the × there (the previous fix) solved the misleading-no-op problem but not what the
+user actually wanted to do.
+
+Reused the exact delete actions the Workspace panels already call (`deleteCode`, `deleteNote`,
+`deleteCategory` — all pre-existing, all full project-wide deletes) and wired the Main board's
+× to them instead of disabling it: on the default board, an item's × deletes the underlying
+code/note from the whole project (not just this board), and a cluster's × deletes the
+category itself (its codes/notes are kept, just unfiled — `deleteCategory` never touched
+`data.codes`/`data.notes`, confirmed by reading it). A raw quote (segment) item keeps the
+plain "remove from board" behavior even there, since it has no project-wide delete to offer
+and, unlike codes/notes, was never virtualized on the default board anyway — removing it
+there already worked correctly before this change.
+
+Given this is a materially bigger action on the Main board than a plain "remove from this
+board's layout" elsewhere, both confirms were redesigned as a below-the-element popover
+(replacing ClusterFrame's cramped ✓/✕ header icons) with full explanatory text, and the
+Main-board version is styled distinctly (red border/background, "Delete cluster"/"Delete"
+button) from the plain, non-destructive removal confirm used everywhere else (slate/white).
+
+Verified: typecheck clean, full suite green (359/359 — UI-only), production build clean,
+boot-tested.

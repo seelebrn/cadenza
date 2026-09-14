@@ -210,6 +210,14 @@ export interface BoardRecord {
    * exchange for a simpler line to read at a glance. A per-board choice,
    * not per-link, since a whole figure reads more consistently one way. */
   clusterLinkStyle?: 'curved' | 'straight'
+  /** How a cluster frame is sized on this board — 'full' (the default
+   * when unset) reserves room for a grid of the category's own codes/
+   * notes, same as a board that actually places items; 'compact' ignores
+   * that entirely and sizes every frame down to just its header. Setting
+   * this doesn't just change what a future "+ Add all clusters" produces —
+   * it re-lays out whatever's already on the board too, so switching it
+   * back and forth actually resizes the existing frames on the spot. */
+  clusterFrameSize?: 'compact' | 'full'
 }
 
 export const PROJECT_SCHEMA_VERSION = 2

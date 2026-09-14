@@ -72,6 +72,7 @@ import {
   renameBoard as renameBoardOp,
   resetDefaultBoardClusterLayout as resetDefaultBoardClusterLayoutOp,
   resizeCluster as resizeClusterOp,
+  setBoardClusterFrameSize as setBoardClusterFrameSizeOp,
   setBoardClusterLinkStyle as setBoardClusterLinkStyleOp,
   unassignItemFromCluster as unassignItemFromClusterOp,
   unlinkItems as unlinkItemsOp
@@ -217,6 +218,10 @@ interface ProjectState {
   renameBoard: (boardId: string, name: string) => void
   /** How this board's ClusterLinks are drawn — see BoardRecord.clusterLinkStyle. */
   setClusterLinkStyle: (boardId: string, style: 'curved' | 'straight') => void
+  /** How this board's cluster frames are sized — see BoardRecord.
+   * clusterFrameSize. Also immediately re-lays-out (and resizes) every
+   * cluster already on the board to match, not just future additions. */
+  setClusterFrameSize: (boardId: string, size: 'compact' | 'full') => void
   deleteBoard: (boardId: string) => void
   addItemToBoard: (boardId: string, refType: BoardItem['refType'], refId: string, x: number, y: number) => string | null
   moveItem: (itemId: string, x: number, y: number) => void
@@ -706,6 +711,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setClusterLinkStyle: (boardId, style) =>
     get().updateProject((data) => setBoardClusterLinkStyleOp(data, boardId, style)),
+
+  setClusterFrameSize: (boardId, size) => {
+    const { data } = get()
+    const board = data?.boards.find((b) => b.id === boardId)
+    if (!data || !board) return
+    // Re-lays out (and resizes) whatever's already on the board, not just
+    // the preference for future additions — same computeNestedLayout pass
+    // "Reset placement" uses on a curated board, just at the new size, so
+    // toggling this back and forth actually shrinks/restores existing
+    // frames instead of only taking effect on the next "+ Add all
+    // clusters" click.
+    const clusters = data.boardClusters.filter((c) => c.boardId === boardId)
+    const positions = computeNestedLayout(clusters, data.categories, size === 'compact')
+    get().updateProject((current) => {
+      const withLayout = applyClusterLayoutWithMembersOp(current, boardId, positions)
+      return setBoardClusterFrameSizeOp(withLayout, boardId, size)
+    })
+  },
 
   deleteBoard: (boardId) => get().updateProject((data) => deleteBoardOp(data, boardId)),
 

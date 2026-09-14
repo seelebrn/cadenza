@@ -41,6 +41,7 @@ import {
   removeItemFromBoard,
   renameBoard,
   resetDefaultBoardClusterLayout,
+  setBoardClusterFrameSize,
   setBoardClusterLinkStyle,
   resizeCluster,
   segmentIntersectsBox,
@@ -249,6 +250,13 @@ describe('board CRUD', () => {
     const next = setBoardClusterLinkStyle(data, 'b', 'straight')
     expect(next.boards.find((x) => x.id === 'a')?.clusterLinkStyle).toBeUndefined()
     expect(next.boards.find((x) => x.id === 'b')?.clusterLinkStyle).toBe('straight')
+  })
+
+  it('setBoardClusterFrameSize only touches the target board', () => {
+    const data = makeData({ boards: [{ id: 'a', name: 'A', isDefault: true }, { id: 'b', name: 'B', isDefault: false }] })
+    const next = setBoardClusterFrameSize(data, 'b', 'compact')
+    expect(next.boards.find((x) => x.id === 'a')?.clusterFrameSize).toBeUndefined()
+    expect(next.boards.find((x) => x.id === 'b')?.clusterFrameSize).toBe('compact')
   })
 
   it('deleteBoard removes the board and everything placed on it, leaving other boards alone', () => {
@@ -1434,6 +1442,21 @@ describe('computeNestedLayout', () => {
     const clusters = [cluster('a', 'A')]
     const positions = computeNestedLayout(clusters, categories)
     expect(positions.map((p) => p.id)).toEqual(['a'])
+  })
+
+  it('compact: true resizes clusters already on the board, not just future ones — the reported follow-up request', () => {
+    // A cluster with plenty of codes, already placed at its normal
+    // item-reserving size (as "+ Add all clusters" without Compact would
+    // have left it) — toggling Compact afterward should shrink it in
+    // place, not just affect whatever gets added from here on.
+    const rich = makeCategory('A', { codeIds: Array.from({ length: 40 }, (_, i) => `c${i}`) })
+    const clusters = [cluster('a', 'A', 100, 100, 600, 500)]
+    const full = computeNestedLayout(clusters, [rich], false)
+    const compact = computeNestedLayout(clusters, [rich], true)
+    const fullPos = full.find((p) => p.id === 'a')!
+    const compactPos = compact.find((p) => p.id === 'a')!
+    expect(compactPos.width!).toBeLessThan(fullPos.width!)
+    expect(compactPos.height!).toBeLessThan(fullPos.height!)
   })
 })
 

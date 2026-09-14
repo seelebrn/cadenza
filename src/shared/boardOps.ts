@@ -149,6 +149,22 @@ export function setBoardClusterLinkStyle(
   }
 }
 
+/** Just the persisted preference (see BoardRecord.clusterFrameSize) —
+ * doesn't touch any cluster's actual size/position. Pair with
+ * computeNestedLayout + applyClusterLayoutWithMembers (see the
+ * setClusterFrameSize store action) to also resize whatever's already on
+ * the board to match, right when the preference changes. */
+export function setBoardClusterFrameSize(
+  data: ProjectData,
+  boardId: string,
+  size: 'compact' | 'full'
+): ProjectData {
+  return {
+    ...data,
+    boards: data.boards.map((b) => (b.id === boardId ? { ...b, clusterFrameSize: size } : b))
+  }
+}
+
 /** Deletes a board and everything on it (items + clusters + links) — other
  * boards untouched. If it was the default board, promotes another board to
  * default so there's always exactly one (when any boards remain). */
@@ -1380,11 +1396,24 @@ function keepPositionsOnBoard(positions: ClusterPosition[]): ClusterPosition[] {
  * nor plain dragging, ever restores containment on its own. Every category
  * present on the board gets a position here (root or nested alike, same as
  * Tree), so apply with applyClusterLayoutWithMembers.
+ *
+ * `compact` (default false) re-sizes everything down to header-only frames
+ * as it re-lays them out — see computeCategoryLayout's own `compact`
+ * option — so toggling a board's compact/full preference doesn't just
+ * change what *future* additions look like, it can also resize whatever's
+ * already there on the spot (the boxes' positions get recomputed fresh
+ * either way, same as any other call to this function, since a size
+ * change without repositioning risks the new size overlapping a neighbor
+ * that hasn't moved).
  */
-export function computeNestedLayout(clusters: BoardCluster[], categories: CategoryRecord[]): ClusterPosition[] {
+export function computeNestedLayout(
+  clusters: BoardCluster[],
+  categories: CategoryRecord[],
+  compact = false
+): ClusterPosition[] {
   const categoryIdsOnBoard = new Set(clusters.map((c) => c.categoryId))
   const categoriesOnBoard = categories.filter((c) => categoryIdsOnBoard.has(c.id))
-  const layout = computeCategoryLayout(categoriesOnBoard)
+  const layout = computeCategoryLayout(categoriesOnBoard, new Map(), compact)
   const clusterByCategoryId = new Map(clusters.map((c) => [c.categoryId, c]))
   return layout
     .map((l): ClusterPosition | null => {

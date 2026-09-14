@@ -1938,3 +1938,30 @@ integrity (0 errors) and reopened through the app's own `readProjectFile`/
 `normalizeProjectData` path, confirming `clusterLinkStyle` survives normalization intact. Full
 suite green (348/348), typecheck clean, production build clean, boot-tested (no errors,
 cleanly killed).
+
+### Compact/Full made live, and Link clusters/Curved-Straight unhidden on the default board (2026-09-14)
+
+Two follow-ups. First: "the Compact tick box would allow to resize on the fly... possible to
+resize/return to normal size by ticking the checkbox" — the checkbox from the previous entry
+only affected *future* "+ Add all clusters" clicks, doing nothing for clusters already on the
+board. Replaced it with a persisted `BoardRecord.clusterFrameSize: 'compact' | 'full'` (a
+`Compact | Full` toggle, matching `Curved | Straight`'s own style) — switching it now also
+re-lays-out (via `computeNestedLayout`, now itself taking a `compact` parameter) and resizes
+every cluster already on the board, the same way "Reset placement" already resets a curated
+board's arrangement. Round-tripped Full→Compact→Full against the real example project's own
+board: sizes changed exactly as expected both directions, zero unwanted overlaps either way.
+
+Second: "the button controls for arrows aren't here [on the main board]... is that normal?" —
+first pass only un-hid the `Curved | Straight` display toggle there; the user then clarified
+they meant the *whole* group, "the possibility to link clusters" included. On inspection,
+`createClusterLink` never had any board-type restriction at all — `ClusterLink` is a
+project-wide relationship between categories (not a per-board thing), so there was never a
+real reason "Link clusters" mode had to be hidden on the default board, only that it happened
+to live inside the same gated toolbar block as Tree/Radial. Un-gated "Link clusters" (+ its
+"Arrow" directed toggle) alongside `Curved | Straight`; left Tree/Radial gated to non-default
+boards, since those *do* have a real reason — their own store actions no-op on the default
+board's own automatic layout, unlike this pair.
+
+Verified: 1 new `computeNestedLayout` compact-resize test, 1 new `setBoardClusterFrameSize`
+test. Full suite green (350/350), typecheck clean, production build clean, boot-tested (no
+errors, cleanly killed).

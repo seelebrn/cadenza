@@ -114,6 +114,12 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
   const [nameDraft, setNameDraft] = useState(category.name)
   const [definitionDraft, setDefinitionDraft] = useState(category.definition)
   const [isExpanded, setIsExpanded] = useState(category.kind === 'question')
+  // An inline confirm bar rather than window.confirm() — see BoardView's
+  // confirmingDeleteBoard for why: a native dialog's Windows/Electron
+  // focus-restoration quirk is the leading suspect for a reported "delete
+  // something, then every text field is unresponsive for a minute or so"
+  // freeze.
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
 
   if (!data) return null
 
@@ -181,13 +187,32 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
         </button>
         <button
           className="flex-shrink-0 text-xs text-red-500 hover:underline"
-          onClick={() => {
-            if (window.confirm(`Delete "${category.name}"?`)) deleteCategory(category.id)
-          }}
+          onClick={() => setIsConfirmingDelete(true)}
         >
           Delete
         </button>
       </div>
+
+      {isConfirmingDelete && (
+        <div className="mt-2 flex items-center gap-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs">
+          <span className="flex-1 text-slate-700">Delete &quot;{category.name}&quot;?</span>
+          <button
+            className="flex-shrink-0 rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-500"
+            onClick={() => {
+              deleteCategory(category.id)
+              setIsConfirmingDelete(false)
+            }}
+          >
+            Delete
+          </button>
+          <button
+            className="flex-shrink-0 rounded border border-slate-300 px-2 py-1 hover:bg-slate-100"
+            onClick={() => setIsConfirmingDelete(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {isExpanded && (
         <div className="mt-3 space-y-3 text-xs">

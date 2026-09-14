@@ -1937,3 +1937,37 @@ Verified: 9 new `backupOps.test.ts` unit tests (both interval- and pruning-edge 
 under/at/past the minimum interval; under-cap/exact-excess/order-independence/zero-cap/empty-
 list pruning). Full suite green (359/359), typecheck clean, production build clean,
 boot-tested (no errors, cleanly killed).
+
+### Remaining window.confirm()/alert() calls, and a real "text fields frozen" report (2026-09-14)
+
+User report: "After deleting a code, I can't use the Create new Code, or Notes text fields for
+1-2 minutes" — then, on follow-up, clarified it's actually *every* free-text field, not just
+those two. CPU idle throughout; nothing else in the app is affected (buttons, scrolling, etc.
+all still work).
+
+This is the same bug BoardView's `confirmingDeleteBoard` was already introduced for (see its
+own comment, from earlier in this project): a native `window.confirm()`/`alert()`/`prompt()`
+dialog's known Windows/Electron focus-restoration quirk — closing one of these doesn't always
+hand keyboard focus back to the web contents properly, and text inputs across the whole
+window stop accepting keystrokes for a while afterward. That fix, though, only ever covered
+board deletion. A grep turned up six more call sites still using the native dialog directly:
+deleting a code (`CodebookPanel`) — exactly what the user hit — deleting a category from
+either tree view (`ClusterRowShell`, `ClustersView`), removing a cluster from a board
+(`ClusterFrame`), deleting a note category (`NotesPanel`), and "Reset placement"
+(`BoardView`), plus two `window.alert()` info messages on PDF export (also native dialogs,
+also worth converting even though they don't gate anything).
+
+Converted all seven to the same inline-bar pattern `confirmingDeleteBoard` established:
+a small local `isConfirming...` boolean that swaps the destructive button for an inline
+Delete/Cancel (or, for `ClusterFrame`'s cramped header, a ✓/✕ pair) bar instead of firing a
+dialog — same explanatory copy, just rendered in the page instead of a native window. The PDF
+export messages became a dismissible banner (`exportMessage`) near the board toolbar rather
+than a blocking alert. No native dialog calls should remain anywhere in the renderer now
+(confirmed by grep — only comments referencing the old pattern remain).
+
+Verified: full suite green (359/359 — this was a UI-only change, no new logic to unit-test),
+typecheck clean, production build clean, boot-tested (no errors, cleanly killed). Could not
+reproduce the freeze interactively (no way to drive the Electron UI from this environment),
+so this is a strong-fit diagnosis based on the codebase's own prior documented instance of the
+exact same symptom, not a confirmed root-cause fix — worth the user confirming it's actually
+gone next time they delete something.

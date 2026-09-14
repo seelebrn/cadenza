@@ -242,6 +242,12 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
   const [isEditingDefinition, setIsEditingDefinition] = useState(false)
   const [definitionDraft, setDefinitionDraft] = useState(node.definition)
   const [isDragOver, setIsDragOver] = useState(false)
+  // An inline confirm bar rather than window.confirm() — see BoardView's
+  // confirmingDeleteBoard for why: a native dialog's Windows/Electron
+  // focus-restoration quirk is the leading suspect for a reported "delete
+  // a code, then every text field is unresponsive for a minute or so"
+  // freeze.
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
 
   function commitRename(): void {
     const trimmed = nameDraft.trim()
@@ -388,16 +394,33 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
             )}
             <button
               className="rounded border border-red-200 px-1 text-[10px] text-red-600 hover:bg-red-50"
-              onClick={() => {
-                if (window.confirm(`Delete "${node.name}"? Codings using it will be removed.`)) {
-                  deleteCode(node.id)
-                }
-              }}
+              onClick={() => setIsConfirmingDelete(true)}
             >
               Delete
             </button>
           </div>
         </div>
+
+        {isConfirmingDelete && (
+          <div className="mt-1 flex items-center gap-1.5 rounded border border-red-200 bg-red-50 px-1.5 py-1 text-[10px]">
+            <span className="flex-1 text-slate-700">Delete &quot;{node.name}&quot;? Codings using it will be removed.</span>
+            <button
+              className="flex-shrink-0 rounded bg-red-600 px-1.5 py-0.5 font-medium text-white hover:bg-red-500"
+              onClick={() => {
+                deleteCode(node.id)
+                setIsConfirmingDelete(false)
+              }}
+            >
+              Delete
+            </button>
+            <button
+              className="flex-shrink-0 rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
+              onClick={() => setIsConfirmingDelete(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         {isEditingDefinition && (
           <textarea

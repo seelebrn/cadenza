@@ -6,6 +6,11 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Fixed
+- All text fields could become briefly unresponsive (1-2 minutes) after confirming a
+  delete or a "Reset placement" — replaced every remaining native confirm/alert dialog
+  with an in-page confirmation bar.
+
 ## [0.3.1] - 2026-09-14
 
 ### Added

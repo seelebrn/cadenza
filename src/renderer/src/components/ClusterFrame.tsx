@@ -100,6 +100,12 @@ function ClusterFrame({
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(category.name)
+  // An inline confirm (swapping the × for a ✓/✕ pair) rather than
+  // window.confirm() — see BoardView's confirmingDeleteBoard for why: a
+  // native dialog's Windows/Electron focus-restoration quirk is the
+  // leading suspect for a reported "delete something, then every text
+  // field is unresponsive for a minute or so" freeze.
+  const [isConfirmingRemove, setIsConfirmingRemove] = useState(false)
 
   const isMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(cluster.id)
   const isResizing = dragState?.kind === 'cluster-resize' && dragState.id === cluster.id
@@ -241,27 +247,47 @@ function ClusterFrame({
             {category.parentCategoryId ? ' ↰' : ''}
           </button>
         )}
-        <button
-          className={
-            canDelete
-              ? 'board-export-hide flex-shrink-0 text-white/80 hover:text-white'
-              : 'board-export-hide flex-shrink-0 text-white/40'
-          }
-          disabled={!canDelete}
-          title={
-            canDelete
-              ? 'Remove from this board (the cluster itself is kept)'
-              : 'Every cluster always shows on the default board — use a different board to curate a subset, or delete the cluster itself from the Workspace/Analysis tab'
-          }
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => {
-            if (window.confirm(`Remove "${category.name}" from this board? The cluster itself — and its codes, notes, and quotes — will be kept; this only removes it from this board's layout.`)) {
-              deleteCluster(cluster.id)
+        {isConfirmingRemove ? (
+          <span className="board-export-hide flex flex-shrink-0 items-center gap-1">
+            <button
+              className="text-white/90 hover:text-white"
+              title={`Remove "${category.name}" from this board? The cluster itself — and its codes, notes, and quotes — will be kept; this only removes it from this board's layout.`}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => {
+                deleteCluster(cluster.id)
+                setIsConfirmingRemove(false)
+              }}
+            >
+              ✓
+            </button>
+            <button
+              className="text-white/60 hover:text-white"
+              title="Cancel"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setIsConfirmingRemove(false)}
+            >
+              ✕
+            </button>
+          </span>
+        ) : (
+          <button
+            className={
+              canDelete
+                ? 'board-export-hide flex-shrink-0 text-white/80 hover:text-white'
+                : 'board-export-hide flex-shrink-0 text-white/40'
             }
-          }}
-        >
-          ×
-        </button>
+            disabled={!canDelete}
+            title={
+              canDelete
+                ? 'Remove from this board (the cluster itself is kept)'
+                : 'Every cluster always shows on the default board — use a different board to curate a subset, or delete the cluster itself from the Workspace/Analysis tab'
+            }
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => setIsConfirmingRemove(true)}
+          >
+            ×
+          </button>
+        )}
       </div>
       <div
         className="board-export-hide absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"

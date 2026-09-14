@@ -202,6 +202,13 @@ function BoardView(): JSX.Element {
   // actually on screen.
   const canvasRef = useRef<HTMLDivElement>(null)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+  // A dismissible inline banner rather than window.alert() — same native-
+  // dialog focus-restoration quirk as confirmingDeleteBoard above, even
+  // though this one doesn't gate anything: an alert() closing can leave
+  // every text field unresponsive for a minute or so just the same.
+  const [exportMessage, setExportMessage] = useState<string | null>(null)
+  // Same reasoning as confirmingDeleteBoard/exportMessage above.
+  const [confirmingResetLayout, setConfirmingResetLayout] = useState(false)
   const pendingZoomAnchorRef = useRef<{
     contentX: number
     contentY: number
@@ -398,7 +405,7 @@ function BoardView(): JSX.Element {
       ...items.map((i) => ({ x: i.x, y: i.y, width: CARD_WIDTH, height: CARD_HEIGHT }))
     ]
     if (boxes.length === 0) {
-      window.alert('Nothing on this board yet to export.')
+      setExportMessage('Nothing on this board yet to export.')
       return
     }
     const pageWidth = Math.max(...boxes.map((b) => b.x + b.width)) + FIT_VIEW_PADDING
@@ -438,7 +445,7 @@ function BoardView(): JSX.Element {
       const html = `<!doctype html><html><head><meta charset="utf-8"><style>${css}\nhtml,body{margin:0;padding:0;}\n.board-export-hide{display:none !important;}</style></head><body>${snapshot.outerHTML}</body></html>`
 
       const savedPath = await window.api.export.boardPdf(html, pageWidth, pageHeight, currentBoard.name)
-      if (savedPath) window.alert(`Exported to ${savedPath}`)
+      if (savedPath) setExportMessage(`Exported to ${savedPath}`)
     } finally {
       setIsExportingPdf(false)
     }
@@ -1225,14 +1232,7 @@ function BoardView(): JSX.Element {
                   ? 'Drop every dragged/resized position on this board and recompute the default grid layout from scratch'
                   : 'Put every cluster back into a nested/contained arrangement — undoes whatever Tree, Radial, or manual dragging left behind'
               }
-              onClick={() => {
-                const message = currentBoard.isDefault
-                  ? 'Reset every cluster and item on this board back to its automatic default layout? Any positions you\'ve dragged or resized here will be lost — the underlying codes, notes, and clusters themselves are not affected.'
-                  : 'Put every cluster on this board back into a nested, contained arrangement (like the default board\'s own layout)? Any positions from Tree, Radial, or manual dragging will be lost — the underlying codes, notes, and clusters themselves are not affected.'
-                if (window.confirm(message)) {
-                  resetBoardLayout(currentBoard.id)
-                }
-              }}
+              onClick={() => setConfirmingResetLayout(true)}
             >
               Reset placement
             </button>
@@ -1262,6 +1262,43 @@ function BoardView(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {exportMessage && (
+        <div className="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-xs">
+          <span className="flex-1 text-slate-700">{exportMessage}</span>
+          <button
+            className="flex-shrink-0 rounded border border-slate-300 px-2 py-1 hover:bg-slate-100"
+            onClick={() => setExportMessage(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {confirmingResetLayout && currentBoard && (
+        <div className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs">
+          <span className="text-slate-700">
+            {currentBoard.isDefault
+              ? "Reset every cluster and item on this board back to its automatic default layout? Any positions you've dragged or resized here will be lost — the underlying codes, notes, and clusters themselves are not affected."
+              : "Put every cluster on this board back into a nested, contained arrangement (like the default board's own layout)? Any positions from Tree, Radial, or manual dragging will be lost — the underlying codes, notes, and clusters themselves are not affected."}
+          </span>
+          <button
+            className="flex-shrink-0 rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-500"
+            onClick={() => {
+              resetBoardLayout(currentBoard.id)
+              setConfirmingResetLayout(false)
+            }}
+          >
+            Reset
+          </button>
+          <button
+            className="flex-shrink-0 rounded border border-slate-300 px-2 py-1 hover:bg-slate-100"
+            onClick={() => setConfirmingResetLayout(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {confirmingDeleteBoard && currentBoard && (
         <div className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs">

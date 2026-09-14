@@ -362,6 +362,12 @@ function NoteCategoryRow({ category }: { category: NoteCategoryDef }): JSX.Eleme
 
   const [isEditing, setIsEditing] = useState(false)
   const [nameDraft, setNameDraft] = useState(category.name)
+  // An inline confirm bar rather than window.confirm() — see BoardView's
+  // confirmingDeleteBoard for why: a native dialog's Windows/Electron
+  // focus-restoration quirk is the leading suspect for a reported "delete
+  // something, then every text field is unresponsive for a minute or so"
+  // freeze.
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
 
   function commit(): void {
     const trimmed = nameDraft.trim()
@@ -370,46 +376,65 @@ function NoteCategoryRow({ category }: { category: NoteCategoryDef }): JSX.Eleme
   }
 
   return (
-    <div className="flex items-center gap-1.5">
-      <input
-        type="color"
-        className="h-3.5 w-3.5 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
-        value={category.color}
-        onChange={(e) => setNoteCategoryColor(category.id, e.target.value)}
-        title="Change color"
-      />
-      {isEditing ? (
+    <div>
+      <div className="flex items-center gap-1.5">
         <input
-          autoFocus
-          className="flex-1 rounded border border-slate-300 px-1"
-          value={nameDraft}
-          onChange={(e) => setNameDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => e.key === 'Enter' && commit()}
+          type="color"
+          className="h-3.5 w-3.5 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
+          value={category.color}
+          onChange={(e) => setNoteCategoryColor(category.id, e.target.value)}
+          title="Change color"
         />
-      ) : (
+        {isEditing ? (
+          <input
+            autoFocus
+            className="flex-1 rounded border border-slate-300 px-1"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => e.key === 'Enter' && commit()}
+          />
+        ) : (
+          <button
+            className="flex-1 truncate text-left"
+            onDoubleClick={() => {
+              setNameDraft(category.name)
+              setIsEditing(true)
+            }}
+            title="Double-click to rename"
+          >
+            {category.name}
+          </button>
+        )}
         <button
-          className="flex-1 truncate text-left"
-          onDoubleClick={() => {
-            setNameDraft(category.name)
-            setIsEditing(true)
-          }}
-          title="Double-click to rename"
+          className="flex-shrink-0 text-red-500 hover:underline"
+          title="Delete category"
+          onClick={() => setIsConfirmingDelete(true)}
         >
-          {category.name}
+          ×
         </button>
+      </div>
+
+      {isConfirmingDelete && (
+        <div className="mt-1 flex items-center gap-1.5 rounded border border-red-200 bg-red-50 px-1.5 py-1">
+          <span className="flex-1 text-slate-700">Delete &quot;{category.name}&quot;? Notes using it become uncategorized.</span>
+          <button
+            className="flex-shrink-0 rounded bg-red-600 px-1.5 py-0.5 font-medium text-white hover:bg-red-500"
+            onClick={() => {
+              deleteNoteCategory(category.id)
+              setIsConfirmingDelete(false)
+            }}
+          >
+            Delete
+          </button>
+          <button
+            className="flex-shrink-0 rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
+            onClick={() => setIsConfirmingDelete(false)}
+          >
+            Cancel
+          </button>
+        </div>
       )}
-      <button
-        className="flex-shrink-0 text-red-500 hover:underline"
-        title="Delete category"
-        onClick={() => {
-          if (window.confirm(`Delete "${category.name}"? Notes using it become uncategorized.`)) {
-            deleteNoteCategory(category.id)
-          }
-        }}
-      >
-        ×
-      </button>
     </div>
   )
 }

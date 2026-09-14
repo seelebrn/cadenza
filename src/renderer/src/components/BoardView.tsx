@@ -270,30 +270,6 @@ function BoardView(): JSX.Element {
     return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes, data.categories, clusters)
   }, [data, currentBoard, explicitItems, clusters])
 
-  // The actual drawing surface, grown to fit whatever's really on the board
-  // instead of a fixed 2400x1600 — CANVAS_WIDTH/HEIGHT stay the floor for a
-  // small/empty board. Without this, a wide arrangement (Tree with several
-  // siblings in one row easily passes several thousand px) still rendered
-  // its cluster *frames* fine (plain divs, unclipped by their own size) but
-  // silently clipped every SVG-drawn connector — structural nesting edges,
-  // ClusterLinks, item links — past x=2400/y=1600, since the <svg> element
-  // itself was pinned to that fixed size regardless of actual content
-  // extent (found via a real exported board where only the leftmost
-  // supercluster's connectors, and only some of those, survived the clip).
-  const canvasSize = useMemo(() => {
-    const boxes = [
-      ...clusters.map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
-      ...items.map((i) => ({ x: i.x, y: i.y, width: CARD_WIDTH, height: CARD_HEIGHT }))
-    ]
-    if (boxes.length === 0) return { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }
-    const maxX = Math.max(...boxes.map((b) => b.x + b.width))
-    const maxY = Math.max(...boxes.map((b) => b.y + b.height))
-    return {
-      width: Math.max(CANVAS_WIDTH, maxX + FIT_VIEW_PADDING),
-      height: Math.max(CANVAS_HEIGHT, maxY + FIT_VIEW_PADDING)
-    }
-  }, [clusters, items])
-
   /** Turns a possibly-virtual cluster into a real, persisted BoardCluster
    * (a no-op returning the same id if it already is one) — needed before
    * any operation that looks a cluster up by id in data.boardClusters
@@ -821,6 +797,41 @@ function BoardView(): JSX.Element {
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)
   }, [data, clusters, dragState, clusterMoveDelta])
+
+  // The actual drawing surface, grown to fit whatever's really on the board
+  // instead of a fixed 2400x1600 — CANVAS_WIDTH/HEIGHT stay the floor for a
+  // small/empty board. Without this, a wide arrangement (Tree with several
+  // siblings in one row easily passes several thousand px) still rendered
+  // its cluster *frames* fine (plain divs, unclipped by their own size) but
+  // silently clipped every SVG-drawn connector — structural nesting edges,
+  // ClusterLinks, item links — past x=2400/y=1600, since the <svg> element
+  // itself was pinned to that fixed size regardless of actual content
+  // extent (found via a real exported board where only the leftmost
+  // supercluster's connectors, and only some of those, survived the clip).
+  // Also includes every cluster-link curve's own control point, not just
+  // cluster/item boxes — a curve bowing outward to clear an obstruction can
+  // reach past whatever the plain boxes alone would have sized the canvas
+  // to (the low/left side is separately guarded inside computeClusterLinkPath
+  // itself, which never lets a control point go negative; this covers the
+  // opposite, equally real case of a curve bowing past the high/right edge).
+  const canvasSize = useMemo(() => {
+    const boxes = [
+      ...clusters.map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
+      ...items.map((i) => ({ x: i.x, y: i.y, width: CARD_WIDTH, height: CARD_HEIGHT }))
+    ]
+    const curvePoints = clusterLinkGeometries.flatMap((g) => [
+      { x: g.ax, y: g.ay },
+      { x: g.bx, y: g.by },
+      { x: g.controlX, y: g.controlY }
+    ])
+    if (boxes.length === 0 && curvePoints.length === 0) return { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }
+    const maxX = Math.max(0, ...boxes.map((b) => b.x + b.width), ...curvePoints.map((p) => p.x))
+    const maxY = Math.max(0, ...boxes.map((b) => b.y + b.height), ...curvePoints.map((p) => p.y))
+    return {
+      width: Math.max(CANVAS_WIDTH, maxX + FIT_VIEW_PADDING),
+      height: Math.max(CANVAS_HEIGHT, maxY + FIT_VIEW_PADDING)
+    }
+  }, [clusters, items, clusterLinkGeometries])
 
   // Structural parent/child edges — automatic, not user-authored (contrast
   // clusterLinkGeometries above): only needed where nesting is no longer

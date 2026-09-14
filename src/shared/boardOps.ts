@@ -1075,6 +1075,17 @@ export interface ClusterLinkPath {
 
 const CLUSTER_LINK_PARALLEL_STEP = 28
 const CLUSTER_LINK_OBSTRUCTION_MARGIN = 30
+// A curve must never bow past the canvas's own top/left edge (x/y = 0) —
+// there's no negative coordinate space to render into (no negative scroll,
+// and an <svg> with explicit width/height clips anything before its own
+// origin), so a curve that needed to bow that far would simply vanish
+// instead of doing its job. Clamping the control point to this margin
+// trades a little of the ideal clearance near the very edge of the board
+// for guaranteeing the whole curve always stays visible — found via a real
+// exported board where a link bowing toward the topmost row (very little
+// headroom above it to begin with) rendered its arc cut off above the
+// visible canvas.
+const CLUSTER_LINK_MIN_COORD = 20
 
 /**
  * The path one ClusterLink should actually draw: clipped to each cluster's
@@ -1149,8 +1160,8 @@ export function computeClusterLinkPath(
     return { ax: start.x, ay: start.y, bx: end.x, by: end.y, midX: midX0, midY: midY0, curved: false, controlX: midX0, controlY: midY0 }
   }
 
-  const controlX = midX0 + px * offset
-  const controlY = midY0 + py * offset
+  const controlX = Math.max(CLUSTER_LINK_MIN_COORD, midX0 + px * offset)
+  const controlY = Math.max(CLUSTER_LINK_MIN_COORD, midY0 + py * offset)
   // Midpoint of a quadratic Bézier at t=0.5 is the average of the control
   // point and the straight midpoint (0.25*start + 0.5*control + 0.25*end).
   const midX = 0.5 * midX0 + 0.5 * controlX

@@ -1174,8 +1174,13 @@ describe('computeClusterLinkPath', () => {
   })
 
   it('bows around a third cluster sitting directly between the two endpoints', () => {
-    const obstruction = { x: 200, y: 20, width: 100, height: 60 } // straddles the straight path's y=50 line
-    const path = computeClusterLinkPath(left, right, [obstruction], 0, 1)
+    // Well clear of the canvas origin (unlike `left`/`right` above) so the
+    // top/left clamp tested separately below is a no-op here — this test
+    // is only about the curving itself.
+    const farLeft = { x: 500, y: 500, width: 100, height: 100 } // center (550,550)
+    const farRight = { x: 900, y: 500, width: 100, height: 100 } // center (950,550)
+    const obstruction = { x: 700, y: 520, width: 100, height: 60 } // straddles the straight path's y=550 line
+    const path = computeClusterLinkPath(farLeft, farRight, [obstruction], 0, 1)
     expect(path.curved).toBe(true)
     // Bows perpendicular to a horizontal line, i.e. vertically, away from
     // the obstruction — some non-zero vertical displacement at the curve's
@@ -1184,9 +1189,25 @@ describe('computeClusterLinkPath', () => {
     // the raw clearing offset computed internally — a real, visible bow,
     // not the full computed clearance), while endpoints stay anchored to
     // the boxes themselves.
-    expect(Math.abs(path.midY - 50)).toBeGreaterThan(20)
-    expect(path.ax).toBeCloseTo(100, 5)
-    expect(path.bx).toBeCloseTo(400, 5)
+    expect(Math.abs(path.midY - 550)).toBeGreaterThan(20)
+    expect(path.ax).toBeCloseTo(600, 5)
+    expect(path.bx).toBeCloseTo(900, 5)
+  })
+
+  it("never bows a curve above the canvas's own top/left edge — the exact reported bug", () => {
+    // Real-world report: a link near the top row of a board, needing to
+    // clear an obstruction, bowed upward past y=0 — there's no negative
+    // coordinate space to render into (no negative scroll, and an <svg>
+    // with explicit width/height clips anything before its own origin),
+    // so the curve's arc was simply cut off above the visible canvas.
+    // `left`/`right` sit right at the origin, same as a cluster near the
+    // very top of a board — the obstruction below them needs the curve to
+    // bow *up*, which is exactly the direction with no room to spare.
+    const obstruction = { x: 200, y: 20, width: 100, height: 60 }
+    const path = computeClusterLinkPath(left, right, [obstruction], 0, 1)
+    expect(path.curved).toBe(true)
+    expect(path.controlY).toBeGreaterThanOrEqual(0)
+    expect(path.midY).toBeGreaterThanOrEqual(0)
   })
 
   it('ignores an obstruction the straight path never actually crosses', () => {

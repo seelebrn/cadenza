@@ -1841,3 +1841,33 @@ real, regenerated example project (all 5 `ClusterLink`s resolve to `curved: true
 independently-confirmed geometry; the new pair resolves to a 2-member parallel group). Full
 suite green (342/342), typecheck clean, production build clean, boot-tested (no errors,
 cleanly killed).
+
+### A curved ClusterLink could bow off the top of the canvas (2026-09-14)
+
+Reported right after the curve feature above shipped: on the example project's own thematic
+map, some arrows were cut off — invisible above the top of the visible board.
+
+Root cause: a curve's bow is a signed offset with no ceiling relative to the canvas's own
+edges — it only had to be big enough to clear an obstruction, never checked whether that took
+it past y=0 (or x=0), where there's nothing to render into (no negative scroll position, and
+an `<svg>` with explicit width/height clips anything before its own origin). A link near the
+top row of a board — not a rare case, since there's naturally little headroom above whatever's
+already at the top — needing to bow *up* to clear an obstruction had nowhere to bow into.
+Checked directly against the shipped example project: 3 of its 5 real links were computing a
+negative control-point Y before this fix, an exact match for the report.
+
+Fixed with a floor: `computeClusterLinkPath` now clamps its control point to never go below a
+small margin (20px) on either axis — trading a slightly tighter curve right at the very edge
+of the board for the curve always actually being visible, which matters far more than the
+last few pixels of ideal clearance. Also moved `canvasSize`'s computation (which grows the
+drawing surface to fit real content — see the earlier fixed-2400×1600-canvas entry) to run
+*after* the cluster-link geometry and include every curve's own points, so a curve bowing
+outward on the opposite (high/right) side now grows the canvas to fit it too, the same
+protection the low/left side gets from the clamp.
+
+Verified: re-ran the exact computation against the real example project — the 3 previously-
+negative control points now clamp to y=20, and the whole board's connector geometry (including
+every curve) stays within non-negative bounds. One existing test relocated away from the
+canvas origin (it was about curving in general, not the edge case) and a new dedicated
+regression test added reproducing the exact reported scenario. Full suite green (343/343),
+typecheck clean, production build clean, boot-tested (no errors, cleanly killed).

@@ -152,6 +152,11 @@ interface WorkspaceUiState {
   inspectedNoteId: string | null
   setInspectedNoteId: (id: string | null) => void
 
+  /** Whether the version-history (automatic backups) panel is open — see
+   * ProjectShell.tsx's "History" button and VersionHistoryModal.tsx. */
+  isVersionHistoryOpen: boolean
+  setVersionHistoryOpen: (open: boolean) => void
+
   clear: () => void
 
   /** Resets everything that references *this project's* ids (selected
@@ -229,6 +234,9 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   inspectedNoteId: null,
   setInspectedNoteId: (id) => set({ inspectedNoteId: id }),
 
+  isVersionHistoryOpen: false,
+  setVersionHistoryOpen: (open) => set({ isVersionHistoryOpen: open }),
+
   clear: () => set({ activeSpan: null }),
 
   resetForProjectSwitch: () =>
@@ -241,6 +249,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
       activeSpan: null,
       suggestedCodeName: null,
       inspectedCodeId: null,
-      inspectedNoteId: null
+      inspectedNoteId: null,
+      isVersionHistoryOpen: false
     })
 }))

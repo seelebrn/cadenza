@@ -1,4 +1,4 @@
-import type { ImportedDocument, ProjectData, RecentProjectEntry, SerializedAssets } from './types'
+import type { BackupEntry, ImportedDocument, ProjectData, RecentProjectEntry, SerializedAssets } from './types'
 import type { Report } from './reportModel'
 
 export type ReportExportFormat = 'html' | 'docx' | 'pdf'
@@ -11,6 +11,15 @@ export interface OpenProjectResult {
 
 export interface SaveProjectResult {
   filePath: string
+}
+
+/** A restored backup isn't tied to any real save location of its own —
+ * filePath is always null, forcing the next save through Save As rather
+ * than risking a silent overwrite of the file it was recovered from. */
+export interface RestoreBackupResult {
+  data: ProjectData
+  assets: SerializedAssets
+  filePath: null
 }
 
 /** The renderer-facing surface exposed via contextBridge as `window.api`. */
@@ -33,6 +42,12 @@ export interface CadenzaApi {
     /** Shows a save dialog, copies the bundled example project to that path,
      * and opens the copy. Null = user canceled. */
     openExample: () => Promise<OpenProjectResult | null>
+    /** Every automatic backup on file for this project, oldest first. See
+     * main/backups.ts for the retention policy. */
+    listBackups: (projectId: string) => Promise<BackupEntry[]>
+    /** Loads one backup's contents as a copy, not tied to any file on disk —
+     * the next save must go through Save As. */
+    restoreBackup: (projectId: string, fileName: string) => Promise<RestoreBackupResult>
   }
   document: {
     /** Opens a native file picker (.docx/.odt/.txt) and imports the chosen file. Null = user canceled. */

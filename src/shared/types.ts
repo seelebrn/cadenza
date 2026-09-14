@@ -247,3 +247,13 @@ export interface RecentProjectEntry {
   name: string
   lastOpenedAt: ISODateString
 }
+
+/** One automatic backup of a project — see main/backups.ts for the policy
+ * (created before every save, throttled, pruned). Keyed by `fileName`
+ * alone when restoring; the project it belongs to is implicit in which
+ * list it came from (main/backups.ts keys the folder by ProjectData.id). */
+export interface BackupEntry {
+  fileName: string
+  createdAt: ISODateString
+  sizeBytes: number
+}

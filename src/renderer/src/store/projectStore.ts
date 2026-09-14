@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  BackupEntry,
   BoardItem,
   BoardRecord,
   CategoryKind,
@@ -106,6 +107,12 @@ interface ProjectState {
   save: () => Promise<void>
   saveAs: () => Promise<void>
   closeProject: () => void
+  /** Every automatic backup on file for the current project, oldest first. */
+  listBackups: () => Promise<BackupEntry[]>
+  /** Loads one backup as the working project — as a copy, not tied to the
+   * file it was recovered from, so it comes back dirty/unsaved and the
+   * next save must go through Save As. */
+  restoreBackup: (fileName: string) => Promise<void>
   /** Apply a change to the current project and (if already saved once) autosave it.
    * Records one undo step per call, UNLESS called from inside withBatch. */
   updateProject: (updater: (data: ProjectData) => ProjectData) => void
@@ -444,6 +451,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (autosaveTimer) clearTimeout(autosaveTimer)
     set({ data: null, assets: {}, filePath: null, isDirty: false, error: null, past: [], future: [] })
     useWorkspaceUiStore.getState().resetForProjectSwitch()
+  },
+
+  listBackups: async () => {
+    const { data } = get()
+    if (!data) return []
+    return window.api.project.listBackups(data.id)
+  },
+
+  restoreBackup: async (fileName) => {
+    const { data } = get()
+    if (!data) return
+    set({ error: null })
+    try {
+      const result = await window.api.project.restoreBackup(data.id, fileName)
+      set({
+        data: result.data,
+        assets: result.assets,
+        filePath: result.filePath,
+        isDirty: true,
+        past: [],
+        future: []
+      })
+    } catch (e) {
+      set({ error: `Could not restore this backup: ${(e as Error).message}` })
+    }
   },
 
   updateProject: (updater) => {

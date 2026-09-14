@@ -1,10 +1,15 @@
 # Changelog
 
 All notable changes to Cadenza are documented here, most recent first. This is the
-short, user-facing version — see `README.md` for the full narrated development log
+short, user-facing version — see `DEVLOG.md` for the full narrated development log
 (what was reported, why each fix happened, and how it was verified).
 
 ## [Unreleased]
+
+### Added
+- Automatic project backups: a silent snapshot is kept before every save (autosave and
+  explicit Save alike), throttled and capped so it never bloats the disk. A new "History"
+  button lets you browse and restore one as a copy — it never silently overwrites your file.
 
 ## [0.3.0] - 2026-09-14
 

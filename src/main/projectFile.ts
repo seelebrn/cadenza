@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import { readFile, writeFile } from 'fs/promises'
 import { nanoid } from 'nanoid'
+import { createBackupIfDue } from './backups'
 import { normalizeProjectData } from '../shared/normalizeProject'
 import {
   PROJECT_SCHEMA_VERSION,
@@ -62,6 +63,15 @@ export async function writeProjectFile(
     assetsFolder?.file(relPath, bytes)
   }
   const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  // Whatever's currently at filePath (if anything) gets snapshotted before
+  // it's gone for good — see createBackupIfDue for the policy (skipped if
+  // one was already taken recently, or there's nothing there yet). A
+  // backup is a safety net, not the actual save the user is waiting on:
+  // never let a backup failure (disk full, permissions) block the save
+  // itself from completing.
+  await createBackupIfDue(data.id, filePath).catch((err) => {
+    console.error('Could not create a project backup (continuing with the save):', err)
+  })
   await writeFile(filePath, buffer)
 }
 

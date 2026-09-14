@@ -1893,3 +1893,47 @@ board's own automatic layout, unlike this pair.
 Verified: 1 new `computeNestedLayout` compact-resize test, 1 new `setBoardClusterFrameSize`
 test. Full suite green (350/350), typecheck clean, production build clean, boot-tested (no
 errors, cleanly killed).
+
+### Project backup / version history (2026-09-14)
+
+Reflecting on "what's still missing" (asked after the user said they were happy with
+v0.3.0), the gap that stood out most was: nothing protects against a bad autosave or a
+mistaken overwrite. In-session undo/redo doesn't survive closing the app, and both autosave
+and an explicit Save silently replace whatever was on disk. The user agreed this was worth
+building ("3. could be an important addition, though" → "Sounds good, let's go!").
+
+Built as: automatic, silent backups taken right before every save (autosave and explicit
+Save both funnel through the same `writeProjectFile`, so one call site covers both), stored
+under Electron's own `userData/backups/<projectId>/` — not next to the `.qdaproj` file,
+where a folder of backup copies would look like clutter and could get deleted along with a
+renamed/moved project. Keyed by the project's own `id` (stable across renames/moves), not
+its file path. Throttled to once per 5 minutes and capped at 20 backups per project, oldest
+pruned first, so rapid autosave churn doesn't fill the disk. A backup's timestamp is always
+read from the file's own `mtime` at list time, never parsed back out of the filename (the
+filename is just a sortable, cross-platform-safe label for a human browsing the folder).
+
+Split the logic the same way `recentProjects.ts` already established as this codebase's
+pattern for Electron-API-touching main-process modules: pure decision logic in
+`shared/backupOps.ts` (`shouldCreateBackup`, `pickBackupsToPrune` — both unit-testable, no
+Electron dependency) plus thin, untested glue in `main/backups.ts` (`listBackups`,
+`createBackupIfDue`, actual fs calls). `writeProjectFile` calls `createBackupIfDue` wrapped
+in `.catch()` — a failed backup (disk full, permissions) logs a warning but never blocks the
+actual save the user is waiting on.
+
+Restoring a backup deliberately does *not* silently overwrite the file it came from: the new
+`project:restore-backup` IPC handler returns `filePath: null`, so the restored project comes
+back into the store as dirty/unsaved (`ProjectStore.restoreBackup`), the same state as a
+brand new project — the user has to explicitly Save As to keep it, same discipline as
+`openExample`'s "copy first, never touch the original" pattern. Added a `RestoreBackupResult`
+type alongside the existing `OpenProjectResult` in `shared/api.ts` since the latter's
+`filePath: string` is non-nullable and doesn't fit this case.
+
+New "History" button on `ProjectShell`'s toolbar (next to Save/Save As/Close) opens
+`VersionHistoryModal`, listing backups newest-first with a human timestamp and size, each
+with an inline "Restore" → "Yes, restore"/"Cancel" confirmation (no `window.confirm`) that
+warns explicitly when there are unsaved changes about to be discarded from the working copy.
+
+Verified: 9 new `backupOps.test.ts` unit tests (both interval- and pruning-edge cases: null/
+under/at/past the minimum interval; under-cap/exact-excess/order-independence/zero-cap/empty-
+list pruning). Full suite green (359/359), typecheck clean, production build clean,
+boot-tested (no errors, cleanly killed).

@@ -4,6 +4,7 @@ import { join } from 'path'
 import type { ProjectData, SerializedAssets } from '../shared/types'
 import type { ReportExportFormat } from '../shared/api'
 import { importDocumentDialog } from './import'
+import { backupFilePath, listBackups } from './backups'
 import { createEmptyProject, readProjectFile, writeProjectFile } from './projectFile'
 import { addRecentProject, getRecentProjects, removeRecentProject } from './recentProjects'
 import { renderReportToDocx } from './export/docxRenderer'
@@ -136,6 +137,17 @@ function registerProjectHandlers(): void {
       lastOpenedAt: new Date().toISOString()
     })
     return { data, assets, filePath: result.filePath }
+  })
+
+  ipcMain.handle('project:list-backups', (_event, projectId: string) => listBackups(projectId))
+
+  ipcMain.handle('project:restore-backup', async (_event, projectId: string, fileName: string) => {
+    const { data, assets } = await readProjectFile(backupFilePath(projectId, fileName))
+    // filePath deliberately null: a restored backup isn't tied to any real
+    // save location of its own (only the file it was recovered *from* is,
+    // which shouldn't be silently overwritten) — the next save has to go
+    // through Save As, same as a brand new project.
+    return { data, assets, filePath: null }
   })
 }
 

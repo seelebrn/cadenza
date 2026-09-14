@@ -9,6 +9,7 @@ import DocumentReader from './DocumentReader'
 import ExportView from './ExportView'
 import NoteInfoModal from './NoteInfoModal'
 import RightSidebar from './RightSidebar'
+import VersionHistoryModal from './VersionHistoryModal'
 
 function ProjectShell(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
@@ -26,6 +27,7 @@ function ProjectShell(): JSX.Element | null {
   const renameProject = useProjectStore((s) => s.renameProject)
   const mainView = useWorkspaceUiStore((s) => s.mainView)
   const setMainView = useWorkspaceUiStore((s) => s.setMainView)
+  const setVersionHistoryOpen = useWorkspaceUiStore((s) => s.setVersionHistoryOpen)
 
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
@@ -157,6 +159,13 @@ function ProjectShell(): JSX.Element | null {
             </button>
             <button
               className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              onClick={() => setVersionHistoryOpen(true)}
+              title="Restore an earlier automatic backup"
+            >
+              History
+            </button>
+            <button
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
               onClick={closeProject}
             >
               Close
@@ -198,6 +207,7 @@ function ProjectShell(): JSX.Element | null {
 
       <CodeInfoModal />
       <NoteInfoModal />
+      <VersionHistoryModal />
     </div>
   )
 }

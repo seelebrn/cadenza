@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-14
+
 ### Added
 - Automatic project backups: a silent snapshot is kept before every save (autosave and
   explicit Save alike), throttled and capped so it never bloats the disk. A new "History"

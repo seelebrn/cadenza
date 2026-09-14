@@ -912,6 +912,58 @@ export function getVisibleClusterLinks(clusterLinks: ClusterLink[], clustersOnBo
   )
 }
 
+function clusterRectContains(outer: BoardCluster, inner: BoardCluster): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  )
+}
+
+export interface StructuralNestingEdge {
+  parentClusterId: string
+  childClusterId: string
+}
+
+/**
+ * Everywhere a cluster's nesting is shown by geometric containment (its box
+ * literally drawn inside its parent's box — the default board, and Radial,
+ * which cascades a moved root's delta down its whole subtree specifically
+ * to preserve this), the parent/child relationship is legible without any
+ * extra line. Tree deliberately breaks that containment on purpose — it
+ * lays parent and children out as separate, non-overlapping boxes (an
+ * organizational-chart arrangement), which was itself a fix (see the Tree
+ * row-spacing entry in the changelog): once children can no longer overlap
+ * their own parent, nothing else on the board shows they still belong to
+ * it.
+ *
+ * This returns one edge per parent/child cluster pair present on the board
+ * whose containment relationship no longer holds geometrically, so the
+ * caller can draw a connecting line for exactly those pairs — automatic
+ * and structural, distinct from a manually-authored ClusterLink (a labeled
+ * analytic relationship, not "this is literally a sub-theme of that one").
+ * A pair that's still visually contained (the default board; Radial) is
+ * skipped, since a redundant line there would just be visual noise.
+ */
+export function getStructuralNestingEdges(
+  clusters: BoardCluster[],
+  categories: CategoryRecord[]
+): StructuralNestingEdge[] {
+  const categoryById = new Map(categories.map((c) => [c.id, c]))
+  const clusterByCategoryId = new Map(clusters.map((c) => [c.categoryId, c]))
+  const edges: StructuralNestingEdge[] = []
+  for (const cluster of clusters) {
+    const parentCategoryId = categoryById.get(cluster.categoryId)?.parentCategoryId ?? null
+    if (!parentCategoryId) continue
+    const parentCluster = clusterByCategoryId.get(parentCategoryId)
+    if (!parentCluster) continue
+    if (clusterRectContains(parentCluster, cluster)) continue
+    edges.push({ parentClusterId: parentCluster.id, childClusterId: cluster.id })
+  }
+  return edges
+}
+
 export interface ClusterPosition {
   id: string
   x: number

@@ -1515,3 +1515,34 @@ needing) the file it pointed to.
 
 Verified: typecheck clean, full suite green (323/323), production build clean, boot-tested (no
 errors, cleanly killed).
+
+### Tree layout visually orphaned nested clusters from their superordinate (2026-09-14)
+
+Reported: after clicking "Tree", a cluster nested under a superordinate cluster looked
+completely disconnected from it — nothing on screen still showed the relationship.
+
+Root cause, once traced through: nesting in Cadenza is normally shown purely by geometric
+containment — a child cluster's box is drawn *inside* its parent's box, with no line needed,
+which is exactly how the default board and Radial (which deliberately cascades a moved root's
+delta down its whole subtree to preserve this) both display it. Tree's own layout deliberately
+breaks that containment on purpose: it lays parent and children out as separate, non-
+overlapping boxes in a top-down organizational-chart arrangement — itself an earlier fix (see
+the Tree row-spacing entry above), since a tall parent's box used to run straight through its
+own child row. Once children could no longer overlap their parent, nothing else on the board
+was left showing they still belonged to it — the hierarchy became genuinely illegible, not
+just differently drawn.
+
+Added `getStructuralNestingEdges` (`boardOps.ts`): for every parent/child cluster pair present
+on a board, checks whether the child's rectangle is still contained in the parent's; if not,
+emits an edge to draw. Rendered as a dashed, muted line distinct from a manually-authored
+`ClusterLink` (a labeled analytic relationship, not "this literally is a sub-theme of that
+one") — automatic, and silent wherever containment already shows the relationship (the default
+board, Radial), so it adds nothing where nothing was missing.
+
+Verified against the real `MultiCaseTest.qdaproj` (25 categories, 19 real parent/child pairs
+on a curated board): 0 edges before Tree (still contained, as expected), exactly 19 after —
+one per pair, matching the project's actual nesting exactly, with zero cluster overlaps.
+4 new unit tests added (no relationship when contained; an edge once laid out beside instead
+of inside — the exact reported bug; a category whose parent isn't on the board at all; a
+three-generation chain). Full suite green (327/327), typecheck clean, production build clean,
+boot-tested (no errors, cleanly killed).

@@ -27,6 +27,7 @@ import {
   getClusterMemberItems,
   getDefaultBoardId,
   getLinkedGroup,
+  getStructuralNestingEdges,
   getVisibleBoardClusters,
   getVisibleBoardItems,
   getVisibleClusterLinks,
@@ -1080,6 +1081,55 @@ describe('getVisibleClusterLinks', () => {
     ]
     const links = [link('l1', 'A', 'B'), link('l2', 'A', 'not-on-board')]
     expect(getVisibleClusterLinks(links, onBoard).map((l) => l.id)).toEqual(['l1'])
+  })
+})
+
+describe('getStructuralNestingEdges', () => {
+  it('finds no edge when a child cluster is still fully contained in its parent (the default board, Radial)', () => {
+    const categories = [makeCategory('parent'), makeCategory('child', { parentCategoryId: 'parent' })]
+    const clusters: BoardCluster[] = [
+      { id: 'p', boardId: 'b1', categoryId: 'parent', x: 0, y: 0, width: 400, height: 400, createdAt: '0' },
+      { id: 'c', boardId: 'b1', categoryId: 'child', x: 20, y: 20, width: 100, height: 100, createdAt: '0' }
+    ]
+    expect(getStructuralNestingEdges(clusters, categories)).toEqual([])
+  })
+
+  it('reports an edge once a child is laid out beside its parent instead of inside it — the exact Tree bug reported', () => {
+    const categories = [makeCategory('parent'), makeCategory('child', { parentCategoryId: 'parent' })]
+    const clusters: BoardCluster[] = [
+      { id: 'p', boardId: 'b1', categoryId: 'parent', x: 0, y: 0, width: 200, height: 100, createdAt: '0' },
+      // Tree's actual arrangement: the child sits in its own row below the
+      // parent, not inside its rectangle.
+      { id: 'c', boardId: 'b1', categoryId: 'child', x: 0, y: 200, width: 200, height: 100, createdAt: '0' }
+    ]
+    expect(getStructuralNestingEdges(clusters, categories)).toEqual([
+      { parentClusterId: 'p', childClusterId: 'c' }
+    ])
+  })
+
+  it('ignores a category whose parent has no cluster on this board', () => {
+    const categories = [makeCategory('parent'), makeCategory('child', { parentCategoryId: 'parent' })]
+    const clusters: BoardCluster[] = [
+      { id: 'c', boardId: 'b1', categoryId: 'child', x: 0, y: 0, width: 100, height: 100, createdAt: '0' }
+    ]
+    expect(getStructuralNestingEdges(clusters, categories)).toEqual([])
+  })
+
+  it('reports one edge per level for a three-generation chain laid out as a Tree', () => {
+    const categories = [
+      makeCategory('grandparent'),
+      makeCategory('parent', { parentCategoryId: 'grandparent' }),
+      makeCategory('child', { parentCategoryId: 'parent' })
+    ]
+    const clusters: BoardCluster[] = [
+      { id: 'gp', boardId: 'b1', categoryId: 'grandparent', x: 0, y: 0, width: 100, height: 100, createdAt: '0' },
+      { id: 'p', boardId: 'b1', categoryId: 'parent', x: 0, y: 200, width: 100, height: 100, createdAt: '0' },
+      { id: 'c', boardId: 'b1', categoryId: 'child', x: 0, y: 400, width: 100, height: 100, createdAt: '0' }
+    ]
+    expect(getStructuralNestingEdges(clusters, categories)).toEqual([
+      { parentClusterId: 'gp', childClusterId: 'p' },
+      { parentClusterId: 'p', childClusterId: 'c' }
+    ])
   })
 })
 

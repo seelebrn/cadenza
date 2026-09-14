@@ -14,6 +14,7 @@ import {
   getLinkedGroup,
   getVisibleBoardClusters,
   getVisibleBoardItems,
+  getStructuralNestingEdges,
   getVisibleClusterLinks,
   MEMBER_CARD_HEIGHT,
   MEMBER_CARD_WIDTH
@@ -740,6 +741,30 @@ function BoardView(): JSX.Element {
       .filter((g): g is NonNullable<typeof g> => g !== null)
   }, [data, clusters, dragState, clusterMoveDelta])
 
+  // Structural parent/child edges — automatic, not user-authored (contrast
+  // clusterLinkGeometries above): only needed where nesting is no longer
+  // shown by plain containment, which Tree's layout deliberately breaks
+  // (see getStructuralNestingEdges). Same live-drag delta handling as the
+  // cluster links.
+  const nestingEdgeGeometries = useMemo(() => {
+    if (!data) return []
+    const edges = getStructuralNestingEdges(clusters, data.categories)
+    return edges
+      .map((edge) => {
+        const a = clusters.find((c) => c.id === edge.parentClusterId)
+        const b = clusters.find((c) => c.id === edge.childClusterId)
+        if (!a || !b) return null
+        const aMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(a.id)
+        const bMoving = dragState?.kind === 'cluster-move' && dragState.groupClusterIds.includes(b.id)
+        const ax = a.x + (aMoving ? clusterMoveDelta.dx : 0) + a.width / 2
+        const ay = a.y + (aMoving ? clusterMoveDelta.dy : 0) + a.height / 2
+        const bx = b.x + (bMoving ? clusterMoveDelta.dx : 0) + b.width / 2
+        const by = b.y + (bMoving ? clusterMoveDelta.dy : 0) + b.height / 2
+        return { key: `${edge.parentClusterId}:${edge.childClusterId}`, ax, ay, bx, by }
+      })
+      .filter((g): g is NonNullable<typeof g> => g !== null)
+  }, [data, clusters, dragState, clusterMoveDelta])
+
   if (!data) return <></>
 
   function handlePickClusterForLink(categoryId: string): void {
@@ -1154,6 +1179,13 @@ function BoardView(): JSX.Element {
               </defs>
               {linkGeometries.map(({ link, ax, ay, bx, by }) => (
                 <line key={link.id} x1={ax} y1={ay} x2={bx} y2={by} stroke="#94a3b8" strokeWidth={2} />
+              ))}
+              {/* Structural parent/child edges — drawn only where the layout
+                  (Tree) has broken plain visual containment; see
+                  getStructuralNestingEdges. Dashed and muted so it never
+                  competes with a labeled, user-authored cluster link. */}
+              {nestingEdgeGeometries.map(({ key, ax, ay, bx, by }) => (
+                <line key={key} x1={ax} y1={ay} x2={bx} y2={by} stroke="#cbd5e1" strokeWidth={1.5} strokeDasharray="5 4" />
               ))}
               {/* Thematic-map cluster links — a labeled relationship between two
                   clusters (see ClusterLink in types.ts), distinct from the plain

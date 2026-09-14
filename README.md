@@ -17,7 +17,8 @@ can nest into superordinate groups (drag one into another; shift+drag to pull on
 Import/export with Word (.docx), OpenOffice (.odt), and Excel (.xlsx/.xls) rounds it out.
 
 Runs on Windows, macOS, and Linux. See `\plans\humble-herding-pike.md` for the
-full design/phase plan.
+full design/phase plan, and `CHANGELOG.md` for a short, per-release version history
+(this file is the longer narrated log of *how* each change happened).
 
 ## Download & install
 

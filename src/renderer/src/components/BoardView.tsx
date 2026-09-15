@@ -19,7 +19,8 @@ import {
   getStructuralNestingEdges,
   getVisibleClusterLinks,
   MEMBER_CARD_HEIGHT,
-  MEMBER_CARD_WIDTH
+  MEMBER_CARD_WIDTH,
+  resolveGroupClusterReassignment
 } from '@shared/boardOps'
 import type { AlignmentGuide, DistributionGuide } from '@shared/boardOps'
 import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
@@ -503,17 +504,35 @@ function BoardView(): JSX.Element {
             const finalY = start.y + dy + adjustY
             finalPositions.set(memberId, { x: finalX, y: finalY })
             moveItem(memberId, finalX, finalY)
+          }
 
-            // Category (cluster) membership follows containment: left the old
-            // cluster -> unassign; entered a new one -> assign.
-            const member = items.find((i) => i.id === memberId)
-            if (!member) continue
-            const oldPos = { x: member.x, y: member.y }
-            const oldCluster = findClusterAtPoint(clusters, oldPos.x + CARD_WIDTH / 2, oldPos.y + CARD_HEIGHT / 2)
-            const newCluster = findClusterAtPoint(clusters, finalX + CARD_WIDTH / 2, finalY + CARD_HEIGHT / 2)
-            if (oldCluster?.id !== newCluster?.id) {
-              if (oldCluster) unassignItemFromCluster(materializeCluster(oldCluster), member.refType, member.refId)
-              if (newCluster) assignItemToCluster(materializeCluster(newCluster), member.refType, member.refId)
+          // Cluster membership is decided for the WHOLE linked group at
+          // once (see resolveGroupClusterReassignment) rather than each
+          // member independently checking its own final position against
+          // cluster bounds — a snapped-together list of linked items can
+          // be tall/wide enough that its trailing members straddle a
+          // cluster's edge even while the group visually reads as
+          // "inside" it, which used to split a linked group across two
+          // different clusters mid-drag.
+          const groupMemberIds = state.groupItemIds.filter((id) => state.startPositions[id])
+          const reassignment = resolveGroupClusterReassignment(
+            clusters,
+            state.startPositions,
+            finalPositions,
+            groupMemberIds,
+            CARD_WIDTH,
+            CARD_HEIGHT
+          )
+          if (reassignment && reassignment.oldCluster?.id !== reassignment.newCluster?.id) {
+            for (const memberId of groupMemberIds) {
+              const member = items.find((i) => i.id === memberId)
+              if (!member) continue
+              if (reassignment.oldCluster) {
+                unassignItemFromCluster(materializeCluster(reassignment.oldCluster), member.refType, member.refId)
+              }
+              if (reassignment.newCluster) {
+                assignItemToCluster(materializeCluster(reassignment.newCluster), member.refType, member.refId)
+              }
             }
           }
 

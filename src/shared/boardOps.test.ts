@@ -41,6 +41,7 @@ import {
   removeItemFromBoard,
   renameBoard,
   resetDefaultBoardClusterLayout,
+  resolveGroupClusterReassignment,
   setBoardClusterFrameSize,
   setBoardClusterLinkStyle,
   resizeCluster,
@@ -158,6 +159,56 @@ describe('findClusterAtPoint', () => {
 
   it('returns null when no cluster contains the point', () => {
     expect(findClusterAtPoint([big, small], 1000, 1000)).toBeNull()
+  })
+})
+
+// --- resolveGroupClusterReassignment ---------------------------------------
+
+describe('resolveGroupClusterReassignment', () => {
+  const clusterA: BoardCluster = { id: 'A', boardId: 'b1', categoryId: 'catA', x: 0, y: 0, width: 400, height: 400, createdAt: '0' }
+  const clusterB: BoardCluster = { id: 'B', boardId: 'b1', categoryId: 'catB', x: 1000, y: 0, width: 400, height: 400, createdAt: '0' }
+  const CARD_W = 180
+  const CARD_H = 64
+
+  it('returns null for an empty group', () => {
+    expect(resolveGroupClusterReassignment([clusterA, clusterB], {}, new Map(), [], CARD_W, CARD_H)).toBeNull()
+  })
+
+  it('a whole group joining a cluster is decided by its topmost (smallest y) member, even when a trailing member spills into a different cluster', () => {
+    // top: well inside A both before and after. trailing: its own final
+    // position actually lands inside CLUSTER B, not A — a per-member
+    // check would put "top" in A and "trailing" in B, splitting one
+    // linked group across two different clusters.
+    const startPositions = { top: { x: 100, y: 50 }, trailing: { x: 900, y: 300 } }
+    const finalPositions = new Map([
+      ['top', { x: 120, y: 60 }],
+      ['trailing', { x: 920, y: 310 }] // center (1010, 342) falls inside B, not A
+    ])
+    const result = resolveGroupClusterReassignment(
+      [clusterA, clusterB],
+      startPositions,
+      finalPositions,
+      ['top', 'trailing'],
+      CARD_W,
+      CARD_H
+    )
+    expect(result?.oldCluster?.id).toBe('A')
+    expect(result?.newCluster?.id).toBe('A')
+  })
+
+  it('a group leaving a cluster is decided by the same reference member on both sides', () => {
+    const startPositions = { top: { x: 100, y: 50 } }
+    const finalPositions = new Map([['top', { x: 1100, y: 50 }]])
+    const result = resolveGroupClusterReassignment([clusterA, clusterB], startPositions, finalPositions, ['top'], CARD_W, CARD_H)
+    expect(result?.oldCluster?.id).toBe('A')
+    expect(result?.newCluster?.id).toBe('B')
+  })
+
+  it('no change reported when the reference member starts and ends in the same cluster', () => {
+    const startPositions = { top: { x: 100, y: 50 } }
+    const finalPositions = new Map([['top', { x: 150, y: 80 }]])
+    const result = resolveGroupClusterReassignment([clusterA, clusterB], startPositions, finalPositions, ['top'], CARD_W, CARD_H)
+    expect(result?.oldCluster?.id).toBe(result?.newCluster?.id)
   })
 })
 

@@ -2198,3 +2198,30 @@ asserts the property that actually matters: a virtual member stays inside its cl
 box even once most of its siblings are explicit. Confirmed it fails against the reverted
 code and passes with the fix. Full suite green (361/361), typecheck clean, production build
 clean, boot-tested.
+
+### Keeping a linked group in one cluster together (2026-09-15)
+
+User's own proposed fix for the reopened "dragging a group into a cluster can leave it split"
+limitation from the last entry: "make sure linked items stay in the same cluster, even if the
+list of items spills to another cluster — take the top item as an indicator."
+
+The per-member cluster-reassignment loop in `handleMouseUp` checked each group member's own
+final position against cluster bounds independently. A snapped-together list of linked items
+is wide/tall enough (each member offset from the last by a card width or height, per the snap
+gap) that a trailing member can land outside the cluster the group otherwise reads as
+"entering" — or even inside a *different* cluster — while the item at the top of the list sits
+clearly inside it. Checking each member independently could then genuinely split one linked
+group's membership across two categories from a single drag.
+
+Extracted a new pure function, `resolveGroupClusterReassignment` (boardOps.ts): picks the
+topmost group member by start `y`, and decides old/new cluster membership for the *entire*
+group off that one member's start/final position, rather than letting each member vote for
+itself. `handleMouseUp` now applies that single verdict uniformly to every member of the
+group. Chose "topmost" specifically because a rigid group's relative vertical order is
+preserved for the whole drag (same delta applied to everyone), so it's a stable, unambiguous
+reference regardless of which member was actually grabbed.
+
+Verified: 4 new unit tests for the extracted function (empty group; a trailing member landing
+inside a *different* cluster than the top member — the concrete split scenario reported;
+leaving a cluster; no-op when the reference member's cluster doesn't change). Full suite green
+(365/365), typecheck clean, production build clean, boot-tested.

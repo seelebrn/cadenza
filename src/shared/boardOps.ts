@@ -68,6 +68,38 @@ export function findClusterAtPoint(clusters: BoardCluster[], px: number, py: num
   return best
 }
 
+/** Which single cluster a whole linked group of items is leaving/entering
+ * on a drag, decided off one reference member (the topmost by y) rather
+ * than each member independently checking its own final position. A
+ * snapped-together list of linked items can be tall/wide enough that its
+ * trailing members straddle a cluster's edge even while the group visibly
+ * reads as "inside" it — checking each member on its own could then split
+ * a linked group across two different clusters mid-drag. Anchoring both
+ * the "leaving" and "entering" side of the decision on the same member
+ * keeps the whole group's membership change internally consistent.
+ * Returns null if the group is empty or the reference member's final
+ * position is missing. */
+export function resolveGroupClusterReassignment(
+  clusters: BoardCluster[],
+  startPositions: Record<string, { x: number; y: number }>,
+  finalPositions: Map<string, { x: number; y: number }>,
+  groupMemberIds: string[],
+  cardWidth: number,
+  cardHeight: number
+): { oldCluster: BoardCluster | null; newCluster: BoardCluster | null } | null {
+  if (groupMemberIds.length === 0) return null
+  const topMemberId = groupMemberIds.reduce((topId, id) =>
+    startPositions[id].y < startPositions[topId].y ? id : topId
+  )
+  const topStart = startPositions[topMemberId]
+  const topFinal = finalPositions.get(topMemberId)
+  if (!topFinal) return null
+  return {
+    oldCluster: findClusterAtPoint(clusters, topStart.x + cardWidth / 2, topStart.y + cardHeight / 2),
+    newCluster: findClusterAtPoint(clusters, topFinal.x + cardWidth / 2, topFinal.y + cardHeight / 2)
+  }
+}
+
 interface Rect {
   x: number
   y: number

@@ -2435,3 +2435,26 @@ null), plus the fuzzed collision reproduction as a 6th, confirmed to fail agains
 un-stabilized `reconcileSoleCategoryMembership` + `addMemberByRefType` sequence before passing
 with the fix. Full suite green (387/387), typecheck clean, production build clean,
 boot-tested.
+
+### Pinning a cluster's members without pinning the cluster itself (2026-09-15)
+
+Immediate follow-up to the item-slot fix above: "I moved an item from a cluster to another,
+the source cluster (with 1 item less) autoresized but left the rightmost item outside of the
+newly resized cluster, even though it still belongs to it." The very fix from the previous
+entry caused this one: `materializeClusterMemberItems` pins a cluster's *members* at their
+current positions before a membership change, but left the cluster's own *box* alone. A
+still-virtual box's size is `computeOwnClusterSize(category)`, recomputed fresh from the live
+membership count on every render — the instant a member actually leaves, the box shrinks to
+fit the smaller count, with no idea that the remaining member's card was just pinned for the
+grid the box had a moment ago, before it shrank.
+
+Fixed by having `materializeClusterMemberItems` pin the cluster's own box too, at its current
+(pre-change) size, right alongside its members, if it isn't already explicit. From that point
+the box can only grow (via the existing `growClusterToFitOwnMembers`/`growAncestorClustersToFit`),
+never shrink out from under members that were just frozen relative to it — keeping the box and
+its pinned members permanently consistent with each other.
+
+Verified: 1 new regression test (moving a member out of a 2-member cluster keeps the source
+box at its original size and the remaining member fully contained in it), confirmed to fail
+without the box-pinning addition before passing with it. Full suite green (388/388), typecheck
+clean, production build clean, boot-tested.

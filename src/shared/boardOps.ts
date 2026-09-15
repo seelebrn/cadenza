@@ -756,7 +756,9 @@ export function getVisibleBoardItems(
 
 /**
  * Gives every still-virtual code/note member of `categoryId` a real,
- * pinned `BoardItem` at its *current* computed slot position on `boardId`.
+ * pinned `BoardItem` at its *current* computed slot position on `boardId`
+ * — and, if the cluster's own box is still virtual too, pins that at its
+ * current size right alongside them.
  *
  * getVisibleBoardItems' own member-grid slot numbers are stable against a
  * given member's own virtual→explicit transition (see memberSlotByRef's
@@ -770,6 +772,17 @@ export function getVisibleBoardItems(
  * from one cluster to another while snap-linking it to a code already in
  * the destination — on release, a code from either cluster ends up
  * superposed on a different code from the same cluster.
+ *
+ * The cluster's own box needs the same treatment for the same reason: a
+ * still-virtual box's size is computeOwnClusterSize(category), recomputed
+ * fresh from the *current* membership count on every render — losing a
+ * member shrinks it immediately, with no idea that a member card just
+ * pinned above was sized for the grid *before* that member left. Pinning
+ * the box alongside its members keeps the two consistent; from then on it
+ * can only grow (growClusterToFitOwnMembers/growAncestorClustersToFit),
+ * never shrink out from under them. Reported as: moving an item out of a
+ * cluster, the source cluster auto-resized smaller and left its own
+ * remaining rightmost item poking outside it.
  *
  * Call this for a category right before its own membership is about to
  * change (a member about to join or leave it) — see
@@ -793,12 +806,37 @@ export function materializeClusterMemberItems(data: ProjectData, boardId: string
     visibleClusters
   )
 
+  let next = data
+
+  // The cluster's own box, if still virtual, is *also* about to lose a
+  // member here — computeOwnClusterSize would recompute it smaller on the
+  // very next render, purely from the smaller membership count, with no
+  // idea that a member card it's about to shrink underneath was just
+  // frozen at a position sized for the *old*, bigger grid. Pinning the box
+  // itself at its current size right alongside its members keeps the two
+  // consistent — from here on it can only grow (growClusterToFitOwnMembers/
+  // growAncestorClustersToFit), never shrink out from under them. Reported
+  // as: moving an item out of a cluster, the source cluster auto-resized
+  // smaller and left its own remaining rightmost item poking outside it.
+  if (!explicitClusters.some((c) => c.categoryId === categoryId)) {
+    const box = visibleClusters.find((c) => c.categoryId === categoryId)
+    if (box) {
+      next = createClusterForCategory(next, {
+        boardId,
+        categoryId,
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height
+      }).data
+    }
+  }
+
   const memberRefs: Array<{ refType: 'code' | 'note'; refId: string }> = [
     ...category.codeIds.map((id) => ({ refType: 'code' as const, refId: id })),
     ...category.noteIds.map((id) => ({ refType: 'note' as const, refId: id }))
   ]
 
-  let next = data
   for (const ref of memberRefs) {
     if (explicitRefs.has(`${ref.refType}:${ref.refId}`)) continue
     const item = visibleItems.find((i) => i.refType === ref.refType && i.refId === ref.refId)

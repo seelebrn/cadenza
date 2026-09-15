@@ -1281,6 +1281,48 @@ describe('reassignRefCategoryMembership', () => {
       }
     }
   })
+
+  // Regression: the source cluster's own box, if still virtual, used to
+  // recompute smaller the instant it lost a member — computeOwnClusterSize
+  // reacts to the live (now smaller) membership count — even though its
+  // remaining member's position was just pinned for the grid the box had
+  // *before* the move. Reported as: moving an item out of a cluster, the
+  // source cluster auto-resized smaller and left its own remaining
+  // rightmost item poking outside it.
+  it("pins the source cluster's own box too, so a remaining member never ends up outside it", () => {
+    const src = makeCategory('src', { codeIds: ['a', 'b'] })
+    const dst = makeCategory('dst', { codeIds: [] })
+    const codes = [makeCode('a'), makeCode('b')]
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [src, dst],
+      codes
+    })
+    const srcBoxBefore = getVisibleBoardClusters(DEFAULT_BOARD, [], data.categories).find(
+      (c) => c.categoryId === 'src'
+    )!
+
+    const next = reassignRefCategoryMembership(data, 'board1', 'code', 'a', 'dst')
+
+    const srcBoxAfter = next.boardClusters.find((c) => c.categoryId === 'src')!
+    expect(srcBoxAfter).toBeDefined()
+    expect(srcBoxAfter.width).toBe(srcBoxBefore.width)
+    expect(srcBoxAfter.height).toBe(srcBoxBefore.height)
+
+    const bItem = next.boardItems.find((i) => i.refId === 'b')!
+    expect(
+      rectContains(srcBoxAfter, {
+        id: 'x',
+        boardId: 'board1',
+        categoryId: '',
+        x: bItem.x,
+        y: bItem.y,
+        width: 180,
+        height: 64,
+        createdAt: ''
+      })
+    ).toBe(true)
+  })
 })
 
 // --- bulk add actions -------------------------------------------------

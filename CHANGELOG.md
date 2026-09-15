@@ -15,7 +15,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 - Resizing or moving one cluster could shove a completely different, untouched cluster into
   overlapping another one. Clusters now stay put unless you move or resize them directly.
 - Moving a code between clusters while snap-linking it to a code already in the destination
-  could land a different code from that cluster exactly on top of another one.
+  could land a different code from that cluster exactly on top of another one, or leave the
+  cluster it left behind auto-resized smaller with its remaining item poking outside it.
 
 ## [0.4.2] - 2026-09-15
 

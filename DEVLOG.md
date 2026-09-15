@@ -2111,3 +2111,58 @@ implementation (reverted it briefly to confirm — `expected 60 to be 248`, i.e.
 dropped into slot 0) and passes with the fix.
 
 Verified: 1 new test (360/360 total), typecheck clean, production build clean, boot-tested.
+
+### Snap-linked codes inside a cluster: hanging links, reflowing siblings, vanishing unlink controls (2026-09-15)
+
+Immediate follow-up, three symptoms at once: (1) snap-linked codes inside a cluster
+"don't move harmoniously" — one snaps into place, the others stay "linked but hanging",
+drawing a messy tangle of lines; (2) dragging a linked group can move *other*, unrelated
+items in the same cluster; (3) a link's unlink "×" sometimes just disappears. The user's own
+read on (1) — "only one code gets autosnapped, leaving the others hanging" — pointed straight
+at it.
+
+**Root cause of (1) and (3):** `findSnapTarget`'s candidate pool is every *visible* item on
+the default board, virtual ones included — so dragging item A onto still-virtual item B and
+releasing creates a `BoardLink` whose `itemBId` is literally the string `"virtual:code:<id>"`,
+not a real, persisted `BoardItem` id (`linkItems` in boardOps.ts stores whatever id it's
+given, no validation). Two things follow from that: until B is ever touched on its own, its
+rendered position comes from the cluster's own auto-grid slot — nothing to do with "stay next
+to what it's linked to" — so the line drawn between A and B stretches wherever the grid
+happens to place B, not a snapped pair (symptom 1). And the moment B *is* later dragged on its
+own, it materializes under a brand-new real id (a fresh `nanoid()`), silently orphaning the
+old link: `linkGeometries` in BoardView.tsx looks up both endpoints in the current item list
+and returns `null` — skipping rendering entirely — the instant either one fails to resolve
+(`if (!a || !b) return null`), so the connector line *and* its unlink control both just vanish
+(symptom 3).
+
+Fixed at the point a link is created (`handleMouseUp`'s item-drag branch): if the snap target
+is still virtual, materialize it (`addItemToBoard`, at its own current position) before
+linking, so `linkItemsAction` only ever receives two real ids. Every link created from now on
+has stable endpoints; this doesn't retroactively repair links already broken in an existing
+project (unlink and re-link those once the fix is live).
+
+**Root cause of (2):** a `BoardLink`'s member list (`getLinkedGroup`) can include a
+still-virtual id too, and moving the whole group calls `moveItem(memberId, …)` for each one —
+but `moveItem` just maps over `data.boardItems` looking for a matching id, and a virtual item
+was never added there, so the call is a silent no-op for it. That member simply doesn't move
+with the rest of the group — the actual mechanism behind "hanging" in symptom 1. (The link-
+creation fix above prevents this going forward, same as symptom 3, since a link's members are
+never virtual once created under the fix.)
+
+Separately, real (2): a linked group crossing into a cluster it wasn't already a member of
+grows that cluster's total membership (`assignItemToCluster`), which changed its packed-grid
+column count (`packGridColumnCount`) and therefore reflowed every *other*, untouched virtual
+member's position — purely as a side effect of a drag the user never meant to apply to them.
+Root-caused in `getVisibleBoardItems`: the column count was based on every declared member of
+the category, when only still-virtual ones actually occupy a grid slot (an explicit member
+renders at its own stored position regardless). Changed it to count virtual members only, so
+an explicit member joining or leaving a cluster's membership no longer perturbs its siblings.
+The cluster's own box size (`getVisibleBoardClusters`) still sizes off total membership, so
+this is always safe against overflow (virtual-only count is never larger).
+
+Verified: 2 new regression tests, each confirmed to fail against the pre-fix code before
+passing with it (`expected 436 to be 60` for the column-count one). Full suite green
+(361/361), typecheck clean, production build clean, boot-tested. As with the last two
+board-interaction fixes, this environment can't drive the actual mouse gestures, so this is a
+well-evidenced diagnosis (every symptom traced to code that matches it exactly) rather than an
+interactively confirmed fix.

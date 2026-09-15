@@ -616,24 +616,40 @@ export function getVisibleBoardItems(
   const homeClusterByRef = new Map<string, BoardCluster>()
   // Same near-square grid every other auto-layout in this file uses
   // (packGridColumnCount) — how many columns THIS cluster's own member
-  // cards pack into, keyed by cluster id so nextPositionInCluster below
-  // doesn't need the category again. Matches exactly what
-  // getVisibleBoardClusters' ownMemberGridSize assumed when it sized the
-  // cluster's box, so cards never overflow it.
+  // cards pack into, keyed by cluster id so positionForSlot below doesn't
+  // need the category again. Matches exactly what getVisibleBoardClusters'
+  // ownMemberGridSize assumed when it sized the cluster's box (which sizes
+  // off *every* declared member, explicit ones included, so it's always
+  // roomy enough), so cards never overflow it.
+  //
+  // Deliberately counts only STILL-VIRTUAL members, not every declared
+  // member: an explicit member (already dragged/materialized) renders at
+  // its own stored position regardless, so it doesn't actually occupy a
+  // grid slot here — but it still used to count toward this total. That
+  // meant a linked group merely being dragged *into* a cluster (a normal
+  // group-drag, not a bulk "+ Add all clusters") changed this cluster's
+  // total membership and therefore its column count, reflowing every
+  // OTHER, untouched virtual member's position as an unintended side
+  // effect of a drag the user never meant to apply to them — reported as
+  // "moving a block of snapped items can move other items in the
+  // cluster". Counting only virtual members keeps this stable against
+  // explicit members joining or leaving.
   const memberColumnCountByCluster = new Map<string, number>()
   for (const category of categories) {
     const cluster = clusterByCategoryId.get(category.id)
     if (!cluster) continue
+    let virtualMemberCount = 0
     for (const codeId of category.codeIds) {
       const key = `code:${codeId}`
       if (!homeClusterByRef.has(key)) homeClusterByRef.set(key, cluster)
+      if (!explicitByRef.has(key)) virtualMemberCount++
     }
     for (const noteId of category.noteIds) {
       const key = `note:${noteId}`
       if (!homeClusterByRef.has(key)) homeClusterByRef.set(key, cluster)
+      if (!explicitByRef.has(key)) virtualMemberCount++
     }
-    const memberCount = category.codeIds.length + category.noteIds.length
-    if (memberCount > 0) memberColumnCountByCluster.set(cluster.id, packGridColumnCount(memberCount))
+    if (virtualMemberCount > 0) memberColumnCountByCluster.set(cluster.id, packGridColumnCount(virtualMemberCount))
   }
 
   // Each member's slot within its home cluster's grid, assigned once up

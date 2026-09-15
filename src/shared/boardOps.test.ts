@@ -795,6 +795,40 @@ describe('getVisibleBoardItems', () => {
     expect(overlapsExplicit(after2)).toBe(false)
   })
 
+  // Regression: a new EXPLICIT member joining a cluster (e.g. a linked
+  // group dragged in from elsewhere, or from outside any cluster) used to
+  // grow this cluster's total member count and therefore its packed
+  // column count, reflowing every untouched virtual sibling's position —
+  // reported as "moving a block of snapped items can move other items in
+  // the cluster".
+  it('a new explicit member joining a cluster does not repack its still-virtual siblings', () => {
+    const codeIds = ['code0', 'code1', 'code2', 'code3']
+    const category = makeCategory('cat1', { codeIds })
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], [category])
+    const codesArg = codeIds.map((id) => ({ id }))
+    const before = getVisibleBoardItems(DEFAULT_BOARD, [], codesArg, [], [category], clusters)
+
+    const grownCategory = makeCategory('cat1', { codeIds: [...codeIds, 'codeExplicit'] })
+    const explicit: BoardItem[] = [
+      { id: 'realExplicit', boardId: DEFAULT_BOARD.id, refType: 'code', refId: 'codeExplicit', x: 9999, y: 9999 }
+    ]
+    const after = getVisibleBoardItems(
+      DEFAULT_BOARD,
+      explicit,
+      [...codesArg, { id: 'codeExplicit' }],
+      [],
+      [grownCategory],
+      clusters
+    )
+
+    for (const id of codeIds) {
+      const b = before.find((i) => i.refId === id)!
+      const a = after.find((i) => i.refId === id)!
+      expect(a.x).toBe(b.x)
+      expect(a.y).toBe(b.y)
+    }
+  })
+
   it('old 4-argument call signature (no categories/clusters) still works', () => {
     const items = getVisibleBoardItems(DEFAULT_BOARD, [], [{ id: 'c1' }], [{ id: 'n1' }])
     expect(items).toHaveLength(2)

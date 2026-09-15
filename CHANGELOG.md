@@ -14,6 +14,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 - Clicking an item inside a cluster on the Main board could make a *different* item jump
   on top of it. A member's position in the cluster's grid no longer shifts depending on
   which of its siblings have already been clicked/dragged.
+- Snap-linking two items where one had never been individually touched could leave them
+  visually "hanging apart" instead of snapped together, could leave other cluster members
+  unable to move along with a dragged group, and could make the unlink "×" vanish later.
+  Links now always start with two fully real, stable items.
+- Dragging a linked group of items into a cluster could reflow and shift every *other*,
+  untouched item already in that cluster.
 
 ## [0.4.0] - 2026-09-14
 

@@ -518,7 +518,30 @@ function BoardView(): JSX.Element {
           }
 
           if (snap && selectedBoardId) {
-            linkItemsAction(selectedBoardId, state.id, snap.targetId)
+            // The snap target can be a still-virtual item (never
+            // individually touched) — findSnapTarget's candidates are
+            // every *visible* item, virtual ones included. A BoardLink
+            // storing that virtual id directly would be fragile in two
+            // ways: until the target is ever touched, its rendered
+            // position comes from the cluster's own auto-grid slot, not
+            // from "stay next to what it's linked to" — so the link
+            // visibly stretches to wherever the grid happens to place it,
+            // not a snapped-together pair. And the moment that item IS
+            // later dragged on its own, it materializes under a brand-new
+            // real id, silently orphaning the old link (it can no longer
+            // resolve either endpoint, so the line and its unlink control
+            // both just vanish). Materializing the target right here, at
+            // its current position, before linking closes both gaps: a
+            // freshly created link always has two real, stable endpoints.
+            let targetId = snap.targetId
+            if (targetId.startsWith('virtual:')) {
+              const targetItem = items.find((i) => i.id === targetId)
+              if (targetItem) {
+                const realId = addItemToBoard(selectedBoardId, targetItem.refType, targetItem.refId, targetItem.x, targetItem.y)
+                if (realId) targetId = realId
+              }
+            }
+            linkItemsAction(selectedBoardId, state.id, targetId)
           }
 
           for (const link of links) {

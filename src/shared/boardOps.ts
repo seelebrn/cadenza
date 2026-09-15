@@ -276,6 +276,12 @@ export function computeGridPosition(index: number, originY: number = GRID_ORIGIN
 
 const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
+// Breathing room left around a child cluster's box when a destination is
+// grown to accommodate it (computeAccommodatingSize) — shared by every
+// caller (nesting a dropped cluster, growing an ancestor chain to fit a
+// resized descendant) so a cluster never ends up snug right against its
+// parent's own edge.
+export const CLUSTER_NEST_PADDING = 20
 // A "compact" leaf cluster (see computeCategoryLayout's own `compact` option)
 // reserves no space for member cards at all, even if the category holds
 // codes/notes — meant for a board that only ever shows cluster frames
@@ -914,6 +920,159 @@ export function createClusterForCategory(
     createdAt: new Date().toISOString()
   }
   return { data: { ...data, boardClusters: [...data.boardClusters, cluster] }, clusterId: cluster.id }
+}
+
+/**
+ * Gives every sibling of `categoryId` (same parentCategoryId — the whole
+ * root-level group, if it has none) that doesn't yet have an explicit
+ * BoardCluster shape on this board a real, persisted one, frozen at its
+ * *current* computed position.
+ *
+ * getVisibleBoardClusters' auto-layout packs every still-virtual category
+ * into a masonry grid — each column tracks its own running bottom edge, so
+ * a category's position depends on the sizes of every sibling processed
+ * before it in the same pass. That makes it inherently unstable across
+ * renders: resizing or moving *any one* sibling changes what the packing
+ * algorithm hands back for the *others* on the next render, even though
+ * nothing about them was touched — reported as "resizing/moving one
+ * cluster, a different, unrelated cluster jumps and lands overlapping a
+ * third one." Once a category has an explicit shape, by contrast, it's
+ * pinned unconditionally (computeCategoryLayout always trusts an override
+ * over recomputing) and never affected by anything else again.
+ *
+ * The fix: the moment any one cluster in a packing group is about to be
+ * individually resized or moved (i.e. is about to become explicit, if it
+ * isn't already), snapshot the *whole* group into explicit shapes at once,
+ * at wherever the auto-layout currently has them — so every member of the
+ * group is immediately and permanently immune to future reflow, not just
+ * the one actually being dragged.
+ */
+export function materializeSiblingClusters(data: ProjectData, boardId: string, categoryId: string): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  const category = data.categories.find((c) => c.id === categoryId)
+  if (!board || !category) return data
+
+  const siblings = data.categories.filter(
+    (c) => c.id !== categoryId && c.parentCategoryId === category.parentCategoryId
+  )
+  if (siblings.length === 0) return data
+
+  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
+  const explicitCategoryIds = new Set(explicitClusters.map((c) => c.categoryId))
+  const visibleByCategoryId = new Map(
+    getVisibleBoardClusters(board, explicitClusters, data.categories).map((c) => [c.categoryId, c])
+  )
+
+  let next = data
+  for (const sibling of siblings) {
+    if (explicitCategoryIds.has(sibling.id)) continue
+    const computed = visibleByCategoryId.get(sibling.id)
+    if (!computed) continue
+    next = createClusterForCategory(next, {
+      boardId,
+      categoryId: sibling.id,
+      x: computed.x,
+      y: computed.y,
+      width: computed.width,
+      height: computed.height
+    }).data
+  }
+  return next
+}
+
+/**
+ * Grows (materializing, if still virtual) a cluster's own box just enough
+ * to fit a near-square grid of its *current* own codes/notes, if it isn't
+ * already big enough — used after a board drag adds a new member to an
+ * already-placed cluster, so the new member's card doesn't just render
+ * outside a box that was sized for a smaller membership. Never shrinks an
+ * already-roomier box back down.
+ */
+export function growClusterToFitOwnMembers(data: ProjectData, boardId: string, categoryId: string): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  const category = data.categories.find((c) => c.id === categoryId)
+  if (!board || !category) return data
+
+  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
+  const current = getVisibleBoardClusters(board, explicitClusters, data.categories).find(
+    (c) => c.categoryId === categoryId
+  )
+  if (!current) return data
+
+  const needed = computeOwnClusterSize(category)
+  const width = Math.max(current.width, needed.width)
+  const height = Math.max(current.height, needed.height)
+  if (width === current.width && height === current.height) return data
+
+  let cluster = explicitClusters.find((c) => c.categoryId === categoryId)
+  let next = data
+  if (!cluster) {
+    const created = createClusterForCategory(next, {
+      boardId,
+      categoryId,
+      x: current.x,
+      y: current.y,
+      width: current.width,
+      height: current.height
+    })
+    next = created.data
+    cluster = next.boardClusters.find((c) => c.id === created.clusterId)
+    if (!cluster) return next
+  }
+  return resizeCluster(next, cluster.id, width, height)
+}
+
+/**
+ * Walks up from `categoryId`'s own cluster, growing (and materializing, if
+ * still virtual) each ancestor's box just enough to still contain it — and
+ * so on transitively, since growing a parent can itself require growing
+ * *its* own parent. Stops as soon as an ancestor already has enough room
+ * (or there isn't one). Used after any operation that can grow a nested
+ * cluster's own size (a manual resize, or growClusterToFitOwnMembers
+ * above), so a superordinate cluster actually keeps containing what's
+ * nested in it instead of leaving it to poke out past a frozen parent box.
+ */
+export function growAncestorClustersToFit(data: ProjectData, boardId: string, categoryId: string): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  if (!board) return data
+
+  let next = data
+  let childCategoryId: string | null = categoryId
+
+  while (childCategoryId) {
+    const childCategory = next.categories.find((c) => c.id === childCategoryId)
+    const parentCategoryId = childCategory?.parentCategoryId ?? null
+    if (!parentCategoryId) break
+
+    const explicitClusters = next.boardClusters.filter((c) => c.boardId === boardId)
+    const visible = getVisibleBoardClusters(board, explicitClusters, next.categories)
+    const childBox = visible.find((c) => c.categoryId === childCategoryId)
+    const parentBox = visible.find((c) => c.categoryId === parentCategoryId)
+    if (!childBox || !parentBox) break
+
+    const size = computeAccommodatingSize(parentBox, childBox, CLUSTER_NEST_PADDING)
+    if (size.width === parentBox.width && size.height === parentBox.height) break
+
+    let parentCluster = explicitClusters.find((c) => c.categoryId === parentCategoryId)
+    if (!parentCluster) {
+      const created = createClusterForCategory(next, {
+        boardId,
+        categoryId: parentCategoryId,
+        x: parentBox.x,
+        y: parentBox.y,
+        width: parentBox.width,
+        height: parentBox.height
+      })
+      next = created.data
+      parentCluster = next.boardClusters.find((c) => c.id === created.clusterId)
+      if (!parentCluster) break
+    }
+    next = resizeCluster(next, parentCluster.id, size.width, size.height)
+
+    childCategoryId = parentCategoryId
+  }
+
+  return next
 }
 
 /** Creates a brand-new category and places it as a cluster on a board in one

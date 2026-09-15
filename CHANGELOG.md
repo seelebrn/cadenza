@@ -6,6 +6,15 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Fixed
+- Dropping an item into an already-placed cluster that was too small let existing member
+  cards spill outside its box, instead of the cluster growing to fit.
+- Resizing a nested cluster left its superordinate cluster frozen at its old size, even once
+  the resized cluster no longer fit inside it. Superordinate clusters now grow to keep
+  containing what's nested in them.
+- Resizing or moving one cluster could shove a completely different, untouched cluster into
+  overlapping another one. Clusters now stay put unless you move or resize them directly.
+
 ## [0.4.2] - 2026-09-15
 
 ### Fixed

@@ -2335,3 +2335,64 @@ keeping only the target; drops from every category when the target is null; no-o
 sole-member; refType isolation — a code and a note sharing an id in different categories don't
 cross-contaminate). Full suite green (369/369), typecheck clean, production build clean,
 boot-tested.
+
+### Cluster auto-layout: a materialize-first-touch fix for reflow, plus ancestor/self growth (2026-09-15)
+
+Three more reports at once: (1) dropping an item into an already-placed cluster that's too
+small lets its existing member cards spill outside the box, instead of the box growing to fit;
+(2) resizing a nested cluster leaves its superordinate frozen at its old size, even once the
+child no longer fits inside it; (3) resizing (or moving) one cluster can shove a completely
+different, untouched cluster into overlapping a third one. Confirmed directly against the
+user's own repro for (3): three clusters nested inside a superordinate, one on the first row,
+two on the row below — resizing the first one moved the third one on top of the second.
+
+**Root cause of (3), the deep one:** `computeCategoryLayout`'s auto-layout for any category
+without an explicit `BoardCluster` shape packs it via a masonry algorithm — each column tracks
+its own running bottom edge, and every category goes into whichever column is currently
+shortest. That makes a still-virtual category's computed position depend on the sizes of every
+sibling processed before it *in that same pass* — so between two renders, pinning (or just
+resizing) one sibling changes what the algorithm hands back for the others, even though nothing
+about them was touched. Reproduced directly as a new test in `getVisibleBoardClusters`: pinning
+one of three root categories to a much taller height moves a third, completely untouched
+sibling's own computed position, purely as a side effect. This is the exact same root-cause
+*category* (a live-recomputed auto-layout reacting to unrelated state changes) as two earlier
+fixes this session (item cluster-slots, item cluster-membership) — this time at the cluster
+level, and for children of *any* parent (root-level or nested), since the masonry algorithm is
+identical at every level.
+
+Fixed with the same strategy as those earlier fixes, generalized: the moment any cluster in a
+packing group is about to be individually resized or moved — about to become explicit, if it
+isn't already — snapshot the *whole* group (every sibling sharing its `parentCategoryId`, root
+or nested) into real, pinned shapes at wherever the auto-layout currently has them. New pure
+function `materializeSiblingClusters` (boardOps.ts) does this; once pinned, `computeCategoryLayout`
+always trusts an explicit shape over recomputing it, so every member of a stabilized group
+becomes permanently immune to future reflow from anything else in the group.
+
+**Fixes for (1) and (2):** two more new pure functions. `growClusterToFitOwnMembers` grows
+(materializing, if still virtual) a cluster's own box to fit a grid of its current membership,
+if it isn't already big enough — called after a board drag assigns a new member into a cluster.
+`growAncestorClustersToFit` walks up a cluster's parent chain, growing (and materializing) each
+ancestor just enough to keep containing it, transitively — called after any operation that can
+grow a nested cluster's own size (a manual resize, or growClusterToFitOwnMembers itself).
+Wired `materializeSiblingClusters` + `growAncestorClustersToFit` into both the cluster-resize
+and cluster-move commit handlers (replacing the old resize handler's bare `resizeCluster` call,
+and the move handler's old immediate-parent-only accommodate logic — `growAncestorClustersToFit`
+propagates further up too); wired `growClusterToFitOwnMembers` + `growAncestorClustersToFit`
+into the item-drag cluster-reassignment commit.
+
+One padding-convention subtlety surfaced writing the tests: `computeAccommodatingSize` (already
+used for the "cluster dropped into another" case) assumes a child's position could be anywhere
+relative to its destination, so it pads both edges; `computeCategoryLayout`'s own nested-child
+placement already reserves padding on one side via a fixed inner offset. Reusing
+`computeAccommodatingSize` for `growAncestorClustersToFit` means a freshly-computed, already
+"just barely fits" parent/child pair isn't a byte-exact no-op — it'll grow by one extra padding
+amount the first time. Harmless (marginally roomier than the bare minimum, only on first
+growth) but worth noting for anyone touching this code later; two of the new tests had to be
+adjusted to use a deliberately generous fixture rather than relying on that exact match.
+
+Verified: 11 new unit tests across `materializeSiblingClusters`, `growClusterToFitOwnMembers`,
+and `growAncestorClustersToFit` (including the reproduced reflow-instability documentation
+test), plus 1 in `getVisibleBoardClusters` itself. Full suite green (381/381), typecheck clean,
+production build clean, boot-tested. As with other board-interaction fixes this session, this
+environment can't drive the actual mouse gestures — worth the user confirming against their own
+repro (the three-clusters-in-a-superordinate case) once it's live.

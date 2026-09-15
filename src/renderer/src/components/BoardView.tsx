@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import {
   boxExitPoint,
+  CLUSTER_NEST_PADDING,
   computeAccommodatingSize,
   computeClusterLinkPath,
   computeGridPosition,
@@ -37,9 +38,6 @@ const CARD_WIDTH = MEMBER_CARD_WIDTH
 const CARD_HEIGHT = MEMBER_CARD_HEIGHT
 const DEFAULT_CLUSTER_WIDTH = 280
 const DEFAULT_CLUSTER_HEIGHT = 200
-// Breathing room left around a cluster dropped into another when the
-// destination grows to accommodate it.
-const CLUSTER_NEST_PADDING = 20
 const CANVAS_WIDTH = 2400
 const CANVAS_HEIGHT = 1600
 const PALETTE = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444', '#14b8a6', '#eab308', '#ec4899']
@@ -145,6 +143,9 @@ function BoardView(): JSX.Element {
   const moveItem = useProjectStore((s) => s.moveItem)
   const moveCluster = useProjectStore((s) => s.moveCluster)
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
+  const materializeSiblingClusters = useProjectStore((s) => s.materializeSiblingClusters)
+  const growClusterToFitOwnMembers = useProjectStore((s) => s.growClusterToFitOwnMembers)
+  const growAncestorClustersToFit = useProjectStore((s) => s.growAncestorClustersToFit)
   const assignItemToCluster = useProjectStore((s) => s.assignItemToCluster)
   const reconcileSoleCategoryMembership = useProjectStore((s) => s.reconcileSoleCategoryMembership)
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
@@ -600,6 +601,16 @@ function BoardView(): JSX.Element {
                 assignItemToCluster(materializeCluster(reassignment.newCluster), ref.refType, ref.refId)
               }
             }
+            // A cluster's own box used to stay frozen at whatever size it
+            // already had, even once a newly-added member's card no
+            // longer fit inside it — reported as "existing items in the
+            // cluster spill out of it" when an item is dropped into an
+            // already-placed cluster. Also keep the whole ancestor chain
+            // (if nested) still containing it after that growth.
+            if (reassignment.newCluster && selectedBoardId) {
+              growClusterToFitOwnMembers(selectedBoardId, reassignment.newCluster.categoryId)
+              growAncestorClustersToFit(selectedBoardId, reassignment.newCluster.categoryId)
+            }
           }
 
           if (snap && selectedBoardId && targetId) {
@@ -631,6 +642,13 @@ function BoardView(): JSX.Element {
           const snap = computeClusterMoveSnap(state, dx, dy, clusters)
           const finalX = state.startX + snap.dx
           const finalY = state.startY + snap.dy
+          // Moving this cluster is what's about to materialize it (if it
+          // wasn't already) — the first-touch moment every other still-
+          // virtual sibling in its current packing group needs to be
+          // pinned too, or a later resize/move of any one of them could
+          // still reflow the others. See materializeSiblingClusters' own
+          // comment.
+          if (selectedBoardId) materializeSiblingClusters(selectedBoardId, state.categoryId)
           moveCluster(state.id, finalX, finalY)
           for (const clusterId of state.groupClusterIds) {
             if (clusterId === state.id) continue
@@ -660,21 +678,29 @@ function BoardView(): JSX.Element {
             if (newParentId !== currentParentId) {
               reparentCategory(state.categoryId, newParentId)
               // Newly nested (not just re-confirming an existing parent) —
-              // grow the destination to actually fit the cluster just
-              // dropped into it, matching the live ghost preview shown
-              // during the drag.
-              if (target) {
-                const childRect = { x: finalX, y: finalY, width: state.startWidth, height: state.startHeight }
-                const size = computeAccommodatingSize(target, childRect, CLUSTER_NEST_PADDING)
-                if (size.width !== target.width || size.height !== target.height) {
-                  resizeCluster(materializeCluster(target), size.width, size.height)
-                }
+              // pin whatever's already in the destination's own children
+              // group too (same first-touch reasoning as above, now for
+              // the group this cluster just joined), then grow the whole
+              // ancestor chain — not just the immediate new parent — to
+              // actually fit the cluster just dropped in, matching the
+              // live ghost preview shown during the drag.
+              if (target && selectedBoardId) {
+                materializeSiblingClusters(selectedBoardId, state.categoryId)
+                growAncestorClustersToFit(selectedBoardId, state.categoryId)
               }
             }
           }
         } else {
           const width = Math.max(MIN_CLUSTER_WIDTH, state.startWidth + dx)
           const height = Math.max(MIN_CLUSTER_HEIGHT, state.startHeight + dy)
+          // Resizing is what's about to materialize this cluster (if it
+          // wasn't already) — pin every still-virtual sibling in its
+          // packing group first, so this resize (or any later one) can
+          // never reflow them. See materializeSiblingClusters' own
+          // comment — this is exactly the bug behind "resizing one
+          // cluster moved a different, unrelated cluster on top of a
+          // third one."
+          if (selectedBoardId) materializeSiblingClusters(selectedBoardId, state.categoryId)
           resizeCluster(state.id, width, height)
 
           // Resizing to enclose other existing clusters "draws a box
@@ -694,6 +720,13 @@ function BoardView(): JSX.Element {
               reparentCategory(enclosed.categoryId, state.categoryId)
             }
           }
+
+          // A superordinate cluster used to stay frozen at whatever size
+          // it already had, even once this resize made one of its own
+          // nested children no longer fit inside it — reported as "on
+          // resizing a cluster, the superordinate cluster size is fixed."
+          // Walks the whole ancestor chain, not just the immediate parent.
+          if (selectedBoardId) growAncestorClustersToFit(selectedBoardId, state.categoryId)
         }
       })
       setDragState(null)

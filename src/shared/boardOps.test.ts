@@ -35,7 +35,10 @@ import {
   getVisibleBoardClusters,
   getVisibleBoardItems,
   getVisibleClusterLinks,
+  growAncestorClustersToFit,
+  growClusterToFitOwnMembers,
   linkItems,
+  materializeSiblingClusters,
   moveCluster,
   moveItem,
   removeItemFromBoard,
@@ -603,6 +606,252 @@ describe('getVisibleBoardClusters', () => {
   it('a single root cluster still gets one column (no pointless empty columns)', () => {
     const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], [makeCategory('solo')])
     expect(clusters).toHaveLength(1)
+  })
+
+  // Documents the root cause behind materializeSiblingClusters below:
+  // pinning ONE root category's shape changes where an entirely untouched
+  // SIBLING's own auto-computed position lands, purely because the
+  // masonry-packing algorithm's running column-bottom bookkeeping depends
+  // on every category processed before it in the same pass. Reported as
+  // "resizing/moving one cluster, a different, unrelated cluster jumps and
+  // lands overlapping a third one." Needs 3 roots packed into 2 columns
+  // (not 2 roots, which would each just get their own column and never
+  // interact) so growing the first one changes which column is shortest
+  // by the time the third one is placed.
+  it('pinning one root category shape moves an untouched sibling\'s own auto-computed position', () => {
+    const a = makeCategory('a')
+    const b = makeCategory('b')
+    const c = makeCategory('c')
+    const before = getVisibleBoardClusters(DEFAULT_BOARD, [], [a, b, c])
+    const aBefore = before.find((cl) => cl.categoryId === 'a')!
+    const cBefore = before.find((cl) => cl.categoryId === 'c')!
+
+    // "a" gets resized/pinned much taller than the auto-layout ever had it
+    // — same shape "materialize on first touch" would create, just with a
+    // different (bigger) height, like an actual user resize.
+    const pinnedA: BoardCluster = { id: 'realA', boardId: DEFAULT_BOARD.id, categoryId: 'a', x: aBefore.x, y: aBefore.y, width: aBefore.width, height: 900, createdAt: '0' }
+    const after = getVisibleBoardClusters(DEFAULT_BOARD, [pinnedA], [a, b, c])
+    const cAfter = after.find((cl) => cl.categoryId === 'c')!
+
+    expect(cAfter).not.toEqual(cBefore)
+  })
+})
+
+describe('materializeSiblingClusters', () => {
+  it('gives every still-virtual sibling of categoryId a real, pinned shape at its current computed position', () => {
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [makeCategory('A'), makeCategory('B'), makeCategory('C')]
+    })
+    const before = getVisibleBoardClusters(DEFAULT_BOARD, [], data.categories)
+    const bBefore = before.find((c) => c.categoryId === 'B')!
+    const cBefore = before.find((c) => c.categoryId === 'C')!
+
+    const next = materializeSiblingClusters(data, 'board1', 'A')
+    const explicitB = next.boardClusters.find((c) => c.categoryId === 'B')!
+    const explicitC = next.boardClusters.find((c) => c.categoryId === 'C')!
+    expect(explicitB).toBeDefined()
+    expect(explicitC).toBeDefined()
+    expect({ x: explicitB.x, y: explicitB.y, width: explicitB.width, height: explicitB.height }).toEqual({
+      x: bBefore.x,
+      y: bBefore.y,
+      width: bBefore.width,
+      height: bBefore.height
+    })
+    expect({ x: explicitC.x, y: explicitC.y, width: explicitC.width, height: explicitC.height }).toEqual({
+      x: cBefore.x,
+      y: cBefore.y,
+      width: cBefore.width,
+      height: cBefore.height
+    })
+    // categoryId itself is NOT the caller's job here — this function only
+    // freezes the *other* siblings.
+    expect(next.boardClusters.find((c) => c.categoryId === 'A')).toBeUndefined()
+  })
+
+  it('a subsequent resize of a materialized sibling no longer affects any of the others', () => {
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [makeCategory('A'), makeCategory('B'), makeCategory('C')]
+    })
+    const stabilized = materializeSiblingClusters(data, 'board1', 'A')
+    const bBefore = getVisibleBoardClusters(DEFAULT_BOARD, stabilized.boardClusters, stabilized.categories).find(
+      (c) => c.categoryId === 'B'
+    )!
+
+    // Now A itself gets materialized (as the caller would) and resized much larger.
+    const aBox = getVisibleBoardClusters(DEFAULT_BOARD, stabilized.boardClusters, stabilized.categories).find(
+      (c) => c.categoryId === 'A'
+    )!
+    const withA = createClusterForCategory(stabilized, {
+      boardId: 'board1',
+      categoryId: 'A',
+      x: aBox.x,
+      y: aBox.y,
+      width: aBox.width,
+      height: aBox.height
+    }).data
+    const aCluster = withA.boardClusters.find((c) => c.categoryId === 'A')!
+    const resized = resizeCluster(withA, aCluster.id, aBox.width, 900)
+
+    const bAfter = getVisibleBoardClusters(DEFAULT_BOARD, resized.boardClusters, resized.categories).find(
+      (c) => c.categoryId === 'B'
+    )!
+    expect(bAfter).toEqual(bBefore)
+  })
+
+  it('is a no-op when the category has no siblings', () => {
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [makeCategory('A')]
+    })
+    const next = materializeSiblingClusters(data, 'board1', 'A')
+    expect(next.boardClusters).toEqual([])
+  })
+
+  it('leaves an already-explicit sibling untouched', () => {
+    const already: BoardCluster = { id: 'existingB', boardId: 'board1', categoryId: 'B', x: 5, y: 5, width: 10, height: 10, createdAt: '0' }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [makeCategory('A'), makeCategory('B')],
+      boardClusters: [already]
+    })
+    const next = materializeSiblingClusters(data, 'board1', 'A')
+    expect(next.boardClusters).toEqual([already])
+  })
+})
+
+describe('growClusterToFitOwnMembers', () => {
+  it('grows an already-explicit cluster that is too small for its current membership', () => {
+    const category = makeCategory('A', { codeIds: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'] })
+    const tooSmall: BoardCluster = { id: 'realA', boardId: 'board1', categoryId: 'A', x: 0, y: 0, width: 280, height: 200, createdAt: '0' }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [category],
+      boardClusters: [tooSmall]
+    })
+    const next = growClusterToFitOwnMembers(data, 'board1', 'A')
+    const grown = next.boardClusters.find((c) => c.categoryId === 'A')!
+    expect(grown.height).toBeGreaterThan(tooSmall.height)
+  })
+
+  it('is a no-op for a still-virtual cluster — its live-computed size already matches its own membership', () => {
+    // A virtual cluster's size is computeOwnClusterSize(category) on every
+    // render, same formula this function's own "needed" size uses — so by
+    // construction it can never be behind its own membership; only an
+    // EXPLICIT (already frozen-size) cluster whose membership grew after
+    // it was pinned can actually need growing.
+    const category = makeCategory('A', { codeIds: Array.from({ length: 20 }, (_, i) => `c${i}`) })
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [category]
+    })
+    const next = growClusterToFitOwnMembers(data, 'board1', 'A')
+    expect(next).toBe(data)
+  })
+
+  it('never shrinks an already-roomy box', () => {
+    const category = makeCategory('A', { codeIds: ['c1'] })
+    const roomy: BoardCluster = { id: 'realA', boardId: 'board1', categoryId: 'A', x: 0, y: 0, width: 900, height: 900, createdAt: '0' }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [category],
+      boardClusters: [roomy]
+    })
+    const next = growClusterToFitOwnMembers(data, 'board1', 'A')
+    expect(next).toBe(data) // no-op: same reference, not just same values
+  })
+})
+
+describe('growAncestorClustersToFit', () => {
+  it("grows a parent whose child no longer fits inside it", () => {
+    const parent = makeCategory('A')
+    const child = makeCategory('B', { parentCategoryId: 'A' })
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, child]
+    })
+    const before = getVisibleBoardClusters(DEFAULT_BOARD, [], data.categories)
+    const parentBefore = before.find((c) => c.categoryId === 'A')!
+    const childBefore = before.find((c) => c.categoryId === 'B')!
+
+    // Materialize the child, resized much larger — as a manual resize would.
+    const withChild = createClusterForCategory(data, {
+      boardId: 'board1',
+      categoryId: 'B',
+      x: childBefore.x,
+      y: childBefore.y,
+      width: childBefore.width,
+      height: childBefore.height
+    }).data
+    const childCluster = withChild.boardClusters.find((c) => c.categoryId === 'B')!
+    const resized = resizeCluster(withChild, childCluster.id, 900, 900)
+
+    const next = growAncestorClustersToFit(resized, 'board1', 'B')
+    const grownParent = next.boardClusters.find((c) => c.categoryId === 'A')!
+    expect(grownParent).toBeDefined()
+    expect(grownParent.width).toBeGreaterThan(parentBefore.width)
+    expect(
+      rectContains(grownParent, next.boardClusters.find((c) => c.categoryId === 'B')!)
+    ).toBe(true)
+  })
+
+  it('grows transitively up a three-level chain', () => {
+    const root = makeCategory('A')
+    const mid = makeCategory('B', { parentCategoryId: 'A' })
+    const leaf = makeCategory('C', { parentCategoryId: 'B' })
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [root, mid, leaf]
+    })
+    const before = getVisibleBoardClusters(DEFAULT_BOARD, [], data.categories)
+    const leafBefore = before.find((c) => c.categoryId === 'C')!
+    const rootBefore = before.find((c) => c.categoryId === 'A')!
+
+    const withLeaf = createClusterForCategory(data, {
+      boardId: 'board1',
+      categoryId: 'C',
+      x: leafBefore.x,
+      y: leafBefore.y,
+      width: leafBefore.width,
+      height: leafBefore.height
+    }).data
+    const leafCluster = withLeaf.boardClusters.find((c) => c.categoryId === 'C')!
+    const resized = resizeCluster(withLeaf, leafCluster.id, 700, 700)
+
+    const next = growAncestorClustersToFit(resized, 'board1', 'C')
+    const grownRoot = next.boardClusters.find((c) => c.categoryId === 'A')!
+    expect(grownRoot).toBeDefined()
+    expect(grownRoot.width).toBeGreaterThan(rootBefore.width)
+  })
+
+  it('is a no-op for a root category with no parent', () => {
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [makeCategory('A')]
+    })
+    const next = growAncestorClustersToFit(data, 'board1', 'A')
+    expect(next).toBe(data)
+  })
+
+  it('is a no-op when the parent already has (generously) enough room', () => {
+    const parent = makeCategory('A')
+    const child = makeCategory('B', { parentCategoryId: 'A' })
+    // Deliberately explicit and much bigger than anything a child could
+    // need, rather than relying on a fresh computeCategoryLayout's own
+    // tightly-fitted size — computeAccommodatingSize's padding convention
+    // doesn't byte-for-byte match computeCategoryLayout's own nested-child
+    // sizing (see growAncestorClustersToFit's own comment), so a freshly
+    // "just barely fits" pair isn't a reliable no-op fixture; a generously
+    // oversized parent unambiguously is.
+    const roomyParent: BoardCluster = { id: 'realA', boardId: 'board1', categoryId: 'A', x: 0, y: 0, width: 2000, height: 2000, createdAt: '0' }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, child],
+      boardClusters: [roomyParent]
+    })
+    const next = growAncestorClustersToFit(data, 'board1', 'B')
+    expect(next).toBe(data)
   })
 })
 

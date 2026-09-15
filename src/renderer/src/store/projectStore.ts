@@ -67,7 +67,10 @@ import {
   deleteBoard as deleteBoardOp,
   deleteCluster as deleteClusterOp,
   getDefaultBoardId,
+  growAncestorClustersToFit as growAncestorClustersToFitOp,
+  growClusterToFitOwnMembers as growClusterToFitOwnMembersOp,
   linkItems as linkItemsOp,
+  materializeSiblingClusters as materializeSiblingClustersOp,
   moveCluster as moveClusterOp,
   moveItem as moveItemOp,
   removeItemFromBoard as removeItemFromBoardOp,
@@ -258,6 +261,21 @@ interface ProjectState {
   resizeCluster: (clusterId: string, width: number, height: number) => void
   /** Removes the cluster's shape from this board only — the category (and its membership) survives. */
   deleteCluster: (clusterId: string) => void
+  /** Gives every still-virtual sibling of categoryId (same parent, or the
+   * whole root-level group if it has none) a real, pinned shape at its
+   * current auto-computed position — call before resizing/moving a
+   * cluster for the first time, so the masonry auto-layout's reflow can
+   * never again shove an untouched sibling into overlapping something
+   * else as a side effect. See materializeSiblingClusters' own comment. */
+  materializeSiblingClusters: (boardId: string, categoryId: string) => void
+  /** Grows (materializing, if still virtual) categoryId's own box to fit
+   * its current membership, if it isn't already big enough — call after a
+   * board drag adds a new member to an already-placed cluster. */
+  growClusterToFitOwnMembers: (boardId: string, categoryId: string) => void
+  /** Walks up categoryId's parent chain, growing (and materializing, if
+   * still virtual) each ancestor just enough to keep containing it —
+   * call after any operation that can grow a nested cluster's own size. */
+  growAncestorClustersToFit: (boardId: string, categoryId: string) => void
   assignItemToCluster: (clusterId: string, refType: BoardItem['refType'], refId: string) => void
   unassignItemFromCluster: (clusterId: string, refType: BoardItem['refType'], refId: string) => void
   /** Removes a ref from every category EXCEPT targetCategoryId (or every
@@ -809,6 +827,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().updateProject((data) => resizeClusterOp(data, clusterId, width, height)),
 
   deleteCluster: (clusterId) => get().updateProject((data) => deleteClusterOp(data, clusterId)),
+
+  materializeSiblingClusters: (boardId, categoryId) =>
+    get().updateProject((data) => materializeSiblingClustersOp(data, boardId, categoryId)),
+
+  growClusterToFitOwnMembers: (boardId, categoryId) =>
+    get().updateProject((data) => growClusterToFitOwnMembersOp(data, boardId, categoryId)),
+
+  growAncestorClustersToFit: (boardId, categoryId) =>
+    get().updateProject((data) => growAncestorClustersToFitOp(data, boardId, categoryId)),
 
   assignItemToCluster: (clusterId, refType, refId) =>
     get().updateProject((data) => assignItemToClusterOp(data, clusterId, refType, refId)),

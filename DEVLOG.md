@@ -2050,3 +2050,37 @@ button) from the plain, non-destructive removal confirm used everywhere else (sl
 
 Verified: typecheck clean, full suite green (359/359 — UI-only), production build clean,
 boot-tested.
+
+### Picking up an item on the default board could snap-link it before any drag (2026-09-15)
+
+User report: clicking an item card on the Main board to start moving it made the card
+immediately shift to the side — still draggable afterward, but "doesn't feel well." Only on
+the default board's auto-packed grid layout, and never once an item had already been dragged
+elsewhere. The user's own diagnosis (snap distance, items already close together at rest) was
+exactly right.
+
+`findSnapTarget` (the drag-to-link mechanic) was evaluated in both the live drag preview and
+the final `handleMouseUp` commit using the *raw* delta from mousedown with no minimum — at the
+very start of a drag, that delta is `{0, 0}`, so if any neighboring card already sat within
+`SNAP_DISTANCE` (70px) of the grabbed one's resting position (routine in the default board's
+tightly packed grid, per `computeGridPosition`), the snap fired immediately against the
+original position, before the mouse had moved at all. Worse than a visual glitch: since
+`handleMouseUp` ran the identical check, a plain click with zero mouse movement could commit
+that snap for real — moving the item to the snapped position *and* creating a permanent
+`BoardLink` to the neighbor — from what looked like an innocent click. This was actually
+already flagged, if obliquely, in a comment on `CodeInfoModal` explaining why board cards use
+right-click instead of double-click for their info window ("no minimum drag distance").
+
+Added `MIN_DRAG_DISTANCE_FOR_SNAP = 4` (canvas pixels) and gated both the `displayPositions`
+live-preview snap check and `handleMouseUp`'s commit-time one on having moved at least that
+far since mousedown — a plain click is now a true no-op for snapping in both places (kept in
+sync, since this codebase already treats "what the preview showed is exactly what commits" as
+a hard invariant for drag gestures). Updated the now-slightly-stale `CodeInfoModal` comment
+to reflect the small deadzone rather than claiming there's still no minimum at all.
+
+Verified: typecheck clean, full suite green (359/359 — UI-interaction fix, not unit-testable
+per this codebase's existing vitest scope), production build clean, boot-tested. Could not
+drive the actual drag gesture from this environment, so — same caveat as the earlier freeze
+fix — this is a well-evidenced diagnosis (the code matched the reported symptom exactly, down
+to "only on the default board" and "not once already dragged"), not a confirmed fix; worth the
+user checking it's actually gone.

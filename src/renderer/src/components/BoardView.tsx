@@ -52,6 +52,17 @@ const FIT_VIEW_PADDING = 60
 // already-linked pair must be dragged apart to sever automatically.
 const SNAP_DISTANCE = 70
 const UNLINK_DISTANCE = 200
+// findSnapTarget itself has no minimum drag distance — without this, an
+// item picked up while already within SNAP_DISTANCE of a neighbor (common
+// in the default board's auto-packed grid layout) snaps to it the instant
+// it's grabbed, before the mouse has moved at all: it visibly jumps on a
+// plain click, and — since handleMouseUp runs the exact same check against
+// the final (here, zero) delta — a click with no drag at all could commit
+// that snap as a real position change and a new link the user never meant
+// to create. Gating both the live preview and the commit on having moved
+// at least this many canvas pixels since mousedown keeps snapping for an
+// actual drag gesture while treating a plain click as a no-op.
+const MIN_DRAG_DISTANCE_FOR_SNAP = 4
 // Smart-guide accent — deliberately not any cluster's own color (which
 // already means something else, e.g. a nest-target highlight) and not the
 // enclosed-by-resize blue, so an alignment/distribution guide always reads
@@ -477,7 +488,10 @@ function BoardView(): JSX.Element {
           const rawX = grabbedStart.x + dx
           const rawY = grabbedStart.y + dy
           const candidates = items.filter((i) => !state.groupItemIds.includes(i.id))
-          const snap = findSnapTarget(candidates, state.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+          const snap =
+            Math.hypot(dx, dy) >= MIN_DRAG_DISTANCE_FOR_SNAP
+              ? findSnapTarget(candidates, state.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+              : null
           const adjustX = snap ? snap.snappedX - rawX : 0
           const adjustY = snap ? snap.snappedY - rawY : 0
 
@@ -632,7 +646,7 @@ function BoardView(): JSX.Element {
       let adjustX = 0
       let adjustY = 0
       let isGrabbedSnapping = false
-      if (grabbedStart) {
+      if (grabbedStart && Math.hypot(liveDelta.dx, liveDelta.dy) >= MIN_DRAG_DISTANCE_FOR_SNAP) {
         const rawX = grabbedStart.x + liveDelta.dx
         const rawY = grabbedStart.y + liveDelta.dy
         const candidates = items.filter((i) => !dragState.groupItemIds.includes(i.id))

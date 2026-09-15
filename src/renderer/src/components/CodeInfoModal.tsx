@@ -8,8 +8,10 @@ import { getCodeUsageDetail, CODE_USAGE_CONTEXT_WORDS } from '@shared/retrieval'
  * or *right*-click it on the board (see BoardItemCard.tsx: a board
  * double-click is ambiguous with two independent single clicks close
  * together in time, since a card's own mousedown always starts a
- * drag-and-possibly-snap gesture with no minimum drag distance, so the
- * first click of an attempted double-click can itself complete a snap-link
+ * drag-and-possibly-snap gesture; even with a few pixels of deadzone
+ * before a snap can trigger (see MIN_DRAG_DISTANCE_FOR_SNAP in
+ * BoardView.tsx), the first click of an attempted double-click can easily
+ * carry enough incidental mouse movement to itself complete a snap-link
  * to a neighboring card before the second click arrives) — to see its
  * name, how many times it's been used, and every verbatim instance,
  * optionally with surrounding context. Mounted once at the app level (see

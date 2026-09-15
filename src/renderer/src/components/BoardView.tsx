@@ -506,60 +506,90 @@ function BoardView(): JSX.Element {
             moveItem(memberId, finalX, finalY)
           }
 
+          // A fresh snap forms a brand-new link to a target below — that
+          // target isn't part of state.groupItemIds (getLinkedGroup only
+          // sees links that already existed at drag-start), so it has to
+          // be resolved *before* the cluster-membership decision, not
+          // after, or a code snapped straight onto an existing cluster
+          // member wouldn't itself be recognized as belonging to that
+          // cluster until some later, separate drag happened to move the
+          // pair together again (reported: a linked code that overflowed
+          // its cluster stayed "outside" it even through Reset Placement,
+          // since it was never actually added as a member — only visually
+          // sitting next to one).
+          let targetId: string | null = null
+          let targetRef: { refType: BoardItem['refType']; refId: string } | null = null
+          let targetPos: Position | null = null
+          if (snap && selectedBoardId) {
+            const targetItem = items.find((i) => i.id === snap.targetId)
+            if (targetItem) {
+              targetRef = { refType: targetItem.refType, refId: targetItem.refId }
+              targetPos = { x: targetItem.x, y: targetItem.y }
+              targetId = snap.targetId
+              // The snap target can be a still-virtual item (never
+              // individually touched) — findSnapTarget's candidates are
+              // every *visible* item, virtual ones included. A BoardLink
+              // storing that virtual id directly would be fragile in two
+              // ways: until the target is ever touched, its rendered
+              // position comes from the cluster's own auto-grid slot, not
+              // from "stay next to what it's linked to" — so the link
+              // visibly stretches to wherever the grid happens to place
+              // it, not a snapped-together pair. And the moment that item
+              // IS later dragged on its own, it materializes under a
+              // brand-new real id, silently orphaning the old link (it
+              // can no longer resolve either endpoint, so the line and
+              // its unlink control both just vanish). Materializing it
+              // right here, at its current position, before linking
+              // closes both gaps: a freshly created link always has two
+              // real, stable endpoints.
+              if (targetId.startsWith('virtual:')) {
+                const realId = addItemToBoard(selectedBoardId, targetItem.refType, targetItem.refId, targetItem.x, targetItem.y)
+                targetId = realId ?? targetId
+              }
+            }
+          }
+
           // Cluster membership is decided for the WHOLE linked group at
-          // once (see resolveGroupClusterReassignment) rather than each
-          // member independently checking its own final position against
-          // cluster bounds — a snapped-together list of linked items can
+          // once (see resolveGroupClusterReassignment) — the freshly
+          // snapped target included — rather than each member
+          // independently checking its own final position against
+          // cluster bounds. A snapped-together list of linked items can
           // be tall/wide enough that its trailing members straddle a
           // cluster's edge even while the group visually reads as
           // "inside" it, which used to split a linked group across two
           // different clusters mid-drag.
           const groupMemberIds = state.groupItemIds.filter((id) => state.startPositions[id])
+          const refByMemberId = new Map(groupMemberIds.map((id) => [id, items.find((i) => i.id === id)]))
+          const reassignmentStartPositions = { ...state.startPositions }
+          const reassignmentFinalPositions = new Map(finalPositions)
+          const reassignmentGroupIds = [...groupMemberIds]
+          if (targetId && targetRef && targetPos && !reassignmentGroupIds.includes(targetId)) {
+            reassignmentStartPositions[targetId] = targetPos
+            reassignmentFinalPositions.set(targetId, targetPos)
+            reassignmentGroupIds.push(targetId)
+          }
           const reassignment = resolveGroupClusterReassignment(
             clusters,
-            state.startPositions,
-            finalPositions,
-            groupMemberIds,
+            reassignmentStartPositions,
+            reassignmentFinalPositions,
+            reassignmentGroupIds,
             CARD_WIDTH,
             CARD_HEIGHT
           )
           if (reassignment && reassignment.oldCluster?.id !== reassignment.newCluster?.id) {
-            for (const memberId of groupMemberIds) {
-              const member = items.find((i) => i.id === memberId)
-              if (!member) continue
+            for (const memberId of reassignmentGroupIds) {
+              const ref = memberId === targetId ? targetRef : refByMemberId.get(memberId)
+              if (!ref) continue
               if (reassignment.oldCluster) {
-                unassignItemFromCluster(materializeCluster(reassignment.oldCluster), member.refType, member.refId)
+                unassignItemFromCluster(materializeCluster(reassignment.oldCluster), ref.refType, ref.refId)
               }
               if (reassignment.newCluster) {
-                assignItemToCluster(materializeCluster(reassignment.newCluster), member.refType, member.refId)
+                assignItemToCluster(materializeCluster(reassignment.newCluster), ref.refType, ref.refId)
               }
             }
           }
 
-          if (snap && selectedBoardId) {
-            // The snap target can be a still-virtual item (never
-            // individually touched) — findSnapTarget's candidates are
-            // every *visible* item, virtual ones included. A BoardLink
-            // storing that virtual id directly would be fragile in two
-            // ways: until the target is ever touched, its rendered
-            // position comes from the cluster's own auto-grid slot, not
-            // from "stay next to what it's linked to" — so the link
-            // visibly stretches to wherever the grid happens to place it,
-            // not a snapped-together pair. And the moment that item IS
-            // later dragged on its own, it materializes under a brand-new
-            // real id, silently orphaning the old link (it can no longer
-            // resolve either endpoint, so the line and its unlink control
-            // both just vanish). Materializing the target right here, at
-            // its current position, before linking closes both gaps: a
-            // freshly created link always has two real, stable endpoints.
-            let targetId = snap.targetId
-            if (targetId.startsWith('virtual:')) {
-              const targetItem = items.find((i) => i.id === targetId)
-              if (targetItem) {
-                const realId = addItemToBoard(selectedBoardId, targetItem.refType, targetItem.refId, targetItem.x, targetItem.y)
-                if (realId) targetId = realId
-              }
-            }
+          if (snap && selectedBoardId && targetId) {
             linkItemsAction(selectedBoardId, state.id, targetId)
           }
 

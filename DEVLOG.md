@@ -2266,3 +2266,32 @@ only, nothing new to unit-test), production build clean, boot-tested. No other u
 found in this pass; the remaining known limitation (a linked group entering a cluster can
 still reflow that cluster's other, untouched virtual members — see two entries back) stands
 as a deliberate, documented tradeoff rather than an oversight.
+
+### A freshly-snapped code wasn't actually joining the cluster it snapped onto (2026-09-15)
+
+Follow-up report, a day after "top item decides the whole group's cluster": codes that
+snap-linked to a cluster member and visually overflowed the cluster's edge stayed "outside"
+it through Reset Placement — meaning they were never actually added as members of that
+category, only visually parked next to one.
+
+Root cause: `resolveGroupClusterReassignment` (yesterday's fix) runs against
+`state.groupItemIds`, which comes from `getLinkedGroup(links, draggedId)` — the group as it
+existed *before* this drag. The very first time two codes snap together, the link that would
+make them a "group" doesn't exist yet; `linkItemsAction` creates it further down in the same
+handler, *after* the cluster-membership decision had already run using only the dragged item
+by itself. So the freshly-snapped target's own final position (not the dragged item's) decided
+whether it individually happened to still be inside the cluster — the "top item decides for the
+whole group" rule never got a chance to apply to it, because it wasn't recognized as part of
+the group yet.
+
+Reordered `handleMouseUp`: resolve (and materialize, if virtual) the snap target *before* the
+cluster-membership decision, and fold it into the group `resolveGroupClusterReassignment` sees
+— using the target's own current position as both its "start" and "final" position, since it
+doesn't move during this drag. The reassignment (and subsequent membership calls) now applies
+uniformly across the dragged group *and* whatever it just snapped onto, so a code snapped onto
+an existing cluster member is immediately recognized as belonging to that cluster too, not just
+the next time the pair happens to get dragged together again.
+
+Verified: typecheck clean, full suite green (365/365 — this is BoardView-side orchestration
+of the already-tested `resolveGroupClusterReassignment`, not new pure logic of its own),
+production build clean, boot-tested.

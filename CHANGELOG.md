@@ -22,6 +22,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   cluster, others left behind or landing in a different one — if the group was wide/tall
   enough for a trailing member to fall outside the cluster the group otherwise reads as
   entering. The whole group's membership now follows its topmost item.
+- A group linked before today's other link fixes could have a member silently fail to move
+  along with the rest of the group on drag.
 
 ## [0.4.0] - 2026-09-14
 

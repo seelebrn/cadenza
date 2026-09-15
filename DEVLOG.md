@@ -2225,3 +2225,44 @@ Verified: 4 new unit tests for the extracted function (empty group; a trailing m
 inside a *different* cluster than the top member — the concrete split scenario reported;
 leaving a cluster; no-op when the reference member's cluster doesn't change). Full suite green
 (365/365), typecheck clean, production build clean, boot-tested.
+
+### Full review of the snap/link/auto-sort logic (2026-09-15)
+
+Requested review, after a run of fixes today, of the whole item-in-cluster
+snap/link/auto-layout system for soundness. Re-read `getVisibleBoardItems`'s slot/column-
+count math, `findSnapTarget`, `getLinkedGroup`/`linkItems`/`unlinkItems`, the whole drag
+lifecycle in BoardView.tsx (`onStartDrag`, the live preview, `handleMouseUp`), the delete
+flows, and `categoryOps`' membership helpers — confirming the day's fixes compose correctly
+together and worked out the safety argument for the current column-count formula precisely
+(it's provably bounded by the same total every member's stable slot number can range across,
+matching `ownMemberGridSize`'s own box-sizing formula exactly — including the multi-membership
+edge case, where a ref homed elsewhere still can't push a slot number past that same total).
+Also confirmed `assignItemToCluster`/`materializeCluster`'s dedup is safe to call once per
+group member within one batch (each read fresh store state synchronously, so a second call
+in the same batch finds the cluster the first call just created rather than duplicating it).
+
+Two things came out of the read:
+
+1. A stray, now-inaccurate comment in `BoardItemCard.tsx` still said "findSnapTarget has no
+   minimum drag distance" — the identical comment in `CodeInfoModal.tsx` was updated for the
+   `MIN_DRAG_DISTANCE_FOR_SNAP` deadzone earlier today, but this duplicate copy was missed.
+   Reworded to match.
+
+2. A real gap: cluster-move (dragging a cluster frame) already materializes every member item
+   up front before moving them, specifically because a still-virtual member has nothing in
+   `data.boardItems` for `moveItem` to find — established, working precedent for exactly the
+   "moveItem is a silent no-op for a virtual id" problem diagnosed twice today. Item-group
+   drags (`onStartDrag` for a snap-linked group) never got the same treatment: it materializes
+   only the directly-grabbed card. Today's link-creation fix guarantees a link made from now
+   on always connects two real items, so a *freshly* linked group can't contain a virtual id
+   — but a link left over from *before* that fix still could, and dragging it would silently
+   fail to move that member (the same "hanging" symptom from two entries back, just for a
+   legacy link instead of a brand-new one). Made item-group drags materialize every member up
+   front too, matching cluster-move's own pattern, so a group drag no longer depends on every
+   link in it having been created after today's fix.
+
+Verified: typecheck clean, full suite green (365/365 — both changes are comment/UI-interaction
+only, nothing new to unit-test), production build clean, boot-tested. No other unsoundness
+found in this pass; the remaining known limitation (a linked group entering a cluster can
+still reflow that cluster's other, untouched virtual members — see two entries back) stands
+as a deliberate, documented tradeoff rather than an oversight.

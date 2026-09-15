@@ -1680,18 +1680,38 @@ function BoardView(): JSX.Element {
                     // Shift+drag is the escape hatch: move just this one
                     // card, ignoring whatever it's linked to.
                     const group = e.shiftKey ? new Set([draggedId]) : getLinkedGroup(links, draggedId)
+                    // Every snap-link created from here on always connects
+                    // two already-real items (see the mouseup handler's own
+                    // materialize-before-linking comment), but a link from
+                    // *before* that existed could still connect to a
+                    // virtual sibling — same "moveItem has nothing to find"
+                    // gap this card's own materialization above and
+                    // cluster-move's group-materialization both already
+                    // close for their own single-item/cluster-drag cases.
+                    // Materializing every group member up front here too
+                    // means a group drag always has something real to move,
+                    // regardless of how old the link connecting it is.
+                    const groupItemIds: string[] = []
                     const startPositions: Record<string, Position> = {}
                     for (const gid of group) {
+                      if (gid === draggedId) {
+                        groupItemIds.push(draggedId)
+                        startPositions[draggedId] = { x: item.x, y: item.y }
+                        continue
+                      }
                       const gItem = items.find((i) => i.id === gid)
-                      if (gItem) startPositions[gid] = { x: gItem.x, y: gItem.y }
+                      if (!gItem) continue
+                      const realGid = gid.startsWith('virtual:')
+                        ? addItemToBoard(currentBoard.id, gItem.refType, gItem.refId, gItem.x, gItem.y)
+                        : gid
+                      const id = realGid ?? gid
+                      groupItemIds.push(id)
+                      startPositions[id] = { x: gItem.x, y: gItem.y }
                     }
-                    // The dragged item itself might not be in `items` yet
-                    // under its real id if it was virtual a moment ago.
-                    if (!startPositions[draggedId]) startPositions[draggedId] = { x: item.x, y: item.y }
                     setDragState({
                       kind: 'item',
                       id: draggedId,
-                      groupItemIds: Array.from(group),
+                      groupItemIds,
                       startMouseX: e.clientX,
                       startMouseY: e.clientY,
                       startPositions

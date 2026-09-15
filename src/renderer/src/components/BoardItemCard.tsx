@@ -87,13 +87,14 @@ function BoardItemCard({
       // (a common outcome of the auto-layout, or just a tightly-packed
       // cluster) make a double-click ambiguous with two independent single
       // clicks close together in time — since onMouseDown always starts a
-      // drag-and-possibly-snap gesture (findSnapTarget has no minimum drag
-      // distance), the first click of an attempted double-click can itself
-      // register as a completed drag that lands within snap range of a
-      // neighboring card and links the two, before the second click ever
-      // arrives. Right-click, now that onMouseDown ignores it (above),
-      // never enters that mousedown/drag/snap path at all, so it can't
-      // conflict with it.
+      // drag-and-possibly-snap gesture, and even with a few pixels of
+      // deadzone before a snap can trigger (see MIN_DRAG_DISTANCE_FOR_SNAP
+      // in BoardView.tsx), the first click of an attempted double-click can
+      // easily carry enough incidental mouse movement to itself register
+      // as a completed drag that lands within snap range of a neighboring
+      // card and links the two, before the second click ever arrives.
+      // Right-click, now that onMouseDown ignores it (above), never enters
+      // that mousedown/drag/snap path at all, so it can't conflict with it.
       onContextMenu={(e) => {
         e.preventDefault()
         if (item.refType === 'code') setInspectedCodeId(item.refId)

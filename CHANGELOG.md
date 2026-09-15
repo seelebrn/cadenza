@@ -18,8 +18,6 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   visually "hanging apart" instead of snapped together, could leave other cluster members
   unable to move along with a dragged group, and could make the unlink "×" vanish later.
   Links now always start with two fully real, stable items.
-- Dragging a linked group of items into a cluster could reflow and shift every *other*,
-  untouched item already in that cluster.
 
 ## [0.4.0] - 2026-09-14
 

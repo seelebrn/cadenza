@@ -618,38 +618,35 @@ export function getVisibleBoardItems(
   // (packGridColumnCount) — how many columns THIS cluster's own member
   // cards pack into, keyed by cluster id so positionForSlot below doesn't
   // need the category again. Matches exactly what getVisibleBoardClusters'
-  // ownMemberGridSize assumed when it sized the cluster's box (which sizes
-  // off *every* declared member, explicit ones included, so it's always
-  // roomy enough), so cards never overflow it.
+  // ownMemberGridSize assumed when it sized the cluster's box, so cards
+  // never overflow it.
   //
-  // Deliberately counts only STILL-VIRTUAL members, not every declared
-  // member: an explicit member (already dragged/materialized) renders at
-  // its own stored position regardless, so it doesn't actually occupy a
-  // grid slot here — but it still used to count toward this total. That
-  // meant a linked group merely being dragged *into* a cluster (a normal
-  // group-drag, not a bulk "+ Add all clusters") changed this cluster's
-  // total membership and therefore its column count, reflowing every
-  // OTHER, untouched virtual member's position as an unintended side
-  // effect of a drag the user never meant to apply to them — reported as
-  // "moving a block of snapped items can move other items in the
-  // cluster". Counting only virtual members keeps this stable against
-  // explicit members joining or leaving.
+  // Deliberately based on EVERY declared member (explicit ones included),
+  // not just still-virtual ones, even though an explicit member doesn't
+  // occupy a grid slot itself — this has to match the same total memberSlotByRef
+  // below assigns slots across (see its own comment): a member's slot
+  // number is stable and can range anywhere up to the *total* member
+  // count, so the column count used to turn that slot into a row/column
+  // has to be sized for the same total, or a virtual member's slot can
+  // land in a row far beyond what a smaller, virtual-only column count
+  // would produce — rendering it well outside the cluster, in what looks
+  // like a random position (this was tried and reverted: it kept a
+  // cluster's own untouched members from reflowing when an unrelated
+  // member's count changed, but at the cost of exactly this overflow).
   const memberColumnCountByCluster = new Map<string, number>()
   for (const category of categories) {
     const cluster = clusterByCategoryId.get(category.id)
     if (!cluster) continue
-    let virtualMemberCount = 0
     for (const codeId of category.codeIds) {
       const key = `code:${codeId}`
       if (!homeClusterByRef.has(key)) homeClusterByRef.set(key, cluster)
-      if (!explicitByRef.has(key)) virtualMemberCount++
     }
     for (const noteId of category.noteIds) {
       const key = `note:${noteId}`
       if (!homeClusterByRef.has(key)) homeClusterByRef.set(key, cluster)
-      if (!explicitByRef.has(key)) virtualMemberCount++
     }
-    if (virtualMemberCount > 0) memberColumnCountByCluster.set(cluster.id, packGridColumnCount(virtualMemberCount))
+    const memberCount = category.codeIds.length + category.noteIds.length
+    if (memberCount > 0) memberColumnCountByCluster.set(cluster.id, packGridColumnCount(memberCount))
   }
 
   // Each member's slot within its home cluster's grid, assigned once up

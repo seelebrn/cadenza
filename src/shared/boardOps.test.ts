@@ -795,38 +795,46 @@ describe('getVisibleBoardItems', () => {
     expect(overlapsExplicit(after2)).toBe(false)
   })
 
-  // Regression: a new EXPLICIT member joining a cluster (e.g. a linked
-  // group dragged in from elsewhere, or from outside any cluster) used to
-  // grow this cluster's total member count and therefore its packed
-  // column count, reflowing every untouched virtual sibling's position —
-  // reported as "moving a block of snapped items can move other items in
-  // the cluster".
-  it('a new explicit member joining a cluster does not repack its still-virtual siblings', () => {
-    const codeIds = ['code0', 'code1', 'code2', 'code3']
+  // Regression: a column count based only on still-virtual members (tried
+  // as a fix for "moving a block of items reflows its cluster siblings")
+  // combined with each member's stable-but-sparse slot number (which can
+  // range up to the cluster's *total* member count, not just how many are
+  // still virtual — see memberSlotByRef's own comment) produced rows far
+  // beyond what the cluster's box was ever sized for: with 8 of 9 members
+  // materialized, the one remaining virtual member (holding a late slot
+  // number) divided by a column count sized for just 1 member landed many
+  // rows below the cluster, reported as a code jumping to "a seemingly
+  // random position, even out-of-cluster". Column count has to stay sized
+  // for the same total every member's slot number can range across.
+  it('a still-virtual member stays inside its cluster even once most other members are explicit', () => {
+    const codeIds = Array.from({ length: 9 }, (_, i) => `code${i}`)
     const category = makeCategory('cat1', { codeIds })
     const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], [category])
-    const codesArg = codeIds.map((id) => ({ id }))
-    const before = getVisibleBoardItems(DEFAULT_BOARD, [], codesArg, [], [category], clusters)
+    const box = clusters[0]
 
-    const grownCategory = makeCategory('cat1', { codeIds: [...codeIds, 'codeExplicit'] })
-    const explicit: BoardItem[] = [
-      { id: 'realExplicit', boardId: DEFAULT_BOARD.id, refType: 'code', refId: 'codeExplicit', x: 9999, y: 9999 }
-    ]
-    const after = getVisibleBoardItems(
+    // Every member but the last materializes (e.g. each was individually
+    // dragged at some point) — the last one stays virtual, holding the
+    // highest slot number in the cluster.
+    const explicit: BoardItem[] = codeIds.slice(0, 8).map((id, i) => ({
+      id: `real${i}`,
+      boardId: DEFAULT_BOARD.id,
+      refType: 'code',
+      refId: id,
+      x: box.x,
+      y: box.y
+    }))
+    const items = getVisibleBoardItems(
       DEFAULT_BOARD,
       explicit,
-      [...codesArg, { id: 'codeExplicit' }],
+      codeIds.map((id) => ({ id })),
       [],
-      [grownCategory],
+      [category],
       clusters
     )
-
-    for (const id of codeIds) {
-      const b = before.find((i) => i.refId === id)!
-      const a = after.find((i) => i.refId === id)!
-      expect(a.x).toBe(b.x)
-      expect(a.y).toBe(b.y)
-    }
+    const lastItem = items.find((i) => i.refId === 'code8')!
+    expect(
+      rectContains(box, { id: 'x', boardId: 'b', categoryId: '', x: lastItem.x, y: lastItem.y, width: 180, height: 64, createdAt: '' })
+    ).toBe(true)
   })
 
   it('old 4-argument call signature (no categories/clusters) still works', () => {

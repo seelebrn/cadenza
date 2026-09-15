@@ -2166,3 +2166,35 @@ passing with it (`expected 436 to be 60` for the column-count one). Full suite g
 board-interaction fixes, this environment can't drive the actual mouse gestures, so this is a
 well-evidenced diagnosis (every symptom traced to code that matches it exactly) rather than an
 interactively confirmed fix.
+
+### Reverting the column-count fix: it traded a reflow bug for an overflow bug (2026-09-15)
+
+The previous entry's "virtual-only count" fix for goal (2) — stopping a cluster's column
+count from reacting to explicit members joining/leaving — turned out unsound, caught almost
+immediately: "on simply clicking a code, another code (not linked) in the same cluster can
+move in a seemingly random position, even out-of-cluster."
+
+The claim that it was "always safe against overflow… since virtual-only count is never
+larger [than total]" was wrong — it only guarantees enough *width*, not enough *height*. A
+member's slot number (from the same-day `memberSlotByRef` fix) is stable and sparse: it can
+be as large as `total member count - 1` for that cluster, regardless of how many members are
+still virtual. Dividing a slot that large by a column count sized for only the *virtual*
+members (much smaller once most of a cluster's members are explicit) sends `row = slot /
+columnCount` far past what the cluster's own box was ever sized for — a virtual member with a
+late slot number renders many rows below the cluster, reads as "random" or "out-of-cluster".
+
+Reverted the column count back to every declared member (explicit included) — the same value
+`ownMemberGridSize` uses to size the cluster's own box, so a slot number that can range up to
+`total - 1` always maps back into a row the box actually has room for. This restores
+correctness (no overflow, no collision) but reopens goal (2) from two fixes ago: a linked
+group crossing into a cluster can still reflow its other, untouched members. A genuinely
+sound fix for that needs the auto-layout to remember which members it already committed to a
+slot rather than recomputing purely from current state each render — a bigger change than
+warranted for a same-day follow-up; left as a known, milder limitation rather than risking
+another unsound quick fix.
+
+Replaced the (now half-false) "does not repack its still-virtual siblings" test with one that
+asserts the property that actually matters: a virtual member stays inside its cluster's own
+box even once most of its siblings are explicit. Confirmed it fails against the reverted
+code and passes with the fix. Full suite green (361/361), typecheck clean, production build
+clean, boot-tested.

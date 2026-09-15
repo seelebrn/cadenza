@@ -146,7 +146,7 @@ function BoardView(): JSX.Element {
   const moveCluster = useProjectStore((s) => s.moveCluster)
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
   const assignItemToCluster = useProjectStore((s) => s.assignItemToCluster)
-  const unassignItemFromCluster = useProjectStore((s) => s.unassignItemFromCluster)
+  const reconcileSoleCategoryMembership = useProjectStore((s) => s.reconcileSoleCategoryMembership)
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
   const linkItemsAction = useProjectStore((s) => s.linkItems)
   const unlinkItemsAction = useProjectStore((s) => s.unlinkItems)
@@ -580,9 +580,22 @@ function BoardView(): JSX.Element {
             for (const memberId of reassignmentGroupIds) {
               const ref = memberId === targetId ? targetRef : refByMemberId.get(memberId)
               if (!ref) continue
-              if (reassignment.oldCluster) {
-                unassignItemFromCluster(materializeCluster(reassignment.oldCluster), ref.refType, ref.refId)
-              }
+              // Reconciled against every category this ref is *actually*
+              // a member of right now, not just the reference member's
+              // own old cluster: a group can easily contain members that
+              // weren't previously in the same cluster as the reference
+              // member at all (freshly linked from outside any cluster, or
+              // already a member of a *different* one) — unassigning only
+              // from the reference member's old cluster left those members
+              // still listed under their real previous category too,
+              // silently a member of two categories at once. Reset
+              // Placement (and any other view driven by category
+              // membership, not visual position) would then pick whichever
+              // one happens to come first in category order — not
+              // necessarily the one it visually sits in — reported as
+              // linked codes landing outside their cluster, or in the
+              // wrong one entirely, after Reset Placement.
+              reconcileSoleCategoryMembership(ref.refType, ref.refId, reassignment.newCluster?.categoryId ?? null)
               if (reassignment.newCluster) {
                 assignItemToCluster(materializeCluster(reassignment.newCluster), ref.refType, ref.refId)
               }

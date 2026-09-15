@@ -40,6 +40,7 @@ import {
   createClusterLink as createClusterLinkOp,
   deleteCategory as deleteCategoryOp,
   deleteClusterLink as deleteClusterLinkOp,
+  reconcileSoleCategoryMembership as reconcileSoleCategoryMembershipOp,
   removeCodeFromCategory as removeCodeFromCategoryOp,
   removeNoteFromCategory as removeNoteFromCategoryOp,
   removeSegmentFromCategory as removeSegmentFromCategoryOp,
@@ -259,6 +260,16 @@ interface ProjectState {
   deleteCluster: (clusterId: string) => void
   assignItemToCluster: (clusterId: string, refType: BoardItem['refType'], refId: string) => void
   unassignItemFromCluster: (clusterId: string, refType: BoardItem['refType'], refId: string) => void
+  /** Removes a ref from every category EXCEPT targetCategoryId (or every
+   * category at all, if null) — cleans up any accidental multi-membership
+   * rather than just adding to a new one and hoping nothing was left
+   * behind in an old one. See reconcileSoleCategoryMembership's own
+   * comment for why this matters. */
+  reconcileSoleCategoryMembership: (
+    refType: BoardItem['refType'],
+    refId: string,
+    targetCategoryId: string | null
+  ) => void
   addAllCodesToBoard: (boardId: string) => void
   addAllNotesToBoard: (boardId: string) => void
   /** includeMembers (default true): also place each cluster's member
@@ -804,6 +815,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   unassignItemFromCluster: (clusterId, refType, refId) =>
     get().updateProject((data) => unassignItemFromClusterOp(data, clusterId, refType, refId)),
+
+  reconcileSoleCategoryMembership: (refType, refId, targetCategoryId) =>
+    get().updateProject((data) => reconcileSoleCategoryMembershipOp(data, refType, refId, targetCategoryId)),
 
   addAllCodesToBoard: (boardId) => get().updateProject((data) => addAllCodesToBoardOp(data, boardId)),
 

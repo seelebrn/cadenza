@@ -10,6 +10,11 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 - Snapping a code onto an existing cluster member didn't actually add it to that cluster —
   only the *next* time that pair was dragged together did it properly join. Now it joins
   immediately, the first time it snaps.
+- A group's cluster reassignment could leave a member still listed under its real previous
+  category too, alongside the new one — surfacing as a linked code landing outside its
+  cluster, or in the wrong one entirely, after Reset Placement. Reassignment now cleans up
+  every category a member actually belongs to, not just the one the group as a whole was
+  leaving.
 
 ## [0.4.1] - 2026-09-15
 

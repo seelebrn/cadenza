@@ -269,3 +269,29 @@ export function removeMemberByRefType(
   if (refType === 'note') return removeNoteFromCategory(data, categoryId, refId)
   return removeSegmentFromCategory(data, categoryId, refId)
 }
+
+/** Ensures a ref belongs to at most one category — `targetCategoryId` (or
+ * none at all, if null) — removing it from every *other* category that
+ * currently lists it. A ref occupies exactly one spatial position on the
+ * board, so multi-membership was never a supported state there; letting it
+ * happen anyway (e.g. a board drag adding a ref to a new cluster without
+ * also removing it from whichever one it actually came from) doesn't fail
+ * loudly — it just leaves the ref silently listed under more than one
+ * category, and anything that derives a ref's cluster from category
+ * membership rather than visual position (Reset Placement, notably) then
+ * picks whichever one happens to come first in the project's own category
+ * order, not necessarily the one it's visually sitting in. */
+export function reconcileSoleCategoryMembership(
+  data: ProjectData,
+  refType: 'code' | 'note' | 'segment',
+  refId: string,
+  targetCategoryId: string | null
+): ProjectData {
+  let next = data
+  for (const category of data.categories) {
+    if (category.id === targetCategoryId) continue
+    if (!isCategoryMember(category, refType, refId)) continue
+    next = removeMemberByRefType(next, category.id, refType, refId)
+  }
+  return next
+}

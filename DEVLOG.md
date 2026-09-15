@@ -2295,3 +2295,43 @@ the next time the pair happens to get dragged together again.
 Verified: typecheck clean, full suite green (365/365 — this is BoardView-side orchestration
 of the already-tested `resolveGroupClusterReassignment`, not new pure logic of its own),
 production build clean, boot-tested.
+
+### Reassignment left stale multi-membership behind, confirmed via before/after PDF export (2026-09-15)
+
+Not fully fixed: the user attached "Before"/"After Reset Placement" PDF exports of the Main
+board showing linked codes still landing outside their cluster after reset — some even in a
+*different* cluster entirely. Text-extracted the PDFs first (labels came through, but not
+spatial layout, so that alone wasn't enough to diagnose) before re-reading the reassignment
+code with the specific "ends up in another cluster" detail in hand.
+
+Root cause, in the reassignment loop added two entries back: it only ever unassigned a member
+from `reassignment.oldCluster` — the *reference* (topmost) member's own old cluster — before
+assigning everyone to the new one. But a group can easily contain a member that was already in
+a *different* category than the reference member (linked in from elsewhere, or already sorted
+into another cluster) — unassigning it only from the reference member's old cluster left it
+still listed under its own real previous category too. Multi-membership was never a supported
+state for a board ref (it occupies one spatial position), so nothing crashed — it just meant
+Reset Placement (which derives a ref's cluster purely from category membership, not visual
+position) picked whichever category happened to come first in the project's own `categories`
+array order, not necessarily the one it visually sat in. Explains both symptoms at once: an
+overflowing code reads as "outside" when its stale category isn't shown clustered at all
+(already reset out of it), or as "in the wrong cluster" when its stale category happens to sort
+before the correct one.
+
+Given this is the second bug found in the same reassignment code in two days, extracted the
+fix into a proper tested pure function rather than another inline patch: `categoryOps.ts` gains
+`reconcileSoleCategoryMembership(data, refType, refId, targetCategoryId)` — removes a ref from
+every category except the target (or every category, if the target is null) — with its own
+store action, replacing the ad-hoc per-member category scan that was inline in `handleMouseUp`.
+Every ref in the reassigned group now gets reconciled against *every* category it's actually a
+member of, not just the reference member's own old one.
+
+This doesn't retroactively repair a project's already-existing stale multi-memberships from
+before this fix — those clear up the next time that specific code is involved in a drag that
+triggers a reassignment (touching it at all is enough; it doesn't need to actually move).
+
+Verified: 4 new unit tests for `reconcileSoleCategoryMembership` (drops every other category,
+keeping only the target; drops from every category when the target is null; no-op when already
+sole-member; refType isolation — a code and a note sharing an id in different categories don't
+cross-contaminate). Full suite green (369/369), typecheck clean, production build clean,
+boot-tested.

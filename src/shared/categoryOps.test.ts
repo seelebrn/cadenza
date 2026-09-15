@@ -11,6 +11,7 @@ import {
   getCategoryDepth,
   getDescendantCategoryIds,
   isCategoryMember,
+  reconcileSoleCategoryMembership,
   removeCodeFromCategory,
   removeMemberByRefType,
   removeNoteFromCategory,
@@ -316,6 +317,42 @@ describe('isCategoryMember', () => {
     expect(isCategoryMember(category, 'note', 'n1')).toBe(true)
     expect(isCategoryMember(category, 'segment', 's1')).toBe(true)
     expect(isCategoryMember(category, 'segment', 'nope')).toBe(false)
+  })
+})
+
+describe('reconcileSoleCategoryMembership', () => {
+  it('removes a ref from every OTHER category that lists it, keeping only the target', () => {
+    const data = makeData([
+      makeCategory('A', { codeIds: ['c1'] }),
+      makeCategory('B', { codeIds: ['c1'] }),
+      makeCategory('C', { codeIds: ['c1'] })
+    ])
+    const next = reconcileSoleCategoryMembership(data, 'code', 'c1', 'B')
+    expect(next.categories.find((c) => c.id === 'A')!.codeIds).toEqual([])
+    expect(next.categories.find((c) => c.id === 'B')!.codeIds).toEqual(['c1'])
+    expect(next.categories.find((c) => c.id === 'C')!.codeIds).toEqual([])
+  })
+
+  it('removes a ref from every category when targetCategoryId is null', () => {
+    const data = makeData([makeCategory('A', { codeIds: ['c1'] }), makeCategory('B', { codeIds: ['c1'] })])
+    const next = reconcileSoleCategoryMembership(data, 'code', 'c1', null)
+    expect(next.categories.every((c) => !c.codeIds.includes('c1'))).toBe(true)
+  })
+
+  it('is a no-op when the ref is already only in the target category', () => {
+    const data = makeData([makeCategory('A', { codeIds: ['c1'] }), makeCategory('B')])
+    const next = reconcileSoleCategoryMembership(data, 'code', 'c1', 'A')
+    expect(next.categories.find((c) => c.id === 'A')!.codeIds).toEqual(['c1'])
+  })
+
+  it('respects refType — a code and a note with the same id in different categories do not cross-contaminate', () => {
+    const data = makeData([
+      makeCategory('A', { codeIds: ['shared'] }),
+      makeCategory('B', { noteIds: ['shared'] })
+    ])
+    const next = reconcileSoleCategoryMembership(data, 'code', 'shared', 'A')
+    expect(next.categories.find((c) => c.id === 'A')!.codeIds).toEqual(['shared'])
+    expect(next.categories.find((c) => c.id === 'B')!.noteIds).toEqual(['shared']) // untouched — different refType
   })
 })
 

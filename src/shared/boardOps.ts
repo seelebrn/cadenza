@@ -15,6 +15,7 @@ import {
   addMemberByRefType,
   createCategory,
   isCategoryMember,
+  reconcileSoleCategoryMembership,
   removeMemberByRefType
 } from './categoryOps'
 import type { BoardCluster, BoardItem, BoardRecord, CategoryKind, CategoryRecord, ClusterLink, ProjectData } from './types'
@@ -751,6 +752,97 @@ export function getVisibleBoardItems(
   // Any explicitly-added segment (quote) items always show too.
   result.push(...explicitItems.filter((i) => i.refType === 'segment'))
   return result
+}
+
+/**
+ * Gives every still-virtual code/note member of `categoryId` a real,
+ * pinned `BoardItem` at its *current* computed slot position on `boardId`.
+ *
+ * getVisibleBoardItems' own member-grid slot numbers are stable against a
+ * given member's own virtual→explicit transition (see memberSlotByRef's
+ * comment there), but not against the *set* of members actually homed to
+ * a cluster changing at all — a member joining or leaving densely
+ * renumbers the slots of every other still-virtual member (the same
+ * project-wide traversal that assigns them in the first place), shifting
+ * their computed positions. If any of *those* siblings already happens to
+ * be explicit (frozen at an earlier slot), the renumbering can land a
+ * still-virtual one directly on top of it. Reported as: moving a code
+ * from one cluster to another while snap-linking it to a code already in
+ * the destination — on release, a code from either cluster ends up
+ * superposed on a different code from the same cluster.
+ *
+ * Call this for a category right before its own membership is about to
+ * change (a member about to join or leave it) — see
+ * reassignRefCategoryMembership below, which does exactly that.
+ */
+export function materializeClusterMemberItems(data: ProjectData, boardId: string, categoryId: string): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  const category = data.categories.find((c) => c.id === categoryId)
+  if (!board || !category) return data
+
+  const explicitItems = data.boardItems.filter((i) => i.boardId === boardId)
+  const explicitRefs = new Set(explicitItems.map((i) => `${i.refType}:${i.refId}`))
+  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
+  const visibleClusters = getVisibleBoardClusters(board, explicitClusters, data.categories)
+  const visibleItems = getVisibleBoardItems(
+    board,
+    explicitItems,
+    data.codes,
+    data.notes,
+    data.categories,
+    visibleClusters
+  )
+
+  const memberRefs: Array<{ refType: 'code' | 'note'; refId: string }> = [
+    ...category.codeIds.map((id) => ({ refType: 'code' as const, refId: id })),
+    ...category.noteIds.map((id) => ({ refType: 'note' as const, refId: id }))
+  ]
+
+  let next = data
+  for (const ref of memberRefs) {
+    if (explicitRefs.has(`${ref.refType}:${ref.refId}`)) continue
+    const item = visibleItems.find((i) => i.refType === ref.refType && i.refId === ref.refId)
+    if (!item) continue
+    next = addItemToBoard(next, boardId, ref.refType, ref.refId, item.x, item.y).data
+  }
+  return next
+}
+
+/**
+ * Moves a ref's category membership from wherever it currently is to
+ * `newCategoryId` (or fully unclusters it, if null) on `boardId` — same
+ * end state as calling reconcileSoleCategoryMembership directly, but
+ * stabilizing (materializeClusterMemberItems) every category actually
+ * involved first, both what the ref is leaving and what it's joining, so
+ * the membership change itself can never shift or collide any of their
+ * other, still-virtual members. The board-agnostic single-category
+ * add/remove helpers this composes (addMemberByRefType,
+ * reconcileSoleCategoryMembership) know nothing about item *positions* —
+ * this is the one place that connects a category-membership change back
+ * to the specific board it needs to stay visually stable on.
+ */
+export function reassignRefCategoryMembership(
+  data: ProjectData,
+  boardId: string,
+  refType: 'code' | 'note' | 'segment',
+  refId: string,
+  newCategoryId: string | null
+): ProjectData {
+  let next = data
+  const staleCategoryIds = next.categories
+    .filter((cat) => cat.id !== newCategoryId && isCategoryMember(cat, refType, refId))
+    .map((cat) => cat.id)
+
+  for (const categoryId of staleCategoryIds) {
+    next = materializeClusterMemberItems(next, boardId, categoryId)
+  }
+  next = reconcileSoleCategoryMembership(next, refType, refId, newCategoryId)
+
+  if (newCategoryId) {
+    next = materializeClusterMemberItems(next, boardId, newCategoryId)
+    next = addMemberByRefType(next, newCategoryId, refType, refId)
+  }
+  return next
 }
 
 /** Adds every code not already on this board, laid out in a grid. */

@@ -146,8 +146,7 @@ function BoardView(): JSX.Element {
   const materializeSiblingClusters = useProjectStore((s) => s.materializeSiblingClusters)
   const growClusterToFitOwnMembers = useProjectStore((s) => s.growClusterToFitOwnMembers)
   const growAncestorClustersToFit = useProjectStore((s) => s.growAncestorClustersToFit)
-  const assignItemToCluster = useProjectStore((s) => s.assignItemToCluster)
-  const reconcileSoleCategoryMembership = useProjectStore((s) => s.reconcileSoleCategoryMembership)
+  const reassignRefCategoryMembership = useProjectStore((s) => s.reassignRefCategoryMembership)
   const reparentCategory = useProjectStore((s) => s.reparentCategory)
   const linkItemsAction = useProjectStore((s) => s.linkItems)
   const unlinkItemsAction = useProjectStore((s) => s.unlinkItems)
@@ -577,7 +576,7 @@ function BoardView(): JSX.Element {
             CARD_WIDTH,
             CARD_HEIGHT
           )
-          if (reassignment && reassignment.oldCluster?.id !== reassignment.newCluster?.id) {
+          if (reassignment && reassignment.oldCluster?.id !== reassignment.newCluster?.id && selectedBoardId) {
             for (const memberId of reassignmentGroupIds) {
               const ref = memberId === targetId ? targetRef : refByMemberId.get(memberId)
               if (!ref) continue
@@ -596,10 +595,23 @@ function BoardView(): JSX.Element {
               // necessarily the one it visually sits in — reported as
               // linked codes landing outside their cluster, or in the
               // wrong one entirely, after Reset Placement.
-              reconcileSoleCategoryMembership(ref.refType, ref.refId, reassignment.newCluster?.categoryId ?? null)
-              if (reassignment.newCluster) {
-                assignItemToCluster(materializeCluster(reassignment.newCluster), ref.refType, ref.refId)
-              }
+              //
+              // Also stabilizes every other still-virtual member of both
+              // the category being left and the one being joined first
+              // (see reassignRefCategoryMembership/materializeClusterMemberItems'
+              // own comments) — a member's membership changing densely
+              // renumbers its former/new cluster's own grid slots, which
+              // could otherwise land a sibling directly on top of another
+              // one already sitting there. Reported as: moving a code
+              // between clusters while snap-linking it to one already in
+              // the destination, a code from either cluster ends up
+              // superposed on a different code from the same cluster.
+              reassignRefCategoryMembership(
+                selectedBoardId,
+                ref.refType,
+                ref.refId,
+                reassignment.newCluster?.categoryId ?? null
+              )
             }
             // A cluster's own box used to stay frozen at whatever size it
             // already had, even once a newly-added member's card no

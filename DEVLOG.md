@@ -2396,3 +2396,42 @@ test), plus 1 in `getVisibleBoardClusters` itself. Full suite green (381/381), t
 production build clean, boot-tested. As with other board-interaction fixes this session, this
 environment can't drive the actual mouse gestures — worth the user confirming against their own
 repro (the three-clusters-in-a-superordinate case) once it's live.
+
+### The same reflow class, one level down: item slots within a cluster (2026-09-15)
+
+Immediate follow-up, same day: "I move a code from cluster 1 to cluster 2 and link it with a
+code from cluster 2. I release my click. A code from cluster 1 or 2 will jump right onto
+another code from the same cluster." Exactly the cluster-level reflow bug just fixed, one
+layer down — `getVisibleBoardItems`' *member* grid (a cluster's own codes/notes, not the
+cluster boxes themselves) uses the identical "slot number = rank in a fixed project-wide
+order among currently-homed members" scheme. A member's own virtual→explicit transition can't
+shift that ranking anymore (this morning's fix), but a member actually *joining or leaving* the
+counted set absolutely still can — every other still-virtual member's rank (and therefore
+pixel position) shifts to fill the gap or make room, and if a sibling is already explicit
+(frozen at an old rank's position), a reflowed one can land exactly on it.
+
+Confirmed by brute-force search rather than by hand: hand-derived scenarios kept landing on
+non-colliding configurations (slot numbers are provably unique within one computation, so a
+direct collision needs a specific coincidence between the departure/arrival point, which
+member is explicit, and how the resulting slot+column-count maps back to pixels) — fuzzed
+member counts, which member is explicit, and the joining ref's position in the project's code
+order against the *un-fixed* reassignment logic, and it turned up real collisions quickly (a
+2-member cluster with one member explicit, the incoming ref ordered before both, reliably
+lands the virtual one exactly on the explicit one).
+
+Same fix strategy as the cluster-level one, one level down: new `materializeClusterMemberItems`
+(boardOps.ts) pins every still-virtual code/note member of a category to a real BoardItem at
+its current computed slot position — called for a category right *before* its membership is
+about to change. New `reassignRefCategoryMembership` composes this with the existing
+`reconcileSoleCategoryMembership`: stabilizes every category a ref is about to leave, reconciles
+membership, stabilizes the category it's about to join, then adds it. Replaced BoardView's
+former two-call sequence (`reconcileSoleCategoryMembership` + `assignItemToCluster`) with this
+single call, and folded its own explanatory comment into the new call site.
+
+Verified: 5 new unit tests (`materializeClusterMemberItems` pins every virtual member at its
+current position / skips already-explicit ones / no-ops for an unknown board or category;
+`reassignRefCategoryMembership` moves membership correctly / unclusters when the target is
+null), plus the fuzzed collision reproduction as a 6th, confirmed to fail against the
+un-stabilized `reconcileSoleCategoryMembership` + `addMemberByRefType` sequence before passing
+with the fix. Full suite green (387/387), typecheck clean, production build clean,
+boot-tested.

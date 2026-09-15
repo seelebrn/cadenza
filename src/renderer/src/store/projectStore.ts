@@ -73,6 +73,7 @@ import {
   materializeSiblingClusters as materializeSiblingClustersOp,
   moveCluster as moveClusterOp,
   moveItem as moveItemOp,
+  reassignRefCategoryMembership as reassignRefCategoryMembershipOp,
   removeItemFromBoard as removeItemFromBoardOp,
   renameBoard as renameBoardOp,
   resetDefaultBoardClusterLayout as resetDefaultBoardClusterLayoutOp,
@@ -287,6 +288,18 @@ interface ProjectState {
     refType: BoardItem['refType'],
     refId: string,
     targetCategoryId: string | null
+  ) => void
+  /** Same end state as reconcileSoleCategoryMembership, but for a specific
+   * board: stabilizes (materializeClusterMemberItems) every category
+   * actually involved — what the ref is leaving and what it's joining —
+   * before changing anything, so the membership change itself can never
+   * shift/collide any of their other, still-virtual member items. See
+   * reassignRefCategoryMembership's own comment. */
+  reassignRefCategoryMembership: (
+    boardId: string,
+    refType: BoardItem['refType'],
+    refId: string,
+    newCategoryId: string | null
   ) => void
   addAllCodesToBoard: (boardId: string) => void
   addAllNotesToBoard: (boardId: string) => void
@@ -845,6 +858,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   reconcileSoleCategoryMembership: (refType, refId, targetCategoryId) =>
     get().updateProject((data) => reconcileSoleCategoryMembershipOp(data, refType, refId, targetCategoryId)),
+
+  reassignRefCategoryMembership: (boardId, refType, refId, newCategoryId) =>
+    get().updateProject((data) => reassignRefCategoryMembershipOp(data, boardId, refType, refId, newCategoryId)),
 
   addAllCodesToBoard: (boardId) => get().updateProject((data) => addAllCodesToBoardOp(data, boardId)),
 

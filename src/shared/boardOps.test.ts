@@ -38,9 +38,11 @@ import {
   growAncestorClustersToFit,
   growClusterToFitOwnMembers,
   linkItems,
+  materializeClusterMemberItems,
   materializeSiblingClusters,
   moveCluster,
   moveItem,
+  reassignRefCategoryMembership,
   removeItemFromBoard,
   renameBoard,
   resetDefaultBoardClusterLayout,
@@ -53,7 +55,7 @@ import {
   unlinkItems
 } from './boardOps'
 import { addCodeToCategory } from './categoryOps'
-import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ClusterLink, ProjectData } from './types'
+import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ClusterLink, CodeNode, ProjectData } from './types'
 
 // --- test fixtures -----------------------------------------------------
 
@@ -71,6 +73,10 @@ function makeCategory(id: string, overrides: Partial<CategoryRecord> = {}): Cate
     createdAt: '0',
     ...overrides
   }
+}
+
+function makeCode(id: string): CodeNode {
+  return { id, kind: 'code', name: id, color: '#fff', definition: '', parentId: null, createdAt: '0' }
 }
 
 function makeData(overrides: Partial<ProjectData> = {}): ProjectData {
@@ -1140,6 +1146,140 @@ describe('getVisibleBoardItems', () => {
   it('old 4-argument call signature (no categories/clusters) still works', () => {
     const items = getVisibleBoardItems(DEFAULT_BOARD, [], [{ id: 'c1' }], [{ id: 'n1' }])
     expect(items).toHaveLength(2)
+  })
+})
+
+describe('materializeClusterMemberItems', () => {
+  it('gives every still-virtual code/note member of a category a real item at its current position', () => {
+    const category = makeCategory('K', { codeIds: ['a', 'b'] })
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [category],
+      codes: [makeCode('a'), makeCode('b')]
+    })
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], data.categories)
+    const before = getVisibleBoardItems(DEFAULT_BOARD, [], data.codes, data.notes, data.categories, clusters)
+
+    const next = materializeClusterMemberItems(data, 'board1', 'K')
+    expect(next.boardItems).toHaveLength(2)
+    for (const item of before) {
+      const materialized = next.boardItems.find((i) => i.refType === item.refType && i.refId === item.refId)
+      expect(materialized).toBeDefined()
+      expect(materialized!.x).toBe(item.x)
+      expect(materialized!.y).toBe(item.y)
+    }
+  })
+
+  it('skips a member that is already explicit', () => {
+    const category = makeCategory('K', { codeIds: ['a'] })
+    const already: BoardItem = { id: 'realA', boardId: 'board1', refType: 'code', refId: 'a', x: 999, y: 999 }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [category],
+      codes: [makeCode('a')],
+      boardItems: [already]
+    })
+    const next = materializeClusterMemberItems(data, 'board1', 'K')
+    expect(next.boardItems).toEqual([already])
+  })
+
+  it('is a no-op for an unknown board or category', () => {
+    const category = makeCategory('K', { codeIds: ['a'] })
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [category],
+      codes: [makeCode('a')]
+    })
+    expect(materializeClusterMemberItems(data, 'nope', 'K')).toBe(data)
+    expect(materializeClusterMemberItems(data, 'board1', 'nope')).toBe(data)
+  })
+})
+
+describe('reassignRefCategoryMembership', () => {
+  it('moves a ref from its old category to a new one', () => {
+    const oldCat = makeCategory('old', { codeIds: ['x'] })
+    const newCat = makeCategory('new', { codeIds: [] })
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [oldCat, newCat],
+      codes: [makeCode('x')]
+    })
+    const next = reassignRefCategoryMembership(data, 'board1', 'code', 'x', 'new')
+    expect(next.categories.find((c) => c.id === 'old')!.codeIds).toEqual([])
+    expect(next.categories.find((c) => c.id === 'new')!.codeIds).toEqual(['x'])
+  })
+
+  it('fully unclusters when newCategoryId is null', () => {
+    const oldCat = makeCategory('old', { codeIds: ['x'] })
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [oldCat],
+      codes: [makeCode('x')]
+    })
+    const next = reassignRefCategoryMembership(data, 'board1', 'code', 'x', null)
+    expect(next.categories.find((c) => c.id === 'old')!.codeIds).toEqual([])
+  })
+
+  // Regression: reconcileSoleCategoryMembership + assignItemToCluster alone
+  // (what BoardView called directly, before this function existed) can
+  // densely renumber a destination cluster's grid slots as a side effect
+  // of the join, landing a still-virtual sibling exactly on top of one
+  // that's already explicit — reported as "moving a code between
+  // clusters while linking it to a code already in the destination, a
+  // code from either cluster ends up superposed on another code from the
+  // same cluster."
+  it('moving a ref into a cluster with a mix of explicit and virtual members never collides any of them', () => {
+    // "dst" has 2 members, one already explicit (keep1, simulating a
+    // previously-touched card); "moving" joins from "src" ordered *before*
+    // both of them in the project's own code array. Found by fuzzing many
+    // (member count, which one's explicit, join position) combinations
+    // against the un-stabilized reconcileSoleCategoryMembership +
+    // addMemberByRefType alone: this specific shape reliably renumbers
+    // keep0's slot to land exactly on keep1's frozen position.
+    const dst = makeCategory('dst', { codeIds: ['keep0', 'keep1'] })
+    const src = makeCategory('src', { codeIds: ['moving'] })
+    const codes = [makeCode('moving'), makeCode('keep0'), makeCode('keep1')]
+    const baseData = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [src, dst],
+      codes
+    })
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], baseData.categories)
+    const keep1Virtual = getVisibleBoardItems(DEFAULT_BOARD, [], codes, [], baseData.categories, clusters).find(
+      (i) => i.refId === 'keep1'
+    )!
+    const keep1Explicit: BoardItem = {
+      id: 'realKeep1',
+      boardId: 'board1',
+      refType: 'code',
+      refId: 'keep1',
+      x: keep1Virtual.x,
+      y: keep1Virtual.y
+    }
+    const data = { ...baseData, boardItems: [keep1Explicit] }
+
+    const next = reassignRefCategoryMembership(data, 'board1', 'code', 'moving', 'dst')
+
+    const explicitClusters = next.boardClusters.filter((c) => c.boardId === 'board1')
+    const visibleClusters = getVisibleBoardClusters(DEFAULT_BOARD, explicitClusters, next.categories)
+    const items = getVisibleBoardItems(
+      DEFAULT_BOARD,
+      next.boardItems,
+      next.codes,
+      next.notes,
+      next.categories,
+      visibleClusters
+    )
+    const CARD_W = 180
+    const CARD_H = 64
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i]
+        const b = items[j]
+        const overlap = a.x < b.x + CARD_W && a.x + CARD_W > b.x && a.y < b.y + CARD_H && a.y + CARD_H > b.y
+        expect(overlap).toBe(false)
+      }
+    }
   })
 })
 

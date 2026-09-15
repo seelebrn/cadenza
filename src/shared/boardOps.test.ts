@@ -756,6 +756,45 @@ describe('getVisibleBoardItems', () => {
     expect(items).toEqual(explicit)
   })
 
+  // Regression: clicking one still-virtual member (materializing it into an
+  // explicit BoardItem at its own current slot) used to shift every OTHER
+  // still-virtual sibling in the same cluster back by one slot, landing one
+  // of them exactly on top of a neighbor — reported as "clicking an item
+  // makes a different item jump on top of it".
+  it('materializing one member does not move its still-virtual siblings onto each other', () => {
+    const codeIds = ['code0', 'code1', 'code2']
+    const category = makeCategory('cat1', { codeIds })
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], [category])
+    const codesArg = codeIds.map((id) => ({ id }))
+
+    // Baseline: every member virtual, note where the untouched siblings land.
+    const before = getVisibleBoardItems(DEFAULT_BOARD, [], codesArg, [], [category], clusters)
+    const before1 = before.find((i) => i.refId === 'code1')!
+    const before2 = before.find((i) => i.refId === 'code2')!
+
+    // code0 materializes (e.g. the user picked it up) at exactly its own
+    // pre-materialization slot — the common case, since addItemToBoard is
+    // called with the virtual item's own current x/y.
+    const before0 = before.find((i) => i.refId === 'code0')!
+    const explicit: BoardItem[] = [
+      { id: 'real0', boardId: DEFAULT_BOARD.id, refType: 'code', refId: 'code0', x: before0.x, y: before0.y }
+    ]
+    const after = getVisibleBoardItems(DEFAULT_BOARD, explicit, codesArg, [], [category], clusters)
+    const after1 = after.find((i) => i.refId === 'code1')!
+    const after2 = after.find((i) => i.refId === 'code2')!
+
+    // The untouched siblings must not have moved...
+    expect(after1.x).toBe(before1.x)
+    expect(after1.y).toBe(before1.y)
+    expect(after2.x).toBe(before2.x)
+    expect(after2.y).toBe(before2.y)
+    // ...and in particular must not have landed on the materialized member.
+    const overlapsExplicit = (item: BoardItem): boolean =>
+      item.x < explicit[0].x + 180 && item.x + 180 > explicit[0].x && item.y < explicit[0].y + 64 && item.y + 64 > explicit[0].y
+    expect(overlapsExplicit(after1)).toBe(false)
+    expect(overlapsExplicit(after2)).toBe(false)
+  })
+
   it('old 4-argument call signature (no categories/clusters) still works', () => {
     const items = getVisibleBoardItems(DEFAULT_BOARD, [], [{ id: 'c1' }], [{ id: 'n1' }])
     expect(items).toHaveLength(2)

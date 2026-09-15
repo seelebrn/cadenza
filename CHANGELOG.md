@@ -11,6 +11,9 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   to a neighbor could immediately snap/link it before any dragging happened — and in the
   worst case, a plain click with no movement at all could silently move the item and
   create a link. Snapping now only kicks in once you've actually started dragging.
+- Clicking an item inside a cluster on the Main board could make a *different* item jump
+  on top of it. A member's position in the cluster's grid no longer shifts depending on
+  which of its siblings have already been clicked/dragged.
 
 ## [0.4.0] - 2026-09-14
 

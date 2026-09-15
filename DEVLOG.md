@@ -2084,3 +2084,30 @@ drive the actual drag gesture from this environment, so — same caveat as the e
 fix — this is a well-evidenced diagnosis (the code matched the reported symptom exactly, down
 to "only on the default board" and "not once already dragged"), not a confirmed fix; worth the
 user checking it's actually gone.
+
+### A different item jumping onto the one just clicked, inside a cluster (2026-09-15)
+
+Immediate follow-up report: clicking an item *inside a cluster* on the Main board made a
+*different* item jump onto the one being clicked — the clicked one was still draggable, but
+another sibling had moved on top of it.
+
+Root cause, in `getVisibleBoardItems`: a cluster's still-virtual (never-dragged) members get
+their grid slot from `nextPositionInCluster`, a counter that only incremented when actually
+called — and `placeRef` only calls it for members that are still virtual, short-circuiting to
+the member's own stored position the moment it's explicit. Clicking a virtual item on the
+board materializes it into a real `BoardItem` at its own current position (`BoardItemCard`'s
+mousedown handler, from the earlier session's work) — on the very next render, `placeRef`
+takes the explicit branch for that member and never calls the counter for it, so every OTHER
+still-virtual sibling that comes after it in iteration order (project-wide code order, then
+note order) gets a slot number one lower than before — the second member drops straight into
+the first member's slot, landing exactly on top of it.
+
+Replaced the live, order-dependent counter with a slot precomputed for every member of a
+cluster up front, independent of which ones happen to already be explicit — a member's slot
+number in the grid no longer depends on how many of its siblings have or haven't been touched
+yet. Added a regression test (`materializing one member does not move its still-virtual
+siblings onto each other`) that reproduces this exactly: verified it fails against the old
+implementation (reverted it briefly to confirm — `expected 60 to be 248`, i.e. the sibling
+dropped into slot 0) and passes with the fix.
+
+Verified: 1 new test (360/360 total), typecheck clean, production build clean, boot-tested.

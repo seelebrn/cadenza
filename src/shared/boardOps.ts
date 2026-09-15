@@ -636,13 +636,38 @@ export function getVisibleBoardItems(
     if (memberCount > 0) memberColumnCountByCluster.set(cluster.id, packGridColumnCount(memberCount))
   }
 
-  const memberIndexByCluster = new Map<string, number>()
-  function nextPositionInCluster(cluster: BoardCluster): { x: number; y: number } {
-    const index = memberIndexByCluster.get(cluster.id) ?? 0
-    memberIndexByCluster.set(cluster.id, index + 1)
+  // Each member's slot within its home cluster's grid, assigned once up
+  // front (project-wide code order, then project-wide note order — the
+  // same traversal placeRef itself does below) rather than by an
+  // incrementing counter consulted only while placing each ref. A counter
+  // consulted live would skip a member the moment it stops being virtual
+  // (an explicit BoardItem short-circuits placeRef below before ever
+  // reaching that counter) — shifting every other still-virtual member in
+  // this cluster back by one slot and landing it exactly on top of a
+  // neighbor. Precomputing the whole cluster's slots up front, independent
+  // of which members happen to be virtual vs. already materialized, keeps
+  // a sibling's position stable regardless of whether this one has been
+  // touched yet.
+  const memberSlotByRef = new Map<string, number>()
+  const slotCounterByCluster = new Map<string, number>()
+  function assignSlot(key: string, cluster: BoardCluster): void {
+    const slot = slotCounterByCluster.get(cluster.id) ?? 0
+    memberSlotByRef.set(key, slot)
+    slotCounterByCluster.set(cluster.id, slot + 1)
+  }
+  for (const code of codes) {
+    const cluster = homeClusterByRef.get(`code:${code.id}`)
+    if (cluster) assignSlot(`code:${code.id}`, cluster)
+  }
+  for (const note of notes) {
+    const cluster = homeClusterByRef.get(`note:${note.id}`)
+    if (cluster) assignSlot(`note:${note.id}`, cluster)
+  }
+
+  function positionForSlot(cluster: BoardCluster, slot: number): { x: number; y: number } {
     const columnCount = memberColumnCountByCluster.get(cluster.id) ?? 1
-    const row = Math.floor(index / columnCount)
-    const column = index % columnCount
+    const row = Math.floor(slot / columnCount)
+    const column = slot % columnCount
     return {
       x: cluster.x + CLUSTER_PADDING + column * (MEMBER_CARD_WIDTH + MEMBER_CARD_GAP),
       y: cluster.y + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + row * CLUSTER_MEMBER_ROW_HEIGHT
@@ -663,7 +688,9 @@ export function getVisibleBoardItems(
       return
     }
     const homeCluster = homeClusterByRef.get(key)
-    const pos = homeCluster ? nextPositionInCluster(homeCluster) : computeGridPosition(autoIndex++, unclusteredOriginY)
+    const slot = memberSlotByRef.get(key)
+    const pos =
+      homeCluster && slot !== undefined ? positionForSlot(homeCluster, slot) : computeGridPosition(autoIndex++, unclusteredOriginY)
     result.push({ id: `virtual:${key}`, boardId: board.id, refType, refId, ...pos })
   }
 

@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-15
+
 ### Fixed
 - Snapping a code onto an existing cluster member didn't actually add it to that cluster —
   only the *next* time that pair was dragged together did it properly join. Now it joins

@@ -52,6 +52,7 @@ import {
   renestClustersCleanly,
   resetDefaultBoardClusterLayout,
   resolveGroupClusterReassignment,
+  resolveItemOverlaps,
   resolveResizeEnclosure,
   resolveSiblingOverlaps,
   setBoardClusterFrameSize,
@@ -3091,5 +3092,76 @@ describe('getVisibleBoardItems flat-grid slot skipping', () => {
     const c1 = items.find((i) => i.refId === 'c1')!
     const c2 = items.find((i) => i.refId === 'c2')!
     expect(Math.abs(c1.x - c2.x) < MEMBER_CARD_WIDTH && Math.abs(c1.y - c2.y) < MEMBER_CARD_HEIGHT).toBe(false)
+  })
+})
+
+describe('resolveItemOverlaps', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  function card(id: string, refId: string, x: number, y: number): BoardItem {
+    return { id, boardId: 'b1', refType: 'code', refId, x, y }
+  }
+  function overlapsCard(a: BoardItem, b: BoardItem): boolean {
+    return Math.abs(a.x - b.x) < MEMBER_CARD_WIDTH && Math.abs(a.y - b.y) < MEMBER_CARD_HEIGHT
+  }
+
+  it('moves the card that was already there, not the dropped one', () => {
+    const data = makeData({
+      boards: [board],
+      codes: [makeCode('a'), makeCode('b')],
+      boardItems: [card('ia', 'a', 100, 100), card('ib', 'b', 120, 110)]
+    })
+    const next = resolveItemOverlaps(data, 'b1', ['ia'])
+    const a = next.boardItems.find((i) => i.id === 'ia')!
+    const b = next.boardItems.find((i) => i.id === 'ib')!
+    expect({ x: a.x, y: a.y }).toEqual({ x: 100, y: 100 })
+    expect(overlapsCard(a, b)).toBe(false)
+  })
+
+  it('ripples through a full row: dropping onto a grid of cards leaves no pair stacked', () => {
+    // Three cards packed at the auto grid pitch, and a drop right on the middle one.
+    const pitch = MEMBER_CARD_WIDTH + 8
+    const data = makeData({
+      boards: [board],
+      codes: ['a', 'b', 'c', 'd'].map(makeCode),
+      boardItems: [
+        card('ia', 'a', 20, 48),
+        card('ib', 'b', 20 + pitch, 48),
+        card('ic', 'c', 20 + 2 * pitch, 48),
+        card('id', 'd', 20 + pitch + 30, 60)
+      ]
+    })
+    const next = resolveItemOverlaps(data, 'b1', ['id'])
+    const items = next.boardItems
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) expect(overlapsCard(items[i], items[j])).toBe(false)
+    }
+    expect(items.find((i) => i.id === 'id')).toMatchObject({ x: 20 + pitch + 30, y: 60 })
+  })
+
+  it("grows a pushed card's cluster so it still contains the card", () => {
+    const a = makeCategory('A', { codeIds: ['a', 'b'] })
+    const aBox: BoardCluster = { id: 'realA', boardId: 'b1', categoryId: 'A', x: 0, y: 0, width: 240, height: 140, createdAt: '0' }
+    const data = makeData({
+      boards: [board],
+      categories: [a],
+      codes: [makeCode('a'), makeCode('b')],
+      boardClusters: [aBox],
+      boardItems: [card('ia', 'a', 20, 48), card('ib', 'b', 30, 60)]
+    })
+    const next = resolveItemOverlaps(data, 'b1', ['ia'])
+    const b = next.boardItems.find((i) => i.id === 'ib')!
+    const box = next.boardClusters.find((c) => c.categoryId === 'A')!
+    expect(overlapsCard(next.boardItems.find((i) => i.id === 'ia')!, b)).toBe(false)
+    expect(b.x + MEMBER_CARD_WIDTH).toBeLessThanOrEqual(box.x + box.width)
+    expect(b.y + MEMBER_CARD_HEIGHT).toBeLessThanOrEqual(box.y + box.height)
+  })
+
+  it('is a no-op when nothing overlaps', () => {
+    const data = makeData({
+      boards: [board],
+      codes: [makeCode('a'), makeCode('b')],
+      boardItems: [card('ia', 'a', 100, 100), card('ib', 'b', 500, 500)]
+    })
+    expect(resolveItemOverlaps(data, 'b1', ['ia'])).toBe(data)
   })
 })

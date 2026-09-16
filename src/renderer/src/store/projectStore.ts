@@ -72,6 +72,7 @@ import {
   growClusterToFitOwnMembers as growClusterToFitOwnMembersOp,
   linkItems as linkItemsOp,
   materializeChildClusters as materializeChildClustersOp,
+  resolveItemOverlaps as resolveItemOverlapsOp,
   resolveSiblingOverlaps as resolveSiblingOverlapsOp,
   materializeSiblingClusters as materializeSiblingClustersOp,
   moveCluster as moveClusterOp,
@@ -298,6 +299,10 @@ interface ProjectState {
    * or dropped, so it never silently covers a neighbor. See
    * resolveSiblingOverlaps' own comment. */
   resolveSiblingOverlaps: (boardId: string, categoryId: string) => void
+  /** Pushes any explicit card the just-dropped cards (anchorItemIds) now
+   * cover to the nearest free spot, growing their clusters to fit — call
+   * after an item drop, so cards never stack. See resolveItemOverlaps. */
+  resolveItemOverlaps: (boardId: string, anchorItemIds: string[]) => void
   /** Grows (materializing, if still virtual) categoryId's own box to fit
    * its current membership, if it isn't already big enough — call after a
    * board drag adds a new member to an already-placed cluster. */
@@ -878,6 +883,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   resolveSiblingOverlaps: (boardId, categoryId) =>
     get().updateProject((data) => resolveSiblingOverlapsOp(data, boardId, categoryId)),
+
+  resolveItemOverlaps: (boardId, anchorItemIds) =>
+    get().updateProject((data) => resolveItemOverlapsOp(data, boardId, anchorItemIds)),
 
   renestClustersCleanly: (boardId, parentCategoryId, newChildCategoryIds) =>
     get().updateProject((data) => renestClustersCleanlyOp(data, boardId, parentCategoryId, newChildCategoryIds)),

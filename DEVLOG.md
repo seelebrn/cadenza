@@ -2771,3 +2771,41 @@ when nothing overlaps or the anchor is virtual; ripple through a third cluster l
 overlapping; no negative coordinates; growing a parent pushes the parent's own neighbor; flat-
 grid slot skipping) — six confirmed to fail with the two fixes toggled off (the seventh is the
 no-op case). Full suite green (415/415), typecheck clean, production build clean, boot-tested.
+
+### Cards never stack: dropping into a full cluster (2026-09-16)
+
+"What happens if I want to drag an item to an already full cluster, meaning I have to drag it
+to an existing item. The new item will stack with an existing one, right? This should be
+avoided. If needed, resize the cluster to accommodate the new item. Generally, items should not
+be stacked either."
+
+Correct — it stacked. A dropped card stayed exactly where it was released, and the only thing
+that changed was the box (`growClusterToFitOwnMembers` grows it to fit the bigger grid and the
+dropped card's own rect). Nothing moved the card that was already sitting there. With a snap
+(release within 70px of a card's center) it was subtly worse: the drop was placed edge-to-edge
+beside the target at a 12px gap, while the grid packs cards at an 8px gap — so the snapped card
+landed almost entirely on top of the *next* card in the row instead.
+
+New `resolveItemOverlaps(boardId, anchorItemIds)`, the card counterpart of the cluster-level
+`resolveSiblingOverlaps` from the previous entry: the dropped cards (the whole linked group, plus
+a freshly snapped target, since that pair belongs together) stay exactly where they were
+released; every other explicit card on the board they now cover is pushed to the nearest free
+spot — down/right/left/up, whichever is the smallest move that lands clear of everything already
+settled — rippling through a third card if the push lands on one. A pushed card that belongs to
+a cluster then has that cluster grown to keep containing it (`growClusterToFitOwnMembers` already
+fits explicit member rects), and its ancestors after that — which is the "resize the cluster to
+accommodate the new item" half of the request, just with the *displaced* card as the thing being
+accommodated, so the user's own drop position is honored. Every card in the destination cluster
+is explicit by the time this runs (`reassignRefCategoryMembership` materializes them all), so
+the whole grid takes part; a still-virtual card elsewhere is left to its slot.
+
+Not changed, worth knowing: dropping onto a card in a full cluster is, by construction, a drop
+within snap range of that card, so it also *links* the two (that's the existing snap-to-link
+gesture). The card no longer stacks, but the link is created; if "drop into a full cluster
+without linking" turns out to be a common need, the snap could be gated further.
+
+Verified: 4 new tests (the already-present card moves, the dropped one doesn't; a drop onto the
+middle of a packed row leaves no pair stacked; a pushed card's cluster grows to keep containing
+it; true no-op by reference equality when nothing overlaps) — the first three confirmed to fail
+with the resolver toggled off. Full suite green (419/419), typecheck clean, production build
+clean, boot-tested.

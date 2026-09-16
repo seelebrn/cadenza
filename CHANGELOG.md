@@ -29,6 +29,10 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   another cluster.
 - An auto-placed card in the unclustered area could land exactly on top of a card you had
   dragged there by hand; it now takes the next free slot.
+- Dropping a code into a cluster with no free space left stacked it on top of the card it was
+  released over (or, when it snapped, on top of the next card along). The card that was already
+  there now moves over to free space and the cluster grows to fit — the dropped card stays where
+  you put it. Cards never stack anywhere on the board after a drop.
 
 ## [0.4.3] - 2026-09-16
 

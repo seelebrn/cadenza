@@ -1531,12 +1531,12 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
 /** The nearest spot (never at negative coordinates) that moves `rect`
  * clear of `collider` — preferring one that's clear of everything already
  * settled, then the smallest displacement. */
-function pushClear(rect: Rect, collider: Rect, settled: Rect[]): Rect {
+function pushClear(rect: Rect, collider: Rect, settled: Rect[], gap: number): Rect {
   const candidates = [
-    { x: rect.x, y: collider.y + collider.height + CLUSTER_GAP },
-    { x: collider.x + collider.width + CLUSTER_GAP, y: rect.y },
-    { x: collider.x - rect.width - CLUSTER_GAP, y: rect.y },
-    { x: rect.x, y: collider.y - rect.height - CLUSTER_GAP }
+    { x: rect.x, y: collider.y + collider.height + gap },
+    { x: collider.x + collider.width + gap, y: rect.y },
+    { x: collider.x - rect.width - gap, y: rect.y },
+    { x: rect.x, y: collider.y - rect.height - gap }
   ]
     .filter((p) => p.x >= 0 && p.y >= 0)
     .map((p) => ({
@@ -1603,7 +1603,7 @@ export function resolveSiblingOverlaps(data: ProjectData, boardId: string, categ
     for (let guard = 0; guard < 100; guard++) {
       const collider = settled.find((s) => rectsOverlap(s, rect))
       if (!collider) break
-      rect = pushClear(rect, collider, settled)
+      rect = pushClear(rect, collider, settled, CLUSTER_GAP)
     }
     const dx = rect.x - sibling.x
     const dy = rect.y - sibling.y
@@ -1614,6 +1614,65 @@ export function resolveSiblingOverlaps(data: ProjectData, boardId: string, categ
     settled.push(rect)
   }
   for (const id of pushed) next = growAncestorClustersToFit(next, boardId, id)
+  return next
+}
+
+/**
+ * The card counterpart of resolveSiblingOverlaps: after a card (or a
+ * linked group of them) is dropped, every other explicit card on the
+ * board it now covers is pushed to the nearest free spot — the dropped
+ * cards themselves stay exactly where they were released. A pushed card
+ * that's a cluster member then has that cluster grown to keep containing
+ * it (which in turn keeps the cluster's own neighbors clear).
+ *
+ * This is what makes dropping into an already-full cluster work: there's
+ * no empty slot to release over, so the drop necessarily lands on an
+ * existing card — previously the two just stacked. Now the one already
+ * there moves over and the cluster grows to fit. Every card in the
+ * destination cluster is explicit by the time this runs
+ * (reassignRefCategoryMembership materializes them), so its whole grid
+ * takes part.
+ */
+export function resolveItemOverlaps(data: ProjectData, boardId: string, anchorItemIds: string[]): ProjectData {
+  const explicitItems = data.boardItems.filter((i) => i.boardId === boardId)
+  const anchorIds = new Set(anchorItemIds)
+  const anchors = explicitItems.filter((i) => anchorIds.has(i.id))
+  if (anchors.length === 0) return data
+
+  const rectOf = (i: BoardItem): Rect => ({ x: i.x, y: i.y, width: MEMBER_CARD_WIDTH, height: MEMBER_CARD_HEIGHT })
+  const settled: Rect[] = anchors.map(rectOf)
+  const others = explicitItems
+    .filter((i) => !anchorIds.has(i.id))
+    .sort((a, b) => {
+      const aHit = settled.some((s) => rectsOverlap(s, rectOf(a))) ? 0 : 1
+      const bHit = settled.some((s) => rectsOverlap(s, rectOf(b))) ? 0 : 1
+      return aHit - bHit || a.y - b.y || a.x - b.x
+    })
+
+  let next = data
+  const pushed: BoardItem[] = []
+  for (const item of others) {
+    let rect = rectOf(item)
+    for (let guard = 0; guard < 100; guard++) {
+      const collider = settled.find((s) => rectsOverlap(s, rect))
+      if (!collider) break
+      rect = pushClear(rect, collider, settled, MEMBER_CARD_GAP)
+    }
+    if (rect.x !== item.x || rect.y !== item.y) {
+      next = moveItem(next, item.id, rect.x, rect.y)
+      pushed.push(item)
+    }
+    settled.push(rect)
+  }
+
+  for (const item of pushed) {
+    if (item.refType === 'segment') continue
+    for (const category of next.categories) {
+      if (!isCategoryMember(category, item.refType, item.refId)) continue
+      next = growClusterToFitOwnMembers(next, boardId, category.id)
+      next = growAncestorClustersToFit(next, boardId, category.id)
+    }
+  }
   return next
 }
 

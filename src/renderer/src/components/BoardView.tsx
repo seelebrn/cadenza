@@ -148,6 +148,7 @@ function BoardView(): JSX.Element {
   const renestClustersCleanly = useProjectStore((s) => s.renestClustersCleanly)
   const detachOrphanedChildren = useProjectStore((s) => s.detachOrphanedChildren)
   const resolveSiblingOverlaps = useProjectStore((s) => s.resolveSiblingOverlaps)
+  const resolveItemOverlaps = useProjectStore((s) => s.resolveItemOverlaps)
   const growClusterToFitOwnMembers = useProjectStore((s) => s.growClusterToFitOwnMembers)
   const growAncestorClustersToFit = useProjectStore((s) => s.growAncestorClustersToFit)
   const reassignRefCategoryMembership = useProjectStore((s) => s.reassignRefCategoryMembership)
@@ -624,6 +625,14 @@ function BoardView(): JSX.Element {
                 reassignment.newCluster?.categoryId ?? null
               )
             }
+          }
+          // The dropped cards stay where they were released; anything
+          // they now cover moves over instead (see resolveItemOverlaps) —
+          // in particular the card that was already sitting in the only
+          // spot left in a full cluster. The freshly snapped target is
+          // part of the dropped pair, so it stays put too.
+          if (selectedBoardId) {
+            resolveItemOverlaps(selectedBoardId, targetId ? [...groupMemberIds, targetId] : groupMemberIds)
           }
           // A cluster's own box used to stay frozen at whatever size it
           // already had, even once a newly-added member's card no longer

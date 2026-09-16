@@ -154,7 +154,6 @@ function BoardView(): JSX.Element {
   const materializeSiblingClusters = useProjectStore((s) => s.materializeSiblingClusters)
   const materializeChildClusters = useProjectStore((s) => s.materializeChildClusters)
   const renestClustersCleanly = useProjectStore((s) => s.renestClustersCleanly)
-  const detachOrphanedChildren = useProjectStore((s) => s.detachOrphanedChildren)
   const resolveSiblingOverlaps = useProjectStore((s) => s.resolveSiblingOverlaps)
   const resolveItemOverlaps = useProjectStore((s) => s.resolveItemOverlaps)
   const growClusterToFitOwnMembers = useProjectStore((s) => s.growClusterToFitOwnMembers)
@@ -498,6 +497,17 @@ function BoardView(): JSX.Element {
       const dx = (e.clientX - state.startMouseX) / zoom
       const dy = (e.clientY - state.startMouseY) / zoom
 
+      // A plain click commits nothing. Without this, releasing with no
+      // real movement still ran the whole drop pipeline with a zero delta
+      // — for a cluster: re-evaluate its parent, pin its group, grow
+      // ancestors, resolve overlaps — and any of that reflowing a neighbor
+      // showed up as "I just clicked a cluster and others moved."
+      if (Math.hypot(dx, dy) < MIN_DRAG_DISTANCE_FOR_SNAP) {
+        setDragState(null)
+        setLiveDelta({ dx: 0, dy: 0, shiftKey: false })
+        return
+      }
+
       // One drag gesture can call several store actions in a row (moving a
       // whole linked group, re-evaluating cluster membership, nesting +
       // resizing a destination cluster…) — batched so it undoes as the one
@@ -621,17 +631,6 @@ function BoardView(): JSX.Element {
               // necessarily the one it visually sits in — reported as
               // linked codes landing outside their cluster, or in the
               // wrong one entirely, after Reset Placement.
-              //
-              // Also stabilizes every other still-virtual member of both
-              // the category being left and the one being joined first
-              // (see reassignRefCategoryMembership/materializeClusterMemberItems'
-              // own comments) — a member's membership changing densely
-              // renumbers its former/new cluster's own grid slots, which
-              // could otherwise land a sibling directly on top of another
-              // one already sitting there. Reported as: moving a code
-              // between clusters while snap-linking it to one already in
-              // the destination, a code from either cluster ends up
-              // superposed on a different code from the same cluster.
               reassignRefCategoryMembership(
                 selectedBoardId,
                 ref.refType,
@@ -809,15 +808,6 @@ function BoardView(): JSX.Element {
             if (newlyEnclosed.length > 0 && selectedBoardId) {
               renestClustersCleanly(selectedBoardId, state.categoryId, newlyEnclosed)
             }
-            // The reverse of the above: shrinking this cluster can leave
-            // one of its EXISTING children no longer fitting inside it.
-            // Leaving the stale parent link standing is exactly when
-            // getStructuralNestingEdges draws a connector line in place of
-            // the spatial containment that's no longer true — reported as
-            // a "stray arrow" appearing from a resize that only touched
-            // one cluster directly. A no-op when nothing's actually
-            // orphaned (e.g. this resize only grew the box).
-            if (selectedBoardId) detachOrphanedChildren(selectedBoardId, state.categoryId)
           }
 
           // A superordinate cluster used to stay frozen at whatever size
@@ -1594,9 +1584,10 @@ function BoardView(): JSX.Element {
           Ctrl/Cmd+scroll to zoom · drop a card into a cluster to file it there (cards inside a cluster are
           arranged automatically; drop it on empty space to take it out) · hold Shift while dragging a card near
           another to link them (a plain drop never links); linked cards move together (Ctrl/Cmd+drag to move just
-          one) · drag a cluster into another to nest it as a superordinate group (shift+drag to pull it out) ·
-          click the × on a connector to unlink · right-click a code/note card for its full info and verbatim
-          excerpts
+          one) · drag a cluster into another to nest it there (clusters inside a superordinate are arranged
+          automatically and it grows to hold them; drag one out, or shift+drag it, to take it out) · resize a
+          top-level cluster around others to nest them · click the × on a connector to unlink · right-click a
+          code/note card for its full info and verbatim excerpts
           {!currentBoard.isDefault &&
             ' · "Link clusters" then click two clusters to draw a labeled thematic-map relationship between them'}
         </p>

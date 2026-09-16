@@ -13,10 +13,11 @@ coding/note automatically. Clusters (a code/note/quote grouping — or itself an
 question) are the same data everywhere they appear: the board, the Workspace sidebar's
 Clusters tab, and Analysis's Clusters tab are three views onto one list, not three copies to
 keep in sync. Every code and note appears on the default board automatically, and clusters
-can nest into superordinate groups (drag one into another; shift+drag to pull one back out).
-Drop a card into a cluster to file it there — cards inside a cluster are arranged in a grid
-automatically and the cluster sizes itself to hold them, so the picture is always exactly the
-membership; free placement is for cards outside any cluster. Codes and notes link into rigid
+can nest into superordinate groups (drag one into another; drag it out, or shift+drag, to pull it
+back out). Inside a cluster, everything is arranged automatically: its cards sit in a grid and
+its nested sub-clusters in a grid of their own, and the cluster sizes itself to hold them all —
+so the picture is always exactly the membership and nesting, never something to tidy up by hand.
+Free placement is for the board's top level: top-level clusters and cards outside any cluster. Codes and notes link into rigid
 little groups only when you ask: hold Shift while dragging a card near another to snap-link them
 (a plain drop never links; linked cards sit side by side in their cluster's grid); Ctrl/Cmd+drag
 moves one card out of its group on its own.

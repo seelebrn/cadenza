@@ -22,7 +22,6 @@ import {
   deleteBoard,
   deleteCluster,
   describeBoardItem,
-  detachOrphanedChildren,
   findAlignmentSnap,
   findClusterAtPoint,
   findClusterForCategoryOnBoard,
@@ -39,7 +38,6 @@ import {
   growAncestorClustersToFit,
   growClusterToFitOwnMembers,
   linkItems,
-  materializeClusterMemberItems,
   materializeChildClusters,
   materializeSiblingClusters,
   MEMBER_CARD_HEIGHT,
@@ -838,12 +836,33 @@ describe('growAncestorClustersToFit', () => {
     const resized = resizeCluster(withChild, childCluster.id, 900, 900)
 
     const next = growAncestorClustersToFit(resized, 'board1', 'B')
-    const grownParent = next.boardClusters.find((c) => c.categoryId === 'A')!
-    expect(grownParent).toBeDefined()
+    // The parent is shown grown around its bigger child (a box is never
+    // smaller than its contents), whether or not it has a stored shape.
+    const visible = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
+    const grownParent = visible.find((c) => c.categoryId === 'A')!
     expect(grownParent.width).toBeGreaterThan(parentBefore.width)
-    expect(
-      rectContains(grownParent, next.boardClusters.find((c) => c.categoryId === 'B')!)
-    ).toBe(true)
+    expect(rectContains(grownParent, visible.find((c) => c.categoryId === 'B')!)).toBe(true)
+  })
+
+  it("brings a stored ancestor shape up to its shown size, and clears the root's neighbors", () => {
+    const parent = makeCategory('A')
+    const child = makeCategory('B', { parentCategoryId: 'A' })
+    const neighbor = makeCategory('N')
+    const smallParent: BoardCluster = { id: 'realA', boardId: 'board1', categoryId: 'A', x: 0, y: 0, width: 300, height: 300, createdAt: '0' }
+    const bigChild: BoardCluster = { id: 'realB', boardId: 'board1', categoryId: 'B', x: 0, y: 0, width: 900, height: 900, createdAt: '0' }
+    const neighborBox: BoardCluster = { id: 'realN', boardId: 'board1', categoryId: 'N', x: 350, y: 0, width: 280, height: 200, createdAt: '0' }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, child, neighbor],
+      boardClusters: [smallParent, bigChild, neighborBox]
+    })
+
+    const next = growAncestorClustersToFit(data, 'board1', 'B')
+
+    const storedParent = next.boardClusters.find((c) => c.categoryId === 'A')!
+    expect(storedParent.width).toBeGreaterThanOrEqual(900)
+    const visible = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
+    expect(rectsOverlap(visible.find((c) => c.categoryId === 'A')!, visible.find((c) => c.categoryId === 'N')!)).toBe(false)
   })
 
   it('grows transitively up a three-level chain', () => {
@@ -870,9 +889,11 @@ describe('growAncestorClustersToFit', () => {
     const resized = resizeCluster(withLeaf, leafCluster.id, 700, 700)
 
     const next = growAncestorClustersToFit(resized, 'board1', 'C')
-    const grownRoot = next.boardClusters.find((c) => c.categoryId === 'A')!
-    expect(grownRoot).toBeDefined()
+    const visible = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
+    const grownRoot = visible.find((c) => c.categoryId === 'A')!
     expect(grownRoot.width).toBeGreaterThan(rootBefore.width)
+    expect(rectContains(grownRoot, visible.find((c) => c.categoryId === 'B')!)).toBe(true)
+    expect(rectContains(visible.find((c) => c.categoryId === 'B')!, visible.find((c) => c.categoryId === 'C')!)).toBe(true)
   })
 
   it('is a no-op for a root category with no parent', () => {
@@ -968,19 +989,20 @@ describe('renestClustersCleanly', () => {
 
     const next = renestClustersCleanly(withParentAndReparent, 'board1', 'super', ['a', 'b', 'c'])
 
-    const childBoxes = ['a', 'b', 'c'].map((id) => next.boardClusters.find((cl) => cl.categoryId === id)!)
+    const visible = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
+    const childBoxes = ['a', 'b', 'c'].map((id) => visible.find((cl) => cl.categoryId === id)!)
     for (const box of childBoxes) expect(box).toBeDefined()
     for (let i = 0; i < childBoxes.length; i++) {
       for (let j = i + 1; j < childBoxes.length; j++) {
         expect(boxesOverlap(childBoxes[i], childBoxes[j])).toBe(false)
       }
     }
-    const parentBox = next.boardClusters.find((cl) => cl.categoryId === 'super')!
+    const parentBox = visible.find((cl) => cl.categoryId === 'super')!
     for (const box of childBoxes) {
       expect(rectContains(parentBox, box)).toBe(true)
     }
     // In particular, "a" no longer sits at its old, unrelated position.
-    const aAfter = next.boardClusters.find((cl) => cl.categoryId === 'a')!
+    const aAfter = visible.find((cl) => cl.categoryId === 'a')!
     expect(aAfter.x).not.toBe(5000)
     expect(aAfter.y).not.toBe(5000)
   })
@@ -1007,9 +1029,13 @@ describe('renestClustersCleanly', () => {
 
     const next = renestClustersCleanly(data, 'board1', 'super', ['a', 'b'])
 
-    const parentAfter = next.boardClusters.find((cl) => cl.categoryId === 'super')!
-    const childBoxes = ['a', 'b'].map((id) => next.boardClusters.find((cl) => cl.categoryId === id)!)
+    const visible = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
+    const parentAfter = visible.find((cl) => cl.categoryId === 'super')!
+    const childBoxes = ['a', 'b'].map((id) => visible.find((cl) => cl.categoryId === id)!)
     for (const box of childBoxes) expect(rectContains(parentAfter, box)).toBe(true)
+    // The stored shape is brought up to what's shown, not left lagging.
+    const stored = next.boardClusters.find((cl) => cl.categoryId === 'super')!
+    expect({ width: stored.width, height: stored.height }).toEqual({ width: parentAfter.width, height: parentAfter.height })
   })
 
   it('leaves an already-explicit child (not part of newChildCategoryIds) untouched', () => {
@@ -1088,10 +1114,14 @@ describe('renestClustersCleanly', () => {
 
     const next = renestClustersCleanly(data, 'board1', 'super', ['fresh'])
 
-    const alreadyAfter = next.boardClusters.find((cl) => cl.categoryId === 'already')!
-    const freshAfter = next.boardClusters.find((cl) => cl.categoryId === 'fresh')!
-    expect(alreadyAfter).toEqual(alreadyExplicit)
+    expect(next.boardClusters.find((cl) => cl.categoryId === 'already')).toEqual(alreadyExplicit)
+    const visible = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
+    const alreadyAfter = visible.find((cl) => cl.categoryId === 'already')!
+    const freshAfter = visible.find((cl) => cl.categoryId === 'fresh')!
     expect(boxesOverlap(alreadyAfter, freshAfter)).toBe(false)
+    const parentAfter = visible.find((cl) => cl.categoryId === 'super')!
+    expect(rectContains(parentAfter, alreadyAfter)).toBe(true)
+    expect(rectContains(parentAfter, freshAfter)).toBe(true)
   })
 
   // Regression: a relocating cluster's own nested sub-cluster was
@@ -1195,185 +1225,6 @@ describe('renestClustersCleanly', () => {
   })
 })
 
-describe('detachOrphanedChildren', () => {
-  // Regression: shrinking a cluster used to leave a child it no longer
-  // encloses still nested in the data model (parentCategoryId untouched)
-  // — the exact condition getStructuralNestingEdges draws a connector
-  // line for, appearing as a "stray arrow" for a resize the user only
-  // did to one cluster directly.
-  it('un-nests a child that no longer fits after its parent shrinks', () => {
-    const parent = makeCategory('super')
-    const child = makeCategory('child', { parentCategoryId: 'super' })
-    const shrunkParent: BoardCluster = {
-      id: 'realSuper',
-      boardId: 'board1',
-      categoryId: 'super',
-      x: 0,
-      y: 0,
-      width: 300,
-      height: 250,
-      createdAt: '0'
-    }
-    // The child sits well outside the parent's new, shrunk box.
-    const childOutside: BoardCluster = {
-      id: 'realChild',
-      boardId: 'board1',
-      categoryId: 'child',
-      x: 900,
-      y: 900,
-      width: 280,
-      height: 200,
-      createdAt: '0'
-    }
-    const data = makeData({
-      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
-      categories: [parent, child],
-      boardClusters: [shrunkParent, childOutside]
-    })
-
-    const next = detachOrphanedChildren(data, 'board1', 'super')
-
-    expect(next.categories.find((c) => c.id === 'child')!.parentCategoryId).toBeNull()
-    // Not moved — still sitting exactly where it visually was.
-    const childAfter = next.boardClusters.find((c) => c.categoryId === 'child')!
-    expect(childAfter.x).toBe(900)
-    expect(childAfter.y).toBe(900)
-  })
-
-  // Regression: a still-virtual child's position is computed from its
-  // parent's box — detaching it by just clearing parentCategoryId made it
-  // recompute from scratch as a root, jumping to the root grid's next free
-  // slot instead of staying where it visibly was.
-  it('pins a still-virtual orphan where it was instead of letting it jump to the root grid', () => {
-    const parent = makeCategory('super')
-    const child = makeCategory('child', { parentCategoryId: 'super' })
-    const tinyParent: BoardCluster = {
-      id: 'realSuper',
-      boardId: 'board1',
-      categoryId: 'super',
-      x: 500,
-      y: 500,
-      width: 100,
-      height: 100,
-      createdAt: '0'
-    }
-    const board = { id: 'board1', name: 'Main', isDefault: true }
-    const data = makeData({ boards: [board], categories: [parent, child], boardClusters: [tinyParent] })
-    const before = getVisibleBoardClusters(board, data.boardClusters, data.categories).find((c) => c.categoryId === 'child')!
-
-    const next = detachOrphanedChildren(data, 'board1', 'super')
-
-    expect(next.categories.find((c) => c.id === 'child')!.parentCategoryId).toBeNull()
-    const after = getVisibleBoardClusters(board, next.boardClusters, next.categories).find((c) => c.categoryId === 'child')!
-    expect({ x: after.x, y: after.y }).toEqual({ x: before.x, y: before.y })
-  })
-
-  it('leaves a child that still fits nested', () => {
-    const parent = makeCategory('super')
-    const child = makeCategory('child', { parentCategoryId: 'super' })
-    const bigParent: BoardCluster = {
-      id: 'realSuper',
-      boardId: 'board1',
-      categoryId: 'super',
-      x: 0,
-      y: 0,
-      width: 2000,
-      height: 2000,
-      createdAt: '0'
-    }
-    const childInside: BoardCluster = {
-      id: 'realChild',
-      boardId: 'board1',
-      categoryId: 'child',
-      x: 50,
-      y: 50,
-      width: 280,
-      height: 200,
-      createdAt: '0'
-    }
-    const data = makeData({
-      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
-      categories: [parent, child],
-      boardClusters: [bigParent, childInside]
-    })
-
-    const next = detachOrphanedChildren(data, 'board1', 'super')
-
-    expect(next.categories.find((c) => c.id === 'child')!.parentCategoryId).toBe('super')
-    expect(next).toBe(data) // true no-op — same reference
-  })
-
-  it('detaches every orphaned child, not just one', () => {
-    const parent = makeCategory('super')
-    const staying = makeCategory('staying', { parentCategoryId: 'super' })
-    const orphan1 = makeCategory('orphan1', { parentCategoryId: 'super' })
-    const orphan2 = makeCategory('orphan2', { parentCategoryId: 'super' })
-    const shrunkParent: BoardCluster = {
-      id: 'realSuper',
-      boardId: 'board1',
-      categoryId: 'super',
-      x: 0,
-      y: 0,
-      width: 320,
-      height: 260,
-      createdAt: '0'
-    }
-    const stayingInside: BoardCluster = {
-      id: 'realStaying',
-      boardId: 'board1',
-      categoryId: 'staying',
-      x: 20,
-      y: 40,
-      width: 280,
-      height: 200,
-      createdAt: '0'
-    }
-    const orphan1Box: BoardCluster = {
-      id: 'realOrphan1',
-      boardId: 'board1',
-      categoryId: 'orphan1',
-      x: 900,
-      y: 900,
-      width: 280,
-      height: 200,
-      createdAt: '0'
-    }
-    const orphan2Box: BoardCluster = {
-      id: 'realOrphan2',
-      boardId: 'board1',
-      categoryId: 'orphan2',
-      x: -900,
-      y: -900,
-      width: 280,
-      height: 200,
-      createdAt: '0'
-    }
-    const data = makeData({
-      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
-      categories: [parent, staying, orphan1, orphan2],
-      boardClusters: [shrunkParent, stayingInside, orphan1Box, orphan2Box]
-    })
-
-    const next = detachOrphanedChildren(data, 'board1', 'super')
-
-    expect(next.categories.find((c) => c.id === 'staying')!.parentCategoryId).toBe('super')
-    expect(next.categories.find((c) => c.id === 'orphan1')!.parentCategoryId).toBeNull()
-    expect(next.categories.find((c) => c.id === 'orphan2')!.parentCategoryId).toBeNull()
-  })
-
-  it('is a no-op for an unknown board or category', () => {
-    const parent = makeCategory('super')
-    const data = makeData({
-      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
-      categories: [parent]
-    })
-    expect(detachOrphanedChildren(data, 'nope', 'super')).toBe(data)
-    expect(detachOrphanedChildren(data, 'board1', 'nope')).toBe(data)
-  })
-})
-
-// --- resetDefaultBoardClusterLayout ---------------------------------------
-
 describe('resetDefaultBoardClusterLayout', () => {
   it('drops explicit cluster shapes only for the target board', () => {
     const data = makeData({
@@ -1449,9 +1300,11 @@ describe('resetDefaultBoardClusterLayout', () => {
     const items = getVisibleBoardItems(DEFAULT_BOARD, data.boardItems, data.codes, [], data.categories, clusters)
     const codeItem = items.find((i) => i.refType === 'code' && i.refId === 'code1')!
 
-    // The frozen 60x60 box couldn't fit a member row — after reflow it must
-    // have grown to accommodate one.
-    expect(cluster.width * cluster.height).toBeGreaterThan(before.width * before.height)
+    // The stored 60x60 box couldn't fit a member row — what's shown must
+    // have room for one (the box is never smaller than its contents; it
+    // already was before the reset, since a stored shape is only a floor).
+    expect(cluster.width * cluster.height).toBeGreaterThan(60 * 60)
+    expect(before.width * before.height).toBe(60 * 60)
     // And the new member actually lands inside the (grown) box, not outside it.
     expect(
       rectContains(cluster, {
@@ -1664,52 +1517,6 @@ describe('getVisibleBoardItems', () => {
   it('old 4-argument call signature (no categories/clusters) still works', () => {
     const items = getVisibleBoardItems(DEFAULT_BOARD, [], [{ id: 'c1' }], [{ id: 'n1' }])
     expect(items).toHaveLength(2)
-  })
-})
-
-describe('materializeClusterMemberItems', () => {
-  it('gives every still-virtual code/note member of a category a real item at its current position', () => {
-    const category = makeCategory('K', { codeIds: ['a', 'b'] })
-    const data = makeData({
-      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
-      categories: [category],
-      codes: [makeCode('a'), makeCode('b')]
-    })
-    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], data.categories)
-    const before = getVisibleBoardItems(DEFAULT_BOARD, [], data.codes, data.notes, data.categories, clusters)
-
-    const next = materializeClusterMemberItems(data, 'board1', 'K')
-    expect(next.boardItems).toHaveLength(2)
-    for (const item of before) {
-      const materialized = next.boardItems.find((i) => i.refType === item.refType && i.refId === item.refId)
-      expect(materialized).toBeDefined()
-      expect(materialized!.x).toBe(item.x)
-      expect(materialized!.y).toBe(item.y)
-    }
-  })
-
-  it('skips a member that is already explicit', () => {
-    const category = makeCategory('K', { codeIds: ['a'] })
-    const already: BoardItem = { id: 'realA', boardId: 'board1', refType: 'code', refId: 'a', x: 999, y: 999 }
-    const data = makeData({
-      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
-      categories: [category],
-      codes: [makeCode('a')],
-      boardItems: [already]
-    })
-    const next = materializeClusterMemberItems(data, 'board1', 'K')
-    expect(next.boardItems).toEqual([already])
-  })
-
-  it('is a no-op for an unknown board or category', () => {
-    const category = makeCategory('K', { codeIds: ['a'] })
-    const data = makeData({
-      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
-      categories: [category],
-      codes: [makeCode('a')]
-    })
-    expect(materializeClusterMemberItems(data, 'nope', 'K')).toBe(data)
-    expect(materializeClusterMemberItems(data, 'board1', 'nope')).toBe(data)
   })
 })
 
@@ -2011,18 +1818,18 @@ describe('computeCategoryLayout', () => {
   // superordinate cluster to enclose several others dropped one of them
   // right on top of a neighbor already nested inside it, instead of into
   // free space in the grid.
-  it("packs a virtual sibling around an explicit one's real position, regardless of processing order", () => {
-    const parent = makeCategory('super')
-    const a = makeCategory('a', { parentCategoryId: 'super' })
-    const b = makeCategory('b', { parentCategoryId: 'super' })
-    const old = makeCategory('old', { parentCategoryId: 'super' })
-    const c = makeCategory('c', { parentCategoryId: 'super' })
+  it("packs a virtual root around an explicit one's real position, regardless of processing order", () => {
+    const a = makeCategory('a')
+    const b = makeCategory('b')
+    const old = makeCategory('old')
+    const c = makeCategory('c')
     // "old" comes *after* "a" and "b" in category order, and its real
-    // position (set via the override map) happens to coincide with
-    // exactly where the shortest-column heuristic would otherwise put
-    // the first virtual sibling it processes.
-    const overrides = new Map([['old', { x: 20, y: 48, width: 280, height: 200 }]])
-    const layout = computeCategoryLayout([parent, a, b, old, c], overrides)
+    // position (set via the override map) is exactly where the
+    // shortest-column heuristic would otherwise put the first virtual
+    // root it processes.
+    const first = computeCategoryLayout([a])[0]
+    const overrides = new Map([['old', { x: first.x, y: first.y, width: 280, height: 200 }]])
+    const layout = computeCategoryLayout([a, b, old, c], overrides)
 
     const boxes = ['a', 'b', 'old', 'c'].map((id) => asCluster(layout.find((l) => l.categoryId === id)!))
     for (let i = 0; i < boxes.length; i++) {
@@ -2031,8 +1838,36 @@ describe('computeCategoryLayout', () => {
       }
     }
     const oldBox = layout.find((l) => l.categoryId === 'old')!
-    expect(oldBox.x).toBe(20)
-    expect(oldBox.y).toBe(48)
+    expect({ x: oldBox.x, y: oldBox.y }).toEqual({ x: first.x, y: first.y })
+  })
+
+  it('places a nested category at its slot in the parent grid, ignoring its stored position', () => {
+    const parent = makeCategory('super')
+    const a = makeCategory('a', { parentCategoryId: 'super' })
+    const b = makeCategory('b', { parentCategoryId: 'super' })
+    const natural = computeCategoryLayout([parent, a, b])
+    const withStray = computeCategoryLayout(
+      [parent, a, b],
+      new Map([['a', { x: 5000, y: 5000, width: 280, height: 200 }]])
+    )
+    const aNatural = natural.find((l) => l.categoryId === 'a')!
+    const aShown = withStray.find((l) => l.categoryId === 'a')!
+    expect({ x: aShown.x, y: aShown.y }).toEqual({ x: aNatural.x, y: aNatural.y })
+    expect(rectContains(asCluster(withStray.find((l) => l.categoryId === 'super')!), asCluster(aShown))).toBe(true)
+  })
+
+  it("an explicit parent is shown big enough for its children grid, not frozen at its stored size", () => {
+    const parent = makeCategory('super')
+    const kids = ['a', 'b', 'c', 'd'].map((id) => makeCategory(id, { parentCategoryId: 'super' }))
+    const layout = computeCategoryLayout(
+      [parent, ...kids],
+      new Map([['super', { x: 0, y: 0, width: 100, height: 100 }]])
+    )
+    const parentBox = asCluster(layout.find((l) => l.categoryId === 'super')!)
+    expect({ x: parentBox.x, y: parentBox.y }).toEqual({ x: 0, y: 0 })
+    for (const id of ['a', 'b', 'c', 'd']) {
+      expect(rectContains(parentBox, asCluster(layout.find((l) => l.categoryId === id)!))).toBe(true)
+    }
   })
 })
 
@@ -2931,20 +2766,13 @@ describe('resolveResizeEnclosure', () => {
 describe('materializeChildClusters', () => {
   const board = { id: 'b1', name: 'Main', isDefault: true }
 
-  it('pins still-virtual children of a parent at their current positions, leaving explicit ones alone', () => {
+  it("is a no-op for a superordinate's children — they sit on its grid and rearrange by design", () => {
     const p = makeCategory('P')
     const a = makeCategory('a', { parentCategoryId: 'P' })
     const b = makeCategory('b', { parentCategoryId: 'P' })
     const pBox: BoardCluster = { id: 'realP', boardId: 'b1', categoryId: 'P', x: 0, y: 0, width: 2000, height: 2000, createdAt: '0' }
-    const bBox: BoardCluster = { id: 'realB', boardId: 'b1', categoryId: 'b', x: 900, y: 900, width: 280, height: 200, createdAt: '0' }
-    const data = makeData({ boards: [board], categories: [p, a, b], boardClusters: [pBox, bBox] })
-    const before = getVisibleBoardClusters(board, data.boardClusters, data.categories).find((c) => c.categoryId === 'a')!
-
-    const next = materializeChildClusters(data, 'b1', 'P')
-
-    const aAfter = next.boardClusters.find((c) => c.categoryId === 'a')!
-    expect(aAfter).toMatchObject({ x: before.x, y: before.y, width: before.width, height: before.height })
-    expect(next.boardClusters.find((c) => c.categoryId === 'b')).toEqual(bBox)
+    const data = makeData({ boards: [board], categories: [p, a, b], boardClusters: [pBox] })
+    expect(materializeChildClusters(data, 'b1', 'P')).toBe(data)
   })
 
   it('pins still-virtual roots when given null', () => {
@@ -2962,35 +2790,23 @@ describe('materializeChildClusters', () => {
   // untouched virtual sibling. Pinning them *after* the join (what the
   // cluster-move commit used to do) froze them at the already-shifted
   // spots; pinning first keeps them where they were on screen.
-  it("pinning before a newcomer joins keeps the existing children where they were; pinning after doesn't", () => {
+  it('pinning the roots before a cluster is un-nested keeps them where they were', () => {
+    const roots = ['a', 'b', 'c', 'd'].map((id) => makeCategory(id))
     const p = makeCategory('P')
-    const kids = ['a', 'b', 'c', 'd'].map((id) => makeCategory(id, { parentCategoryId: 'P' }))
-    const x = makeCategory('X')
-    const pBox: BoardCluster = { id: 'realP', boardId: 'b1', categoryId: 'P', x: 0, y: 0, width: 3000, height: 3000, createdAt: '0' }
-    const xBox: BoardCluster = { id: 'realX', boardId: 'b1', categoryId: 'X', x: 1500, y: 1500, width: 280, height: 200, createdAt: '0' }
-    const data = makeData({ boards: [board], categories: [p, ...kids, x], boardClusters: [pBox, xBox] })
+    const x = makeCategory('X', { parentCategoryId: 'P' })
+    const pBox: BoardCluster = { id: 'realP', boardId: 'b1', categoryId: 'P', x: 3000, y: 40, width: 600, height: 500, createdAt: '0' }
+    const data = makeData({ boards: [board], categories: [...roots, p, x], boardClusters: [pBox] })
     const before = new Map(
       getVisibleBoardClusters(board, data.boardClusters, data.categories).map((c) => [c.categoryId, c])
     )
 
-    const pinnedFirst = reparentCategory(materializeChildClusters(data, 'b1', 'P'), 'X', 'P')
+    const pinnedFirst = reparentCategory(materializeChildClusters(data, 'b1', null), 'X', null)
+    const after = getVisibleBoardClusters(board, pinnedFirst.boardClusters, pinnedFirst.categories)
     for (const id of ['a', 'b', 'c', 'd']) {
       const b = before.get(id)!
-      const a = getVisibleBoardClusters(board, pinnedFirst.boardClusters, pinnedFirst.categories).find(
-        (c) => c.categoryId === id
-      )!
+      const a = after.find((c) => c.categoryId === id)!
       expect({ x: a.x, y: a.y }).toEqual({ x: b.x, y: b.y })
     }
-
-    const pinnedAfter = materializeSiblingClusters(reparentCategory(data, 'X', 'P'), 'b1', 'X')
-    const moved = ['a', 'b', 'c', 'd'].some((id) => {
-      const b = before.get(id)!
-      const a = getVisibleBoardClusters(board, pinnedAfter.boardClusters, pinnedAfter.categories).find(
-        (c) => c.categoryId === id
-      )!
-      return a.x !== b.x || a.y !== b.y
-    })
-    expect(moved).toBe(true)
   })
 })
 
@@ -3231,5 +3047,74 @@ describe('clustered cards always sit on their cluster grid', () => {
     const emptyBox: BoardCluster = { ...tiny, id: 'realE', categoryId: 'E' }
     const emptyShown = getVisibleBoardClusters(board, [emptyBox], [empty])[0]
     expect({ width: emptyShown.width, height: emptyShown.height }).toEqual({ width: 120, height: 80 })
+  })
+})
+
+describe('clusters inside a superordinate always sit on its grid', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  function box(categoryId: string, x: number, y: number, width: number, height: number): BoardCluster {
+    return { id: `real:${categoryId}`, boardId: 'b1', categoryId, x, y, width, height, createdAt: '0' }
+  }
+
+  // Reported: dragging a cluster from one superordinate into another pushed
+  // a cluster already in the destination out of it, and "Reset placement"
+  // then showed that one as an orphan. Now the destination's children are
+  // all on its grid, the superordinate grows to hold them, and a reset
+  // changes nothing about where anything is.
+  it('moving a cluster into another superordinate keeps every child inside it, with no orphan after a reset', () => {
+    const so1 = makeCategory('SO1')
+    const so2 = makeCategory('SO2')
+    const x = makeCategory('X', { parentCategoryId: 'SO1', codeIds: ['c1', 'c2', 'c3'] })
+    const k1 = makeCategory('K1', { parentCategoryId: 'SO2', codeIds: ['c4'] })
+    const k2 = makeCategory('K2', { parentCategoryId: 'SO2', codeIds: ['c5'] })
+    let data = makeData({
+      boards: [board],
+      categories: [so1, so2, x, k1, k2],
+      codes: ['c1', 'c2', 'c3', 'c4', 'c5'].map(makeCode),
+      boardClusters: [
+        box('SO1', 0, 0, 700, 600),
+        box('SO2', 1000, 0, 700, 600),
+        box('X', 20, 48, 500, 300),
+        box('K1', 1020, 48, 280, 200),
+        box('K2', 1340, 48, 280, 200)
+      ]
+    })
+
+    // The drop: X lands in SO2 (its stored position is wherever the user
+    // released it — irrelevant once nested).
+    data = moveCluster(data, 'real:X', 1100, 300)
+    data = reparentCategory(data, 'X', 'SO2')
+    data = growAncestorClustersToFit(data, 'b1', 'X')
+
+    function check(d: ProjectData): void {
+      const visible = getVisibleBoardClusters(board, d.boardClusters, d.categories)
+      const so2Box = visible.find((c) => c.categoryId === 'SO2')!
+      const kids = ['X', 'K1', 'K2'].map((id) => visible.find((c) => c.categoryId === id)!)
+      for (const kid of kids) expect(rectContains(so2Box, kid)).toBe(true)
+      for (let i = 0; i < kids.length; i++) {
+        for (let j = i + 1; j < kids.length; j++) expect(rectsOverlap(kids[i], kids[j])).toBe(false)
+      }
+      expect(getStructuralNestingEdges(visible, d.categories)).toEqual([])
+      for (const id of ['X', 'K1', 'K2']) {
+        expect(d.categories.find((c) => c.id === id)!.parentCategoryId).toBe('SO2')
+      }
+    }
+    check(data)
+    check(resetDefaultBoardClusterLayout(data, 'b1'))
+  })
+
+  it('a stored position for a nested cluster never disagrees with its nesting: no structural edge on the default board', () => {
+    const so = makeCategory('SO')
+    const a = makeCategory('A', { parentCategoryId: 'SO' })
+    const b = makeCategory('B', { parentCategoryId: 'SO' })
+    const data = makeData({
+      boards: [board],
+      categories: [so, a, b],
+      boardClusters: [box('SO', 0, 0, 300, 300), box('A', 5000, 5000, 280, 200), box('B', -50, 9000, 280, 200)]
+    })
+    const visible = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    expect(getStructuralNestingEdges(visible, data.categories)).toEqual([])
+    const soBox = visible.find((c) => c.categoryId === 'SO')!
+    for (const id of ['A', 'B']) expect(rectContains(soBox, visible.find((c) => c.categoryId === id)!)).toBe(true)
   })
 })

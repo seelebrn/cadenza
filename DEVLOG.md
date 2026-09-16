@@ -2926,3 +2926,65 @@ position regardless of membership" now asserts the opposite, plus a new one that
 explicit item *does* keep it), one obsolete test removed each from `growClusterToFitOwnMembers`
 and `resolveItemOverlaps`. Full suite green (423/423), typecheck clean, production build clean,
 boot-tested.
+
+### The same rule one level up: nested clusters live on the superordinate's grid (2026-09-16)
+
+"Can the same be done for clusters within a superordinate cluster? I noticed two things. 1) On
+rearranging clusters inside an SO, some clusters can be pushed outside the SO and become linked
+with the SO with arrowless lines. 2) On dragging a cluster from an SO to another SO, another
+cluster in the destination SO can be pushed out of its SO and become an orphan on pressing
+'Reset placement'." And shortly after: "On just clicking a cluster, sometimes, other clusters in
+the vicinity will become pushed out of their shared SO and be linked by arrowless lines."
+
+All three are the cluster-level twin of the card problem the previous entry closed: a nested
+cluster had a stored free-form position *and* a slot in its parent's grid, and the parent's
+stored size was a frozen ceiling its children had to be kept inside by hand (grow-to-fit,
+pin-before-change, push-on-overlap, detach-when-outside). The click report is that machinery
+running on a zero-distance "drag": a click was a full move-commit — re-evaluate the parent, pin
+the group, grow ancestors, resolve overlaps — and any of it reflowing a neighbor read as "I just
+clicked and things moved."
+
+The rule now, in `computeCategoryLayout`:
+
+- **A nested category always sits at its slot in its parent's children grid.** Its stored x/y
+  is ignored (`placeCategory` only honors a stored position for a root); its stored size still
+  counts, as a floor. `getVisibleBoardClusters` returns the shown position for an explicit shape
+  as well as the shown size. So the two failure modes can't be expressed anymore: nothing can be
+  pushed out of a superordinate, and a stored position can never disagree with the nesting it's
+  actually in — hence no structural edge on the default board, ever, and nothing for a reset to
+  "reveal."
+- **A stored size is a floor on the whole contents, not just the cards.** `computeSize` is
+  `max(stored, natural)` where natural is the full bottom-up size (own card grid + children
+  grid) — the previous entry's floor only covered the category's own cards, leaving a stored
+  parent frozen around its sub-clusters. An *empty* cluster (no cards, no sub-clusters) keeps
+  its stored size exactly, even below the default, so a deliberately tiny box stays tiny.
+- The two-pass "reserve every explicit child's footprint first" from the masonry fix is gone
+  for children (there are no explicit child *positions* to reserve anymore); it stays for the
+  root level, where free placement still exists.
+
+What that made redundant, and was removed or reduced to the root level:
+`detachOrphanedChildren` (containment can't break; deleted with its store action and tests —
+which also means *shrinking* a superordinate no longer detaches anything: to take a cluster
+out, drag it out or shift+drag it), `materializeSiblingClusters` / `materializeChildClusters` /
+`resolveSiblingOverlaps` (early-return for anything nested — inside a superordinate, children
+rearrange by design), `renestClustersCleanly`'s pin loop (it now just resets the relocating
+subtrees' shapes and cards and lets the grid place them). `growAncestorClustersToFit` was
+rewritten: containment needs no fixing, so it now only brings each ancestor's *stored* size up
+to its *shown* size (so stored never lags the picture) and then runs the overlap push at the
+root, since a root that just grew to fit its contents can overlap a free-placed neighbor.
+
+And a plain click is now a true no-op: `handleMouseUp` returns before the commit pipeline when
+the pointer moved less than the existing 4px snap deadzone, for every drag kind.
+
+Verified: rewrote the ten tests that encoded the old contract (stored positions of nested
+clusters, pinning of nested children, containment repair) to assert on *shown* boxes; added
+tests that a nested category is placed at its slot regardless of a stray stored position, that
+an explicit parent is shown big enough for its children grid, that a stored ancestor shape is
+brought up to its shown size with the root's neighbor pushed clear, and the two user scenarios
+end to end — a cluster moved from one superordinate into another leaves every child of the
+destination inside it, non-overlapping, still nested, with no structural edge, before *and*
+after `resetDefaultBoardClusterLayout`; and arbitrary stray stored positions for nested clusters
+produce no structural edge at all. `materializeClusterMemberItems` — the "pin every card
+before a membership change" helper — turned out to have no remaining caller after the previous
+entry and was deleted with its tests. Full suite green (420/420), typecheck clean, production
+build clean, boot-tested.

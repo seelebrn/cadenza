@@ -66,7 +66,6 @@ import {
   createClusterWithNewCategory as createClusterWithNewCategoryOp,
   deleteBoard as deleteBoardOp,
   deleteCluster as deleteClusterOp,
-  detachOrphanedChildren as detachOrphanedChildrenOp,
   getDefaultBoardId,
   growAncestorClustersToFit as growAncestorClustersToFitOp,
   growClusterToFitOwnMembers as growClusterToFitOwnMembersOp,
@@ -287,13 +286,6 @@ interface ProjectState {
    * then pins the result and grows the parent to fit it. See
    * renestClustersCleanly's own comment. */
   renestClustersCleanly: (boardId: string, parentCategoryId: string, newChildCategoryIds: string[]) => void
-  /** Un-nests any direct child of categoryId that no longer fits inside
-   * its current (just-resized) box — call after resizing a cluster
-   * smaller, so a child it used to fully enclose but doesn't anymore
-   * gets detached instead of staying nested-in-data-only, which is what
-   * makes a stray structural connector line appear. See
-   * detachOrphanedChildren's own comment. */
-  detachOrphanedChildren: (boardId: string, categoryId: string) => void
   /** Pushes any explicit sibling that categoryId's box now overlaps out
    * of its way to the nearest free spot — call after a cluster is resized
    * or dropped, so it never silently covers a neighbor. See
@@ -323,12 +315,9 @@ interface ProjectState {
     refId: string,
     targetCategoryId: string | null
   ) => void
-  /** Same end state as reconcileSoleCategoryMembership, but for a specific
-   * board: stabilizes (materializeClusterMemberItems) every category
-   * actually involved — what the ref is leaving and what it's joining —
-   * before changing anything, so the membership change itself can never
-   * shift/collide any of their other, still-virtual member items. See
-   * reassignRefCategoryMembership's own comment. */
+  /** Same end state as reconcileSoleCategoryMembership, then adds the ref
+   * to the new category — the one entry point a board drag uses for a
+   * membership change. See reassignRefCategoryMembership's own comment. */
   reassignRefCategoryMembership: (
     boardId: string,
     refType: BoardItem['refType'],
@@ -889,9 +878,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   renestClustersCleanly: (boardId, parentCategoryId, newChildCategoryIds) =>
     get().updateProject((data) => renestClustersCleanlyOp(data, boardId, parentCategoryId, newChildCategoryIds)),
-
-  detachOrphanedChildren: (boardId, categoryId) =>
-    get().updateProject((data) => detachOrphanedChildrenOp(data, boardId, categoryId)),
 
   growClusterToFitOwnMembers: (boardId, categoryId) =>
     get().updateProject((data) => growClusterToFitOwnMembersOp(data, boardId, categoryId)),

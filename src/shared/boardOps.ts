@@ -493,31 +493,29 @@ export function computeCategoryLayout(
   }
 
   // Bottom-up: the size a category's box needs to fit its own member cards
-  // plus a grid of its nested children packed inside it. An overridden
-  // category keeps its own given size unconditionally (never recomputed —
-  // the caller already decided it) — placeCategory below still sizes and
-  // packs *its* children within whatever room that frozen box actually
-  // gives them, which may not be enough; the fix is the same as always,
-  // resetting the board's layout. No cycle guard needed here: every
-  // category has exactly one parentCategoryId, so a cycle can only exist
-  // among categories that are *not* reachable from any real root in the
-  // first place (reparentCategory prevents ever creating one) — this only
-  // ever recurses along real parent->child edges starting from an actual
-  // root.
+  // plus a grid of its nested children packed inside it. An explicit
+  // (stored) size is a *floor* on that, never a ceiling: the box is shown
+  // at whichever is bigger, so a stored shape shrunk by hand, or sized
+  // before more cards/sub-clusters landed in it, still holds everything
+  // — a cluster's picture is its contents, and its contents always fit.
+  // No cycle guard needed here: every category has exactly one
+  // parentCategoryId, so a cycle can only exist among categories that are
+  // *not* reachable from any real root in the first place
+  // (reparentCategory prevents ever creating one) — this only ever
+  // recurses along real parent->child edges starting from an actual root.
   function computeSize(category: CategoryRecord): { width: number; height: number } {
+    const natural = computeNaturalSize(category)
     const existing = explicitOverrides.get(category.id)
-    if (existing) {
-      // An explicit box is a floor, never a ceiling on its own cards: a
-      // clustered card always renders at its grid slot (getVisibleBoardItems),
-      // so a box left smaller than that grid — shrunk by hand, or sized
-      // before more members were dropped in — is shown at the grid's size
-      // instead of letting cards hang out of it. Nested children are not
-      // part of this floor; a frozen box still packs them into whatever
-      // room it gives them.
-      const floor = compact ? { width: 0, height: 0 } : ownMemberMinSize(category)
-      return { width: Math.max(existing.width, floor.width), height: Math.max(existing.height, floor.height) }
-    }
+    if (!existing) return natural
+    // An empty cluster (no cards, no sub-clusters) has nothing to hold —
+    // its box stays exactly as drawn, even below the default size.
+    const hasContent =
+      category.codeIds.length + category.noteIds.length > 0 || (childrenByParentId.get(category.id)?.length ?? 0) > 0
+    if (!hasContent) return { width: existing.width, height: existing.height }
+    return { width: Math.max(existing.width, natural.width), height: Math.max(existing.height, natural.height) }
+  }
 
+  function computeNaturalSize(category: CategoryRecord): { width: number; height: number } {
     const children = childrenByParentId.get(category.id) ?? []
     const ownGrid = compact ? { width: 0, height: 0 } : ownMemberGridSize(category)
     const ownContentHeight = CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + ownGrid.height
@@ -556,8 +554,16 @@ export function computeCategoryLayout(
   // in the same grid arrangement computeSize assumed — same children, same
   // sizes, same greedy packing order, so the two can never disagree about
   // how much room was actually needed vs. how it's actually laid out.
+  //
+  // Only a *root* category's stored position is honored. A nested one
+  // always sits at its slot in its parent's children grid, whatever its
+  // stored x/y says (stored size still counts, as a floor) — so nothing
+  // can be pushed out of a superordinate, and a stored position can never
+  // disagree with the nesting it's actually in. Free placement is for the
+  // board's top level only; inside a superordinate, arrangement is
+  // automatic, exactly like cards inside a cluster.
   function placeCategory(category: CategoryRecord, x: number, y: number): { y: number; height: number } {
-    const existing = explicitOverrides.get(category.id)
+    const existing = category.parentCategoryId ? undefined : explicitOverrides.get(category.id)
     const size = computeSize(category)
     const actualX = existing ? existing.x : x
     const actualY = existing ? existing.y : y
@@ -574,34 +580,7 @@ export function computeCategoryLayout(
         actualY + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + (compact ? 0 : ownMemberGridSize(category).height)
       const columnBottoms = new Array<number>(columnCount).fill(innerY)
 
-      // An explicit child keeps its own real position no matter what —
-      // placeCategory below never moves it — but the shortest-column
-      // heuristic used for still-virtual siblings has no idea it's
-      // there unless its footprint is reserved first. Doing that in a
-      // separate pass, before any virtual sibling gets placed, makes
-      // the result independent of which order `children` happens to
-      // list them in: previously, a virtual child processed *before* an
-      // explicit sibling in iteration order could get assigned the
-      // exact same column-bottom slot that sibling's real position
-      // already occupies, landing the two directly on top of each
-      // other. Reported as: enclosing several clusters into a
-      // superordinate one dropped one of them right on top of a
-      // neighbor already inside it, instead of using free space in the
-      // grid.
-      const overriddenChildren = children.filter((child) => explicitOverrides.has(child.id))
-      for (const child of overriddenChildren) {
-        const box = explicitOverrides.get(child.id)!
-        const size = computeSize(child)
-        for (let i = 0; i < columnCount; i++) {
-          const colX = innerX + i * (columnWidth + CLUSTER_GAP)
-          const overlapsColumn = box.x < colX + columnWidth && box.x + size.width > colX
-          if (overlapsColumn) columnBottoms[i] = Math.max(columnBottoms[i], box.y + size.height + CLUSTER_GAP)
-        }
-        placeCategory(child, box.x, box.y)
-      }
-
       for (const child of children) {
-        if (explicitOverrides.has(child.id)) continue
         let column = 0
         for (let i = 1; i < columnCount; i++) {
           if (columnBottoms[i] < columnBottoms[column]) column = i
@@ -678,10 +657,11 @@ export function getVisibleBoardClusters(
   const layout = computeCategoryLayout(categories, explicitByCategory)
   return layout.map((l) => {
     const explicit = explicitByCategory.get(l.categoryId)
-    // An explicit shape keeps its identity and position, but its *shown*
-    // size is the layout's — at least its own member grid (see
-    // computeCategoryLayout's computeSize), so cards never hang out of it.
-    if (explicit) return { ...explicit, width: l.width, height: l.height }
+    // An explicit shape keeps its identity, but what's *shown* is the
+    // layout's: a root keeps its stored position and is at least as big as
+    // its contents; a nested one sits at its slot in its parent's grid
+    // (see computeCategoryLayout).
+    if (explicit) return { ...explicit, x: l.x, y: l.y, width: l.width, height: l.height }
     return {
       id: `virtual:cluster:${l.categoryId}`,
       boardId: board.id,
@@ -899,99 +879,6 @@ export function getVisibleBoardItems(
   // Any explicitly-added segment (quote) items always show too.
   result.push(...explicitItems.filter((i) => i.refType === 'segment'))
   return result
-}
-
-/**
- * Gives every still-virtual code/note member of `categoryId` a real,
- * pinned `BoardItem` at its *current* computed slot position on `boardId`
- * — and, if the cluster's own box is still virtual too, pins that at its
- * current size right alongside them.
- *
- * getVisibleBoardItems' own member-grid slot numbers are stable against a
- * given member's own virtual→explicit transition (see memberSlotByRef's
- * comment there), but not against the *set* of members actually homed to
- * a cluster changing at all — a member joining or leaving densely
- * renumbers the slots of every other still-virtual member (the same
- * project-wide traversal that assigns them in the first place), shifting
- * their computed positions. If any of *those* siblings already happens to
- * be explicit (frozen at an earlier slot), the renumbering can land a
- * still-virtual one directly on top of it. Reported as: moving a code
- * from one cluster to another while snap-linking it to a code already in
- * the destination — on release, a code from either cluster ends up
- * superposed on a different code from the same cluster.
- *
- * The cluster's own box needs the same treatment for the same reason: a
- * still-virtual box's size is computeOwnClusterSize(category), recomputed
- * fresh from the *current* membership count on every render — losing a
- * member shrinks it immediately, with no idea that a member card just
- * pinned above was sized for the grid *before* that member left. Pinning
- * the box alongside its members keeps the two consistent; from then on it
- * can only grow (growClusterToFitOwnMembers/growAncestorClustersToFit),
- * never shrink out from under them. Reported as: moving an item out of a
- * cluster, the source cluster auto-resized smaller and left its own
- * remaining rightmost item poking outside it.
- *
- * Call this for a category right before its own membership is about to
- * change (a member about to join or leave it) — see
- * reassignRefCategoryMembership below, which does exactly that.
- */
-export function materializeClusterMemberItems(data: ProjectData, boardId: string, categoryId: string): ProjectData {
-  const board = data.boards.find((b) => b.id === boardId)
-  const category = data.categories.find((c) => c.id === categoryId)
-  if (!board || !category) return data
-
-  const explicitItems = data.boardItems.filter((i) => i.boardId === boardId)
-  const explicitRefs = new Set(explicitItems.map((i) => `${i.refType}:${i.refId}`))
-  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
-  const visibleClusters = getVisibleBoardClusters(board, explicitClusters, data.categories)
-  const visibleItems = getVisibleBoardItems(
-    board,
-    explicitItems,
-    data.codes,
-    data.notes,
-    data.categories,
-    visibleClusters,
-    data.boardLinks.filter((l) => l.boardId === boardId)
-  )
-
-  let next = data
-
-  // The cluster's own box, if still virtual, is *also* about to lose a
-  // member here — computeOwnClusterSize would recompute it smaller on the
-  // very next render, purely from the smaller membership count, with no
-  // idea that a member card it's about to shrink underneath was just
-  // frozen at a position sized for the *old*, bigger grid. Pinning the box
-  // itself at its current size right alongside its members keeps the two
-  // consistent — from here on it can only grow (growClusterToFitOwnMembers/
-  // growAncestorClustersToFit), never shrink out from under them. Reported
-  // as: moving an item out of a cluster, the source cluster auto-resized
-  // smaller and left its own remaining rightmost item poking outside it.
-  if (!explicitClusters.some((c) => c.categoryId === categoryId)) {
-    const box = visibleClusters.find((c) => c.categoryId === categoryId)
-    if (box) {
-      next = createClusterForCategory(next, {
-        boardId,
-        categoryId,
-        x: box.x,
-        y: box.y,
-        width: box.width,
-        height: box.height
-      }).data
-    }
-  }
-
-  const memberRefs: Array<{ refType: 'code' | 'note'; refId: string }> = [
-    ...category.codeIds.map((id) => ({ refType: 'code' as const, refId: id })),
-    ...category.noteIds.map((id) => ({ refType: 'note' as const, refId: id }))
-  ]
-
-  for (const ref of memberRefs) {
-    if (explicitRefs.has(`${ref.refType}:${ref.refId}`)) continue
-    const item = visibleItems.find((i) => i.refType === ref.refType && i.refId === ref.refId)
-    if (!item) continue
-    next = addItemToBoard(next, boardId, ref.refType, ref.refId, item.x, item.y).data
-  }
-  return next
 }
 
 /**
@@ -1219,6 +1106,10 @@ export function materializeSiblingClusters(data: ProjectData, boardId: string, c
   const board = data.boards.find((b) => b.id === boardId)
   const category = data.categories.find((c) => c.id === categoryId)
   if (!board || !category) return data
+  // Only the board's top level has free positions to protect — clusters
+  // inside a superordinate always sit on its grid, and are *meant* to
+  // rearrange when one of them changes.
+  if (category.parentCategoryId) return data
 
   const siblings = data.categories.filter(
     (c) => c.id !== categoryId && c.parentCategoryId === category.parentCategoryId
@@ -1270,6 +1161,9 @@ export function materializeChildClusters(
 ): ProjectData {
   const board = data.boards.find((b) => b.id === boardId)
   if (!board) return data
+  // Inside a superordinate, children sit on its grid and rearrange by
+  // design when one joins; only the free-placed top level needs pinning.
+  if (parentCategoryId) return data
 
   const children = data.categories.filter((c) => (c.parentCategoryId ?? null) === parentCategoryId)
   if (children.length === 0) return data
@@ -1335,73 +1229,52 @@ export function growClusterToFitOwnMembers(data: ProjectData, boardId: string, c
 }
 
 /**
- * Walks up from `categoryId`'s own cluster, growing (and materializing, if
- * still virtual) each ancestor's box just enough to still contain it — and
- * so on transitively, since growing a parent can itself require growing
- * *its* own parent. Stops as soon as an ancestor already has enough room
- * (or there isn't one). Used after any operation that can grow a nested
- * cluster's own size (a manual resize, or growClusterToFitOwnMembers
- * above), so a superordinate cluster actually keeps containing what's
- * nested in it instead of leaving it to poke out past a frozen parent box.
+ * After anything that can change what a nested cluster's ancestors have
+ * to hold (a card dropped in, a sub-cluster nested/resized/removed): walks
+ * up `categoryId`'s ancestor chain bringing each ancestor's *stored* size
+ * up to its *shown* size, then clears the top-level ancestor's neighbors
+ * out of its (possibly bigger) way.
+ *
+ * Containment itself never needs fixing anymore — a box is shown at no
+ * less than its contents (computeCategoryLayout), so a superordinate
+ * always visibly holds everything nested in it. What this does is keep a
+ * stored shape from lagging behind what's on screen (so anything reading
+ * stored sizes agrees with the picture), and — the part that does matter
+ * visually — run resolveSiblingOverlaps at the root, since a root that
+ * just grew to fit its contents can now overlap a free-placed neighbor.
  */
 export function growAncestorClustersToFit(data: ProjectData, boardId: string, categoryId: string): ProjectData {
   const board = data.boards.find((b) => b.id === boardId)
   if (!board) return data
 
   let next = data
-  let childCategoryId: string | null = categoryId
+  let current: string | null = categoryId
+  let root: string | null = null
 
-  while (childCategoryId) {
-    const childCategory = next.categories.find((c) => c.id === childCategoryId)
-    const parentCategoryId = childCategory?.parentCategoryId ?? null
-    if (!parentCategoryId) break
-
+  while (current) {
+    const category = next.categories.find((c) => c.id === current)
+    if (!category) break
+    root = current
     const explicitClusters = next.boardClusters.filter((c) => c.boardId === boardId)
-    const visible = getVisibleBoardClusters(board, explicitClusters, next.categories)
-    const parentBox = visible.find((c) => c.categoryId === parentCategoryId)
-    if (!parentBox) break
-
-    // Fit *every* child of this parent, not just the one that changed: a
-    // still-virtual sibling is repacked around the changed one's bigger
-    // box on every read, and can land past the parent's frozen edge just
-    // the same — reported as a superordinate that grew in one direction
-    // only, with two untouched clusters left outside its bottom edge.
-    const childBoxes = visible.filter(
-      (c) => next.categories.find((cat) => cat.id === c.categoryId)?.parentCategoryId === parentCategoryId
-    )
-    let size = { width: parentBox.width, height: parentBox.height }
-    for (const box of childBoxes) {
-      size = computeAccommodatingSize({ x: parentBox.x, y: parentBox.y, ...size }, box, CLUSTER_NEST_PADDING)
+    const stored = explicitClusters.find((c) => c.categoryId === current)
+    if (stored) {
+      const shown = getVisibleBoardClusters(board, explicitClusters, next.categories).find(
+        (c) => c.categoryId === current
+      )
+      if (shown && (shown.width > stored.width || shown.height > stored.height)) {
+        if (!category.parentCategoryId) next = materializeSiblingClusters(next, boardId, current)
+        next = resizeCluster(
+          next,
+          stored.id,
+          Math.max(stored.width, shown.width),
+          Math.max(stored.height, shown.height)
+        )
+      }
     }
-    if (size.width === parentBox.width && size.height === parentBox.height) break
-
-    let parentCluster = explicitClusters.find((c) => c.categoryId === parentCategoryId)
-    if (!parentCluster) {
-      const created = createClusterForCategory(next, {
-        boardId,
-        categoryId: parentCategoryId,
-        x: parentBox.x,
-        y: parentBox.y,
-        width: parentBox.width,
-        height: parentBox.height
-      })
-      next = created.data
-      parentCluster = next.boardClusters.find((c) => c.id === created.clusterId)
-      if (!parentCluster) break
-    }
-    // Same first-touch rule as growClusterToFitOwnMembers: pin this
-    // parent's own siblings before its box changes, so they get pushed
-    // (minimally, ancestors grown) rather than silently repacked.
-    next = materializeSiblingClusters(next, boardId, parentCategoryId)
-    next = resizeCluster(next, parentCluster.id, size.width, size.height)
-    // Growing this box can run it into one of *its* own neighbors — push
-    // that neighbor to free space rather than leaving it covered.
-    next = resolveSiblingOverlaps(next, boardId, parentCategoryId)
-
-    childCategoryId = parentCategoryId
+    current = category.parentCategoryId ?? null
   }
 
-  return next
+  return root ? resolveSiblingOverlaps(next, boardId, root) : next
 }
 
 /**
@@ -1496,27 +1369,7 @@ export function renestClustersCleanly(
     )
   }
 
-  const childCategoryIds = next.categories
-    .filter((c) => c.parentCategoryId === parentCategoryId)
-    .map((c) => c.id)
-
-  for (const childId of childCategoryIds) {
-    const explicitClusters = next.boardClusters.filter((c) => c.boardId === boardId)
-    if (explicitClusters.some((c) => c.categoryId === childId)) continue
-    const box = getVisibleBoardClusters(board, explicitClusters, next.categories).find(
-      (c) => c.categoryId === childId
-    )
-    if (!box) continue
-    next = createClusterForCategory(next, {
-      boardId,
-      categoryId: childId,
-      x: box.x,
-      y: box.y,
-      width: box.width,
-      height: box.height
-    }).data
-  }
-
+  void board
   for (const childId of newChildCategoryIds) {
     if (relocatingCategoryIds.has(childId)) next = growAncestorClustersToFit(next, boardId, childId)
   }
@@ -1602,6 +1455,9 @@ export function resolveSiblingOverlaps(data: ProjectData, boardId: string, categ
   const board = data.boards.find((b) => b.id === boardId)
   const category = data.categories.find((c) => c.id === categoryId)
   if (!board || !category) return data
+  // Clusters inside a superordinate sit on its grid: they can't overlap
+  // by construction. Only the free-placed top level needs this.
+  if (category.parentCategoryId) return data
 
   // Rects are the *shown* boxes (a stored shape can be shown bigger than
   // stored — see getVisibleBoardClusters), but only explicit siblings are
@@ -1707,71 +1563,6 @@ export function resolveItemOverlaps(data: ProjectData, boardId: string, anchorIt
     }
     if (rect.x !== item.x || rect.y !== item.y) next = moveItem(next, item.id, rect.x, rect.y)
     settled.push(rect)
-  }
-  return next
-}
-
-/**
- * Detaches (un-nests) any direct child of `categoryId` that no longer
- * fits inside its own box — call after resizing a cluster *smaller*, so a
- * child it used to fully enclose but doesn't anymore gets its
- * relationship updated to match, rather than staying nested-in-data-only.
- *
- * Shrinking a cluster so an existing child now pokes outside it is a
- * deliberate "this doesn't belong in here anymore" gesture — same intent
- * as dragging that child out by hand. Leaving the stale parentCategoryId
- * standing doesn't just misrepresent the relationship: it's also exactly
- * when getStructuralNestingEdges starts drawing a connector line in place
- * of the spatial containment that's no longer true, appearing as a "stray
- * arrow" out of nowhere for a resize the user never touched that cluster
- * *directly* for. Doesn't move the detached child at all (it's already
- * sitting right where it visually is, outside the shrunk box now) — only
- * the parent relationship changes; a still-virtual child is pinned at
- * that spot first so it genuinely stays there. Pins the root-level group
- * it rejoins *before* it joins (see materializeChildClusters), same as
- * any other parent change, so nothing already there moves either.
- */
-export function detachOrphanedChildren(data: ProjectData, boardId: string, categoryId: string): ProjectData {
-  const board = data.boards.find((b) => b.id === boardId)
-  if (!board) return data
-
-  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
-  const visibleByCategoryId = new Map(
-    getVisibleBoardClusters(board, explicitClusters, data.categories).map((c) => [c.categoryId, c])
-  )
-  const parentBox = visibleByCategoryId.get(categoryId)
-  if (!parentBox) return data
-
-  const orphaned = data.categories.filter((c) => {
-    if (c.parentCategoryId !== categoryId) return false
-    const childBox = visibleByCategoryId.get(c.id)
-    return childBox ? !clusterRectContains(parentBox, childBox) : false
-  })
-  if (orphaned.length === 0) return data
-
-  let next = data
-  for (const child of orphaned) {
-    // "Detached where it is" needs a real shape to be detached *at*: a
-    // still-virtual child's position is computed from its parent's box,
-    // and would be recomputed from scratch as a root the moment the
-    // parent link goes — jumping to the root grid's next free slot
-    // instead of staying put.
-    if (!explicitClusters.some((c) => c.categoryId === child.id)) {
-      const childBox = visibleByCategoryId.get(child.id)!
-      next = createClusterForCategory(next, {
-        boardId,
-        categoryId: child.id,
-        x: childBox.x,
-        y: childBox.y,
-        width: childBox.width,
-        height: childBox.height
-      }).data
-    }
-    // Pin the root-level group it's about to rejoin first, so rejoining
-    // can't reflow any of them (see materializeChildClusters).
-    next = materializeChildClusters(next, boardId, null)
-    next = reparentCategory(next, child.id, null)
-    next = resolveSiblingOverlaps(next, boardId, child.id)
   }
   return next
 }

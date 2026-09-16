@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-09-16
+
 ### Added
 - Cluster names (and the header's buttons) stay readable and clickable when the board is
   zoomed far out — the header counter-scales with the zoom, so a large board can actually be

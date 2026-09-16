@@ -71,6 +71,8 @@ import {
   growAncestorClustersToFit as growAncestorClustersToFitOp,
   growClusterToFitOwnMembers as growClusterToFitOwnMembersOp,
   linkItems as linkItemsOp,
+  materializeChildClusters as materializeChildClustersOp,
+  resolveSiblingOverlaps as resolveSiblingOverlapsOp,
   materializeSiblingClusters as materializeSiblingClustersOp,
   moveCluster as moveClusterOp,
   moveItem as moveItemOp,
@@ -271,6 +273,11 @@ interface ProjectState {
    * never again shove an untouched sibling into overlapping something
    * else as a side effect. See materializeSiblingClusters' own comment. */
   materializeSiblingClusters: (boardId: string, categoryId: string) => void
+  /** Pins every still-virtual direct child of parentCategoryId (or every
+   * still-virtual root, if null) at its current position — call right
+   * *before* a cluster joins that group, so joining can't shift anything
+   * already there. See materializeChildClusters' own comment. */
+  materializeChildClusters: (boardId: string, parentCategoryId: string | null) => void
   /** Used when a resize newly encloses one or more other clusters,
    * nesting them into the resizing cluster all at once — drops each newly-
    * nested cluster's own explicit shape and re-packs the destination's
@@ -286,6 +293,11 @@ interface ProjectState {
    * makes a stray structural connector line appear. See
    * detachOrphanedChildren's own comment. */
   detachOrphanedChildren: (boardId: string, categoryId: string) => void
+  /** Pushes any explicit sibling that categoryId's box now overlaps out
+   * of its way to the nearest free spot — call after a cluster is resized
+   * or dropped, so it never silently covers a neighbor. See
+   * resolveSiblingOverlaps' own comment. */
+  resolveSiblingOverlaps: (boardId: string, categoryId: string) => void
   /** Grows (materializing, if still virtual) categoryId's own box to fit
    * its current membership, if it isn't already big enough — call after a
    * board drag adds a new member to an already-placed cluster. */
@@ -860,6 +872,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   materializeSiblingClusters: (boardId, categoryId) =>
     get().updateProject((data) => materializeSiblingClustersOp(data, boardId, categoryId)),
+
+  materializeChildClusters: (boardId, parentCategoryId) =>
+    get().updateProject((data) => materializeChildClustersOp(data, boardId, parentCategoryId)),
+
+  resolveSiblingOverlaps: (boardId, categoryId) =>
+    get().updateProject((data) => resolveSiblingOverlapsOp(data, boardId, categoryId)),
 
   renestClustersCleanly: (boardId, parentCategoryId, newChildCategoryIds) =>
     get().updateProject((data) => renestClustersCleanlyOp(data, boardId, parentCategoryId, newChildCategoryIds)),

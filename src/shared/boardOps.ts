@@ -14,6 +14,7 @@ import { nanoid } from 'nanoid'
 import {
   addMemberByRefType,
   createCategory,
+  getDescendantCategoryIds,
   isCategoryMember,
   reconcileSoleCategoryMembership,
   removeMemberByRefType,
@@ -152,6 +153,51 @@ export function findClustersEnclosedBy(
   return clusters.filter((c) => {
     if (excludeCategoryIds.has(c.categoryId)) return false
     return c.x >= box.x && c.y >= box.y && c.x + c.width <= box.x + box.width && c.y + c.height <= box.y + box.height
+  })
+}
+
+/**
+ * The category ids a resize of `resizingCategoryId`'s frame to `box`
+ * should newly nest — findClustersEnclosedBy, narrowed to what can
+ * actually *become* a direct child:
+ *
+ * - not the resizing cluster itself, nor anything already nested under it
+ *   (already a child, not a new one);
+ * - not any of its own ancestors — a nested cluster resized to exactly
+ *   its parent's own top-left corner and bigger than it geometrically
+ *   "encloses" the parent, but nesting a parent under its own child is a
+ *   cycle reparentCategory refuses anyway, and the caller would still go
+ *   on to reset that parent's shape as if it had been nested;
+ * - not a cluster whose own ancestor is *also* being enclosed — "draw a
+ *   box around a cluster that has sub-clusters inside it" nests that
+ *   cluster, keeping its sub-clusters under it, rather than flattening
+ *   every level into direct children of the resizing one.
+ *
+ * Used by both the live highlight during the drag and the commit on
+ * release, so what's highlighted is exactly what nests.
+ */
+export function resolveResizeEnclosure(
+  clusters: BoardCluster[],
+  categories: CategoryRecord[],
+  box: Rect,
+  resizingCategoryId: string
+): string[] {
+  const byId = new Map(categories.map((c) => [c.id, c]))
+  const excluded = new Set<string>([resizingCategoryId, ...getDescendantCategoryIds(categories, resizingCategoryId)])
+  let ancestor = byId.get(resizingCategoryId)?.parentCategoryId ?? null
+  while (ancestor && !excluded.has(ancestor)) {
+    excluded.add(ancestor)
+    ancestor = byId.get(ancestor)?.parentCategoryId ?? null
+  }
+
+  const enclosed = new Set(findClustersEnclosedBy(clusters, box, excluded).map((c) => c.categoryId))
+  return [...enclosed].filter((id) => {
+    let parent = byId.get(id)?.parentCategoryId ?? null
+    while (parent) {
+      if (enclosed.has(parent)) return false
+      parent = byId.get(parent)?.parentCategoryId ?? null
+    }
+    return true
   })
 }
 
@@ -786,8 +832,23 @@ export function getVisibleBoardItems(
     }
     const homeCluster = homeClusterByRef.get(key)
     const slot = memberSlotByRef.get(key)
-    const pos =
-      homeCluster && slot !== undefined ? positionForSlot(homeCluster, slot) : computeGridPosition(autoIndex++, unclusteredOriginY)
+    let pos: { x: number; y: number }
+    if (homeCluster && slot !== undefined) {
+      pos = positionForSlot(homeCluster, slot)
+    } else {
+      // A hand-placed card keeps its spot; an auto-placed one skips any
+      // flat-grid slot such a card already covers — the flat area's origin
+      // moves with the clusters above it, so a slot can land on a card
+      // placed there earlier.
+      pos = computeGridPosition(autoIndex++, unclusteredOriginY)
+      while (
+        explicitItems.some(
+          (e) => Math.abs(e.x - pos.x) < MEMBER_CARD_WIDTH && Math.abs(e.y - pos.y) < MEMBER_CARD_HEIGHT
+        )
+      ) {
+        pos = computeGridPosition(autoIndex++, unclusteredOriginY)
+      }
+    }
     result.push({ id: `virtual:${key}`, boardId: board.id, refType, refId, ...pos })
   }
 
@@ -1156,6 +1217,55 @@ export function materializeSiblingClusters(data: ProjectData, boardId: string, c
 }
 
 /**
+ * The destination-side counterpart of materializeSiblingClusters: pins
+ * every still-virtual direct child of `parentCategoryId` (or every
+ * still-virtual root, if null) at its current auto-computed position.
+ *
+ * Call this *before* a cluster joins that group (nesting into it, or
+ * un-nesting back to root level), not after: a group's packed positions
+ * depend on its whole membership — how many columns there are, and how
+ * wide each one is, both follow from the full set of siblings — so the
+ * moment a newcomer is added, every untouched virtual sibling's computed
+ * position can shift. Pinning them afterward only freezes them at the
+ * already-shifted spots; pinning them first keeps them exactly where they
+ * were on screen, so joining a group never moves anything the user didn't
+ * touch. The newcomer itself is placed wherever the user actually put it.
+ */
+export function materializeChildClusters(
+  data: ProjectData,
+  boardId: string,
+  parentCategoryId: string | null
+): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  if (!board) return data
+
+  const children = data.categories.filter((c) => (c.parentCategoryId ?? null) === parentCategoryId)
+  if (children.length === 0) return data
+
+  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
+  const explicitCategoryIds = new Set(explicitClusters.map((c) => c.categoryId))
+  const visibleByCategoryId = new Map(
+    getVisibleBoardClusters(board, explicitClusters, data.categories).map((c) => [c.categoryId, c])
+  )
+
+  let next = data
+  for (const child of children) {
+    if (explicitCategoryIds.has(child.id)) continue
+    const computed = visibleByCategoryId.get(child.id)
+    if (!computed) continue
+    next = createClusterForCategory(next, {
+      boardId,
+      categoryId: child.id,
+      x: computed.x,
+      y: computed.y,
+      width: computed.width,
+      height: computed.height
+    }).data
+  }
+  return next
+}
+
+/**
  * Grows (materializing, if still virtual) a cluster's own box just enough
  * to fit a near-square grid of its *current* own codes/notes, if it isn't
  * already big enough — used after a board drag adds a new member to an
@@ -1175,8 +1285,19 @@ export function growClusterToFitOwnMembers(data: ProjectData, boardId: string, c
   if (!current) return data
 
   const needed = computeOwnClusterSize(category)
-  const width = Math.max(current.width, needed.width)
-  const height = Math.max(current.height, needed.height)
+  let width = Math.max(current.width, needed.width)
+  let height = Math.max(current.height, needed.height)
+  // The grid size above only covers members at their auto-computed slots.
+  // A member dropped by hand sits wherever it was released — its center
+  // inside the box is what made it a member, but the card itself can
+  // still hang out past the right/bottom edge by up to half a card. Fit
+  // those too (same grow-right/down-only rule as computeAccommodatingSize).
+  for (const item of data.boardItems) {
+    if (item.boardId !== boardId || item.refType === 'segment') continue
+    if (!isCategoryMember(category, item.refType, item.refId)) continue
+    width = Math.max(width, item.x + MEMBER_CARD_WIDTH - current.x + CLUSTER_PADDING)
+    height = Math.max(height, item.y + MEMBER_CARD_HEIGHT - current.y + CLUSTER_PADDING)
+  }
   if (width === current.width && height === current.height) return data
 
   let cluster = explicitClusters.find((c) => c.categoryId === categoryId)
@@ -1194,7 +1315,8 @@ export function growClusterToFitOwnMembers(data: ProjectData, boardId: string, c
     cluster = next.boardClusters.find((c) => c.id === created.clusterId)
     if (!cluster) return next
   }
-  return resizeCluster(next, cluster.id, width, height)
+  next = resizeCluster(next, cluster.id, width, height)
+  return resolveSiblingOverlaps(next, boardId, categoryId)
 }
 
 /**
@@ -1243,6 +1365,9 @@ export function growAncestorClustersToFit(data: ProjectData, boardId: string, ca
       if (!parentCluster) break
     }
     next = resizeCluster(next, parentCluster.id, size.width, size.height)
+    // Growing this box can run it into one of *its* own neighbors — push
+    // that neighbor to free space rather than leaving it covered.
+    next = resolveSiblingOverlaps(next, boardId, parentCategoryId)
 
     childCategoryId = parentCategoryId
   }
@@ -1290,7 +1415,15 @@ export function growAncestorClustersToFit(data: ProjectData, boardId: string, ca
  * now-unrelated coordinates instead of following its cluster. Reported as:
  * enclosing several clusters in one resize left one of them with its items
  * sitting in place but no frame around them, elsewhere the frame reappeared
- * empty.
+ * empty. A relocating cluster's own nested sub-clusters get the same
+ * treatment (their shapes and members reset along with it), for the same
+ * reason one level down.
+ *
+ * Children the parent *already* had are left exactly where they are — pin
+ * them first (materializeChildClusters) so that holds for still-virtual
+ * ones too; the newcomers then pack into whatever space is genuinely free
+ * around them (computeCategoryLayout reserves every explicit sibling's
+ * footprint before placing anything).
  */
 export function renestClustersCleanly(
   data: ProjectData,
@@ -1301,10 +1434,25 @@ export function renestClustersCleanly(
   const board = data.boards.find((b) => b.id === boardId)
   if (!board) return data
 
-  const relocatingRefs = new Set<string>()
+  // Only what actually ended up a direct child counts — a reparent that
+  // was refused (it would have made a cycle) must not get its shape reset
+  // as if it had gone through. Each relocating cluster takes its whole
+  // nested subtree along: its sub-clusters (and their members) were
+  // positioned relative to where *it* used to be, so they have to
+  // recompute against its new position too, or they'd be left stranded
+  // outside it exactly like its own member cards would.
+  const relocatingCategoryIds = new Set<string>()
   for (const categoryId of newChildCategoryIds) {
     const category = data.categories.find((c) => c.id === categoryId)
-    if (!category) continue
+    if (!category || category.parentCategoryId !== parentCategoryId) continue
+    relocatingCategoryIds.add(categoryId)
+    for (const id of getDescendantCategoryIds(data.categories, categoryId)) relocatingCategoryIds.add(id)
+  }
+  if (relocatingCategoryIds.size === 0) return data
+
+  const relocatingRefs = new Set<string>()
+  for (const category of data.categories) {
+    if (!relocatingCategoryIds.has(category.id)) continue
     for (const codeId of category.codeIds) relocatingRefs.add(`code:${codeId}`)
     for (const noteId of category.noteIds) relocatingRefs.add(`note:${noteId}`)
   }
@@ -1312,7 +1460,7 @@ export function renestClustersCleanly(
   let next: ProjectData = {
     ...data,
     boardClusters: data.boardClusters.filter(
-      (c) => !(c.boardId === boardId && newChildCategoryIds.includes(c.categoryId))
+      (c) => !(c.boardId === boardId && relocatingCategoryIds.has(c.categoryId))
     ),
     boardItems: data.boardItems.filter(
       (i) => i.boardId !== boardId || !relocatingRefs.has(`${i.refType}:${i.refId}`)
@@ -1341,9 +1489,131 @@ export function renestClustersCleanly(
   }
 
   for (const childId of newChildCategoryIds) {
-    next = growAncestorClustersToFit(next, boardId, childId)
+    if (relocatingCategoryIds.has(childId)) next = growAncestorClustersToFit(next, boardId, childId)
   }
 
+  return next
+}
+
+/** Shifts a cluster's explicit box, every explicit box nested anywhere
+ * under it, and every explicit member card of any of them by (dx, dy) —
+ * still-virtual ones follow on their own, being computed relative to it. */
+export function translateClusterSubtree(
+  data: ProjectData,
+  boardId: string,
+  categoryId: string,
+  dx: number,
+  dy: number
+): ProjectData {
+  if (dx === 0 && dy === 0) return data
+  const ids = new Set([categoryId, ...getDescendantCategoryIds(data.categories, categoryId)])
+  const refs = new Set<string>()
+  for (const category of data.categories) {
+    if (!ids.has(category.id)) continue
+    for (const codeId of category.codeIds) refs.add(`code:${codeId}`)
+    for (const noteId of category.noteIds) refs.add(`note:${noteId}`)
+  }
+  return {
+    ...data,
+    boardClusters: data.boardClusters.map((c) =>
+      c.boardId === boardId && ids.has(c.categoryId) ? { ...c, x: c.x + dx, y: c.y + dy } : c
+    ),
+    boardItems: data.boardItems.map((i) =>
+      i.boardId === boardId && refs.has(`${i.refType}:${i.refId}`) ? { ...i, x: i.x + dx, y: i.y + dy } : i
+    )
+  }
+}
+
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+}
+
+/** The nearest spot (never at negative coordinates) that moves `rect`
+ * clear of `collider` — preferring one that's clear of everything already
+ * settled, then the smallest displacement. */
+function pushClear(rect: Rect, collider: Rect, settled: Rect[]): Rect {
+  const candidates = [
+    { x: rect.x, y: collider.y + collider.height + CLUSTER_GAP },
+    { x: collider.x + collider.width + CLUSTER_GAP, y: rect.y },
+    { x: collider.x - rect.width - CLUSTER_GAP, y: rect.y },
+    { x: rect.x, y: collider.y - rect.height - CLUSTER_GAP }
+  ]
+    .filter((p) => p.x >= 0 && p.y >= 0)
+    .map((p) => ({
+      p,
+      distance: Math.hypot(p.x - rect.x, p.y - rect.y),
+      clear: !settled.some((s) => rectsOverlap(s, { ...rect, x: p.x, y: p.y }))
+    }))
+    .sort((a, b) => (a.clear === b.clear ? a.distance - b.distance : a.clear ? -1 : 1))
+  return { ...rect, x: candidates[0].p.x, y: candidates[0].p.y }
+}
+
+/**
+ * After `categoryId`'s box has changed (resized by hand, grown to fit
+ * what it now holds, or dropped somewhere), moves any explicit sibling in
+ * its packing group (same parent, or the board's root level) that its box
+ * now overlaps out of the way, to the nearest free spot — never the other
+ * way round: the cluster that changed is the one the user (or the fit
+ * logic) just put there, so it stays exactly where it is. A pushed sibling
+ * takes its whole subtree and its member cards with it, and can itself
+ * push the next one along; each then has its own ancestors grown to keep
+ * containing it.
+ *
+ * Only explicit siblings need this: a still-virtual one is packed around
+ * every explicit footprint in its group on each read (see the reservation
+ * pass in computeCategoryLayout), so it can never be under anything.
+ *
+ * Without it, a box growing into a neighbor — a superordinate grown to
+ * fit newly enclosed clusters, say — silently covered whatever it grew
+ * over, leaving an uninvolved cluster hidden behind it. Reported as:
+ * "make sure a neighboring unconcerned cluster won't be moved behind /
+ * hidden behind another cluster."
+ */
+export function resolveSiblingOverlaps(data: ProjectData, boardId: string, categoryId: string): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  const category = data.categories.find((c) => c.id === categoryId)
+  if (!board || !category) return data
+
+  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
+  const anchor = explicitClusters.find((c) => c.categoryId === categoryId)
+  if (!anchor) return data
+
+  const parentId = category.parentCategoryId ?? null
+  const siblings = data.categories
+    .filter((c) => c.id !== categoryId && (c.parentCategoryId ?? null) === parentId)
+    .map((c) => explicitClusters.find((e) => e.categoryId === c.id))
+    .filter((c): c is BoardCluster => c !== undefined)
+  if (siblings.length === 0) return data
+
+  const anchorRect: Rect = { x: anchor.x, y: anchor.y, width: anchor.width, height: anchor.height }
+  // Whatever the anchor actually overlaps gets sorted out first; the rest
+  // settle in reading order, so a push only ever ripples down/right-ward
+  // through the group in a predictable way.
+  const ordered = [...siblings].sort((a, b) => {
+    const aHit = rectsOverlap(anchorRect, a) ? 0 : 1
+    const bHit = rectsOverlap(anchorRect, b) ? 0 : 1
+    return aHit - bHit || a.y - b.y || a.x - b.x
+  })
+
+  const settled: Rect[] = [anchorRect]
+  const pushed: string[] = []
+  let next = data
+  for (const sibling of ordered) {
+    let rect: Rect = { x: sibling.x, y: sibling.y, width: sibling.width, height: sibling.height }
+    for (let guard = 0; guard < 100; guard++) {
+      const collider = settled.find((s) => rectsOverlap(s, rect))
+      if (!collider) break
+      rect = pushClear(rect, collider, settled)
+    }
+    const dx = rect.x - sibling.x
+    const dy = rect.y - sibling.y
+    if (dx !== 0 || dy !== 0) {
+      next = translateClusterSubtree(next, boardId, sibling.categoryId, dx, dy)
+      pushed.push(sibling.categoryId)
+    }
+    settled.push(rect)
+  }
+  for (const id of pushed) next = growAncestorClustersToFit(next, boardId, id)
   return next
 }
 
@@ -1362,9 +1632,10 @@ export function renestClustersCleanly(
  * arrow" out of nowhere for a resize the user never touched that cluster
  * *directly* for. Doesn't move the detached child at all (it's already
  * sitting right where it visually is, outside the shrunk box now) — only
- * the parent relationship changes. Stabilizes whatever group each
- * detached child rejoins (another cluster's children, or the board's own
- * root level), same as any other parent change.
+ * the parent relationship changes; a still-virtual child is pinned at
+ * that spot first so it genuinely stays there. Pins the root-level group
+ * it rejoins *before* it joins (see materializeChildClusters), same as
+ * any other parent change, so nothing already there moves either.
  */
 export function detachOrphanedChildren(data: ProjectData, boardId: string, categoryId: string): ProjectData {
   const board = data.boards.find((b) => b.id === boardId)
@@ -1386,8 +1657,27 @@ export function detachOrphanedChildren(data: ProjectData, boardId: string, categ
 
   let next = data
   for (const child of orphaned) {
+    // "Detached where it is" needs a real shape to be detached *at*: a
+    // still-virtual child's position is computed from its parent's box,
+    // and would be recomputed from scratch as a root the moment the
+    // parent link goes — jumping to the root grid's next free slot
+    // instead of staying put.
+    if (!explicitClusters.some((c) => c.categoryId === child.id)) {
+      const childBox = visibleByCategoryId.get(child.id)!
+      next = createClusterForCategory(next, {
+        boardId,
+        categoryId: child.id,
+        x: childBox.x,
+        y: childBox.y,
+        width: childBox.width,
+        height: childBox.height
+      }).data
+    }
+    // Pin the root-level group it's about to rejoin first, so rejoining
+    // can't reflow any of them (see materializeChildClusters).
+    next = materializeChildClusters(next, boardId, null)
     next = reparentCategory(next, child.id, null)
-    next = materializeSiblingClusters(next, boardId, child.id)
+    next = resolveSiblingOverlaps(next, boardId, child.id)
   }
   return next
 }

@@ -9,7 +9,6 @@ import {
   computeGridPosition,
   findAlignmentSnap,
   findClusterAtPoint,
-  findClustersEnclosedBy,
   findDistributionSnap,
   findSnapTarget,
   getClusterMemberItems,
@@ -21,7 +20,8 @@ import {
   getVisibleClusterLinks,
   MEMBER_CARD_HEIGHT,
   MEMBER_CARD_WIDTH,
-  resolveGroupClusterReassignment
+  resolveGroupClusterReassignment,
+  resolveResizeEnclosure
 } from '@shared/boardOps'
 import type { AlignmentGuide, DistributionGuide } from '@shared/boardOps'
 import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
@@ -144,8 +144,10 @@ function BoardView(): JSX.Element {
   const moveCluster = useProjectStore((s) => s.moveCluster)
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
   const materializeSiblingClusters = useProjectStore((s) => s.materializeSiblingClusters)
+  const materializeChildClusters = useProjectStore((s) => s.materializeChildClusters)
   const renestClustersCleanly = useProjectStore((s) => s.renestClustersCleanly)
   const detachOrphanedChildren = useProjectStore((s) => s.detachOrphanedChildren)
+  const resolveSiblingOverlaps = useProjectStore((s) => s.resolveSiblingOverlaps)
   const growClusterToFitOwnMembers = useProjectStore((s) => s.growClusterToFitOwnMembers)
   const growAncestorClustersToFit = useProjectStore((s) => s.growAncestorClustersToFit)
   const reassignRefCategoryMembership = useProjectStore((s) => s.reassignRefCategoryMembership)
@@ -562,22 +564,29 @@ function BoardView(): JSX.Element {
           // different clusters mid-drag.
           const groupMemberIds = state.groupItemIds.filter((id) => state.startPositions[id])
           const refByMemberId = new Map(groupMemberIds.map((id) => [id, items.find((i) => i.id === id)]))
-          const reassignmentStartPositions = { ...state.startPositions }
-          const reassignmentFinalPositions = new Map(finalPositions)
-          const reassignmentGroupIds = [...groupMemberIds]
-          if (targetId && targetRef && targetPos && !reassignmentGroupIds.includes(targetId)) {
-            reassignmentStartPositions[targetId] = targetPos
-            reassignmentFinalPositions.set(targetId, targetPos)
-            reassignmentGroupIds.push(targetId)
-          }
+          // The decision is made from the members that actually MOVED —
+          // the freshly snapped target didn't (its start and final
+          // position are the same spot), so it can never be the one that
+          // signals a cluster change. It used to be included as a
+          // reference candidate: whenever it happened to sit above the
+          // dragged card (snapping onto it from below), it became the
+          // "topmost" reference, read as "old cluster = new cluster", and
+          // the whole reassignment was skipped — the dragged code stayed a
+          // member of the cluster it came from while sitting inside the
+          // one it was dropped in. It still *receives* the group's
+          // decision below, same as every other member.
           const reassignment = resolveGroupClusterReassignment(
             clusters,
-            reassignmentStartPositions,
-            reassignmentFinalPositions,
-            reassignmentGroupIds,
+            state.startPositions,
+            finalPositions,
+            groupMemberIds,
             CARD_WIDTH,
             CARD_HEIGHT
           )
+          const reassignmentGroupIds = [...groupMemberIds]
+          if (targetId && targetRef && !reassignmentGroupIds.includes(targetId)) {
+            reassignmentGroupIds.push(targetId)
+          }
           if (reassignment && reassignment.oldCluster?.id !== reassignment.newCluster?.id && selectedBoardId) {
             for (const memberId of reassignmentGroupIds) {
               const ref = memberId === targetId ? targetRef : refByMemberId.get(memberId)
@@ -615,16 +624,19 @@ function BoardView(): JSX.Element {
                 reassignment.newCluster?.categoryId ?? null
               )
             }
-            // A cluster's own box used to stay frozen at whatever size it
-            // already had, even once a newly-added member's card no
-            // longer fit inside it — reported as "existing items in the
-            // cluster spill out of it" when an item is dropped into an
-            // already-placed cluster. Also keep the whole ancestor chain
-            // (if nested) still containing it after that growth.
-            if (reassignment.newCluster && selectedBoardId) {
-              growClusterToFitOwnMembers(selectedBoardId, reassignment.newCluster.categoryId)
-              growAncestorClustersToFit(selectedBoardId, reassignment.newCluster.categoryId)
-            }
+          }
+          // A cluster's own box used to stay frozen at whatever size it
+          // already had, even once a newly-added member's card no longer
+          // fit inside it — reported as "existing items in the cluster
+          // spill out of it" when an item is dropped into an already-
+          // placed cluster. Also keep the whole ancestor chain (if nested)
+          // still containing it after that growth. Runs for a drop inside
+          // the cluster the group was already in too, not just on a
+          // membership change: a card released against the bottom/right
+          // edge hangs out past it just the same either way.
+          if (reassignment?.newCluster && selectedBoardId) {
+            growClusterToFitOwnMembers(selectedBoardId, reassignment.newCluster.categoryId)
+            growAncestorClustersToFit(selectedBoardId, reassignment.newCluster.categoryId)
           }
 
           if (snap && selectedBoardId && targetId) {
@@ -692,15 +704,13 @@ function BoardView(): JSX.Element {
             newParentId = target?.categoryId ?? null
           }
           if (newParentId !== currentParentId) {
-            reparentCategory(state.categoryId, newParentId)
-            // Whatever this cluster just joined — another cluster's
+            // Whatever this cluster is about to join — another cluster's
             // existing children, or the board's own root-level group if
             // un-nested (shift-drag, or dropped on empty space) — pin
-            // every still-virtual sibling already there too (same
-            // first-touch reasoning as above, now for the destination),
-            // then grow the whole ancestor chain (a no-op if it's now a
-            // root) to actually fit the cluster just dropped in, matching
-            // the live ghost preview shown during the drag. Has to run for
+            // every still-virtual member already there *before* it joins
+            // (see materializeChildClusters: a group's packed positions
+            // depend on its whole membership, so pinning after the join
+            // would freeze them at already-shifted spots). Has to run for
             // un-nesting too, not just nesting into something — leaving a
             // superordinate rejoins the board's root-level packing group
             // just as much as nesting into a new parent joins that
@@ -712,10 +722,23 @@ function BoardView(): JSX.Element {
             // getStructuralNestingEdges) appear out of nowhere for some
             // other, uninvolved parent/child pair whose spatial
             // containment that same reflow broke.
-            if (selectedBoardId) {
-              materializeSiblingClusters(selectedBoardId, state.categoryId)
-              growAncestorClustersToFit(selectedBoardId, state.categoryId)
-            }
+            if (selectedBoardId) materializeChildClusters(selectedBoardId, newParentId)
+            reparentCategory(state.categoryId, newParentId)
+          }
+          // Grow the whole ancestor chain (a no-op for a root, or when it
+          // already fits) to actually contain the cluster where it was
+          // dropped, matching the live ghost preview shown during the
+          // drag. Not only on a parent change: nudging a nested cluster
+          // partway past its own parent's edge (center still inside, so
+          // it stays nested) is just as much a "no longer contained"
+          // situation, and leaving it that way is exactly when
+          // getStructuralNestingEdges draws a stray connector for it.
+          // Then push any sibling the dropped frame now covers (center
+          // outside it, so not a nest target) to free space, so a drop
+          // never silently hides a neighbor.
+          if (selectedBoardId) {
+            growAncestorClustersToFit(selectedBoardId, state.categoryId)
+            resolveSiblingOverlaps(selectedBoardId, state.categoryId)
           }
         } else {
           const width = Math.max(MIN_CLUSTER_WIDTH, state.startWidth + dx)
@@ -739,13 +762,16 @@ function BoardView(): JSX.Element {
           const resizingCluster = clusters.find((c) => c.id === state.id)
           if (resizingCluster) {
             const box = { x: resizingCluster.x, y: resizingCluster.y, width, height }
-            const excluded = new Set([
-              state.categoryId,
-              ...getDescendantCategoryIds(currentData.categories, state.categoryId)
-            ])
-            const newlyEnclosed = findClustersEnclosedBy(clusters, box, excluded)
-            for (const enclosed of newlyEnclosed) {
-              reparentCategory(enclosed.categoryId, state.categoryId)
+            const newlyEnclosed = resolveResizeEnclosure(clusters, currentData.categories, box, state.categoryId)
+            // Children this cluster already had stay exactly where they
+            // are — pinned before anything joins them, so that holds for
+            // still-virtual ones too (see materializeChildClusters); the
+            // newcomers pack into the free space around them.
+            if (newlyEnclosed.length > 0 && selectedBoardId) {
+              materializeChildClusters(selectedBoardId, state.categoryId)
+            }
+            for (const categoryId of newlyEnclosed) {
+              reparentCategory(categoryId, state.categoryId)
             }
             // Nesting several clusters into the resizing one at once needs
             // more than just reparenting: each of them kept whatever
@@ -758,11 +784,7 @@ function BoardView(): JSX.Element {
             // resizing a cluster to enclose several others left them
             // overlapping and some pushed out past its edge.
             if (newlyEnclosed.length > 0 && selectedBoardId) {
-              renestClustersCleanly(
-                selectedBoardId,
-                state.categoryId,
-                newlyEnclosed.map((c) => c.categoryId)
-              )
+              renestClustersCleanly(selectedBoardId, state.categoryId, newlyEnclosed)
             }
             // The reverse of the above: shrinking this cluster can leave
             // one of its EXISTING children no longer fitting inside it.
@@ -780,7 +802,13 @@ function BoardView(): JSX.Element {
           // nested children no longer fit inside it — reported as "on
           // resizing a cluster, the superordinate cluster size is fixed."
           // Walks the whole ancestor chain, not just the immediate parent.
-          if (selectedBoardId) growAncestorClustersToFit(selectedBoardId, state.categoryId)
+          // Then push any neighbor the resized frame now partly covers
+          // (not enclosed, so not nested — just overlapped) to free
+          // space, so a resize never hides an uninvolved cluster.
+          if (selectedBoardId) {
+            growAncestorClustersToFit(selectedBoardId, state.categoryId)
+            resolveSiblingOverlaps(selectedBoardId, state.categoryId)
+          }
         }
       })
       setDragState(null)
@@ -903,11 +931,7 @@ function BoardView(): JSX.Element {
     const width = Math.max(MIN_CLUSTER_WIDTH, dragState.startWidth + liveDelta.dx)
     const height = Math.max(MIN_CLUSTER_HEIGHT, dragState.startHeight + liveDelta.dy)
     const box = { x: resizingCluster.x, y: resizingCluster.y, width, height }
-    const excluded = new Set([
-      dragState.categoryId,
-      ...getDescendantCategoryIds(data.categories, dragState.categoryId)
-    ])
-    return new Set(findClustersEnclosedBy(clusters, box, excluded).map((c) => c.categoryId))
+    return new Set(resolveResizeEnclosure(clusters, data.categories, box, dragState.categoryId))
   }, [data, dragState, liveDelta, clusters])
 
   // Shared endpoint/midpoint geometry for each link — computed once and used

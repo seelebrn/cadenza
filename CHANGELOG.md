@@ -6,6 +6,30 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Fixed
+- Snapping a code onto a code in another cluster from *below* it left the dragged code a member
+  of the cluster it came from, even though it now sat inside the other one (snapping from above
+  worked). It now joins the cluster it was dropped in either way.
+- Nudging a nested cluster partway past its superordinate's edge (without moving it out) drew a
+  stray connector line instead of growing the superordinate to keep containing it.
+- Nesting or un-nesting a cluster could shift the other clusters already in the group it joined
+  (a superordinate's existing sub-clusters, or the board's top level). They now stay put.
+- Shrinking a superordinate so that a never-touched sub-cluster no longer fit detached it but
+  made it jump to the board's top-left grid instead of staying where it was.
+- Resizing a cluster to enclose one that has its own sub-clusters flattened the whole hierarchy
+  into direct children; it now nests that cluster as one unit, sub-clusters kept inside it. A
+  nested cluster resized bigger than its own superordinate could also reset the superordinate's
+  position.
+- A code dropped against the bottom/right edge of a cluster could hang partly outside it; the
+  cluster now grows to fit it.
+- A cluster growing into a neighbor — a superordinate grown to fit what it just enclosed, a
+  cluster grown to fit a new member, or a frame resized/dropped so it partly covers one — left
+  that neighbor silently hidden underneath. The neighbor is now pushed to the nearest free
+  space instead (taking its own sub-clusters and cards with it), so nothing ends up behind
+  another cluster.
+- An auto-placed card in the unclustered area could land exactly on top of a card you had
+  dragged there by hand; it now takes the next free slot.
+
 ## [0.4.3] - 2026-09-16
 
 ### Fixed

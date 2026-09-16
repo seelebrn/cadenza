@@ -2654,3 +2654,120 @@ asserts no pair of the four resulting boxes overlaps — confirmed to fail (two 
 same coordinates) with the fix reverted, passes with it restored. A second, end-to-end test
 through `renestClustersCleanly` covers the same scenario via the actual resize-to-enclose path.
 Full suite green (398/398), typecheck clean, production build clean, boot-tested.
+
+### Board interaction audit: snap/link, cluster move/resize, nest/un-nest, grid (2026-09-16)
+
+After v0.4.3 shipped, asked to review the whole interaction pipeline for soundness rather than
+wait for the next report. Read every commit branch in `BoardView`'s mouseup handler
+(item drag, cluster move, cluster resize) and every pure function they call, specifically
+hunting the two failure classes this whole arc kept producing: an explicit position left
+stale after the thing it was computed against moved, and a packing result that depends on
+processing order. Wrote throwaway diagnostics for each suspect before believing it. Seven
+findings, six fixed, one left as a design question:
+
+1. **Snapping a code onto a target *below* it never re-clustered it.** The group-membership
+   decision (`resolveGroupClusterReassignment`) picks its reference member as the topmost by
+   start position, and the freshly snapped target was folded into the candidates — but the
+   target didn't move (start = final), so whenever it sat above the dragged card it became the
+   reference, read as "old cluster = new cluster", and the whole reassignment was skipped. Half
+   the snaps (from below) silently left the dragged code a member of the cluster it came from
+   while sitting inside another. Confirmed with a diagnostic; the reference is now chosen from
+   the members that actually moved, and the target still receives the group's decision.
+
+2. **Nudging a nested cluster partway past its parent's edge drew a stray connector.** The
+   ancestor-growth after a cluster move only ran on a parent *change*; a move that kept the
+   center inside its parent (so it stayed nested) but poked the frame out past the edge did
+   nothing — exactly the condition `getStructuralNestingEdges` draws for. Growth now runs after
+   every cluster move (a no-op when it already fits).
+
+3. **Joining a group reflowed the untouched members already in it.** `materializeSiblingClusters`
+   was called *after* the reparent, so it froze the destination's virtual siblings at positions
+   already recomputed with the newcomer counted in (column count and width both follow from the
+   full membership). New `materializeChildClusters(parentCategoryId | null)` pins a group *before*
+   anything joins it — used by cluster-move (both nesting and un-nesting), resize-to-enclose
+   (the resizing cluster's pre-existing children), and `detachOrphanedChildren` (the roots).
+   The regression test asserts both directions: pin-first leaves every existing child where it
+   was; pin-after demonstrably moves one.
+
+4. **Detaching a still-virtual child made it jump to the root grid.** "Detached where it is"
+   only held for a child that already had an explicit shape; a virtual one recomputed from
+   scratch as a root the moment its parent link was cleared — diagnostic showed it moving from
+   (520, 548) to (40, 40). It's now pinned at its current box first.
+
+5. **Resize-to-enclose flattened hierarchies, and could reset an ancestor.** Enclosing a cluster
+   that has its own sub-clusters reparented every level directly under the resizing one; and a
+   nested cluster resized from its parent's exact corner to bigger than the parent "enclosed"
+   the parent, which `reparentCategory` correctly refused (cycle) but `renestClustersCleanly`
+   still reset the parent's shape and items as if it had gone through. New
+   `resolveResizeEnclosure` (shared by the live highlight and the commit) excludes ancestors and
+   any enclosed cluster whose own ancestor is also enclosed — a sub-tree nests as one unit.
+   `renestClustersCleanly` now only touches ids that actually became children, and takes each
+   relocating cluster's whole subtree along (their shapes and members reset with it, for the same
+   stranded-position reason as its own member cards — the test confirms the sub-cluster ends up
+   inside the relocated cluster, which it did not before).
+
+6. **A hand-dropped card could hang past its cluster's edge.** `growClusterToFitOwnMembers` only
+   sized for the auto grid; a card released against the bottom/right edge (center inside, so it
+   joined) stuck out by up to half a card. It now also fits every explicit member's actual rect,
+   and runs on any drop inside a cluster, not only on a membership change.
+
+7. **Not changed — a design question:** a cluster-move's nest target is whichever cluster
+   contains the dropped frame's *center* (smallest first), with no size check. Dragging a big
+   superordinate so its center crosses a small leaf nests the big one into the small one, which
+   then grows to swallow it. A "target must be at least as large as what's being dropped" rule
+   (or "the dropped frame must be mostly inside the target") would prevent it; left for the user
+   to decide, since it changes what a deliberate drop means.
+
+Also reviewed and found sound: `findClusterAtPoint` preferring the smallest containing frame
+(so a drop into a nested cluster picks the nested one); the item-drag materialize-before-link
+sequence; the unlink-on-distance loop; `getVisibleBoardItems`' slot stability; the two-pass
+reservation from the previous entry (the pre-existing tests that pinned exact positions all
+still pass, so pinning a cluster in its natural slot no longer changes anything else).
+
+Verified: 10 new unit tests across `resolveResizeEnclosure`, `materializeChildClusters`,
+`renestClustersCleanly`, `detachOrphanedChildren`, `growClusterToFitOwnMembers`; the two whose
+old behavior wasn't already demonstrated by a diagnostic were confirmed to fail with just that
+fix toggled off. Full suite green (408/408), typecheck clean, production build clean,
+boot-tested. Findings 1 and 2 live in `BoardView`'s handler ordering, outside the pure layer, so
+they're covered by reasoning and the diagnostic rather than a unit test.
+
+### Nothing gets silently covered: sibling overlap resolution (2026-09-16)
+
+Asked mid-audit: "on resizing a SO cluster to include/exclude clusters, make sure a neighboring
+unconcerned cluster won't be moved behind / hidden behind another cluster — generally, make sure
+items and clusters aren't silently placed on top of / behind an existing similar object."
+
+The remaining way that could still happen after the audit above: a box *growing*. A
+superordinate grown to fit newly enclosed clusters (`growAncestorClustersToFit`), a cluster grown
+to fit a new member (`growClusterToFitOwnMembers`), or a frame the user resized/dropped so it
+partly covers a neighbor without enclosing it — none of these touched the neighbor, which was
+left sitting under (or over, depending on paint order) the grown frame. Still-virtual siblings
+were already safe, since `computeCategoryLayout`'s reservation pass packs them around every
+explicit footprint on each read; explicit ones had nothing.
+
+New `resolveSiblingOverlaps(boardId, categoryId)`: the changed cluster stays exactly where it is
+(the user or the fit logic just put it there); every explicit sibling in its group that it now
+overlaps is pushed to the nearest free spot — down / right / left / up, whichever is the
+smallest move that lands clear of everything already settled, never to negative coordinates
+(those are unreachable on the canvas). Siblings the anchor overlaps settle first, then the rest
+in reading order, so a push ripples predictably: a pushed cluster that would land on a third
+pushes that one along. A pushed sibling carries its whole subtree and its member cards with it
+(`translateClusterSubtree`), then has its own ancestors grown to keep containing it — and that
+growth resolves overlaps at *its* level in turn. Wired into `growAncestorClustersToFit` (after
+each ancestor grows), `growClusterToFitOwnMembers`, `detachOrphanedChildren` (the detached child
+rejoining the roots), and both the resize and cluster-move commits in `BoardView`, so every path
+that changes a box ends with "and nothing is under it."
+
+Items: the one silent case found was the flat (unclustered) grid — its origin sits just below
+the lowest cluster, so it moves whenever clusters above it grow, and an auto-placed card's slot
+could then land exactly on a card someone had already dragged there by hand. Auto-placed cards
+now skip any slot a hand-placed card covers. A card dropped by hand partly onto another card is
+left alone: that's the user's own placement, visible as it happens, and the snap already handles
+the close case by placing them edge-to-edge.
+
+Verified: 7 new tests (push direction is the smaller move and the anchor is untouched; a pushed
+sibling's sub-cluster and member cards move by the same delta; true no-op by reference equality
+when nothing overlaps or the anchor is virtual; ripple through a third cluster leaves no pair
+overlapping; no negative coordinates; growing a parent pushes the parent's own neighbor; flat-
+grid slot skipping) — six confirmed to fail with the two fixes toggled off (the seventh is the
+no-op case). Full suite green (415/415), typecheck clean, production build clean, boot-tested.

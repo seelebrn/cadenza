@@ -2988,3 +2988,33 @@ produce no structural edge at all. `materializeClusterMemberItems` — the "pin 
 before a membership change" helper — turned out to have no remaining caller after the previous
 entry and was deleted with its tests. Full suite green (420/420), typecheck clean, production
 build clean, boot-tested.
+
+### Resize-to-exclude, restored on top of the grid model (2026-09-16)
+
+"Now I can't resize a SO cluster to exclude some clusters from it. It instantly goes back to its
+previous size."
+
+Expected given the previous entry — a box is never shown smaller than its contents, so a shrink
+that still contained everything simply bounced — but the previous entry also dropped the
+resize-to-exclude gesture entirely, and the user wants it. Restored, in the form that fits the
+grid model: shrinking is a statement about *membership*, not size. On release, every nested
+cluster that no longer fully fits inside the box the user drew is taken out first
+(`resolveResizeExclusion` — the mirror of `resolveResizeEnclosure`, judged against where each
+child is actually shown, i.e. its grid slot), and only then does the superordinate settle at
+`max(drawn, what remains)` — so it genuinely shrinks. `detachClustersFrom` pins each excluded
+cluster as a top-level cluster exactly where it was being shown (its sub-clusters and cards
+follow, being on its grid), pins the root group before they join (the usual rule), and runs the
+overlap push from the shrunk superordinate so a partly-covered cluster ends up beside it rather
+than under its edge. Exclusion is decided before enclosure in the same commit, from the
+pre-resize picture, so a cluster the same resize newly encloses can't be judged against a box
+its own arrival reshapes.
+
+The live feedback mirrors enclosure: while shrinking, a nested cluster that would be taken out
+gets an amber "Will be taken out" badge (`isExcludedByResize` on `ClusterFrame`), from the same
+function the commit uses, so what's highlighted is exactly what detaches.
+
+Verified: 3 new tests (the exclusion set is exactly the children cut by the drawn box; after
+detaching, the excluded ones are top-level and pinned near where they were, the superordinate is
+shown at the drawn size with the remaining child inside, nothing overlaps and no structural edge
+exists; a non-child id and an empty list are left alone). Full suite green (423/423), typecheck clean,
+production build clean, boot-tested.

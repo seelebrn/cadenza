@@ -66,6 +66,7 @@ import {
   createClusterWithNewCategory as createClusterWithNewCategoryOp,
   deleteBoard as deleteBoardOp,
   deleteCluster as deleteClusterOp,
+  detachClustersFrom as detachClustersFromOp,
   getDefaultBoardId,
   growAncestorClustersToFit as growAncestorClustersToFitOp,
   growClusterToFitOwnMembers as growClusterToFitOwnMembersOp,
@@ -295,6 +296,11 @@ interface ProjectState {
    * cover to the nearest free spot, growing their clusters to fit — call
    * after an item drop, so cards never stack. See resolveItemOverlaps. */
   resolveItemOverlaps: (boardId: string, anchorItemIds: string[]) => void
+  /** Takes the given nested clusters out of categoryId, each pinned as a
+   * top-level cluster right where it was shown — what shrinking a
+   * superordinate so they no longer fit inside it means. See
+   * detachClustersFrom's own comment. */
+  detachClustersFrom: (boardId: string, categoryId: string, childCategoryIds: string[]) => void
   /** Grows (materializing, if still virtual) categoryId's own box to fit
    * its current membership, if it isn't already big enough — call after a
    * board drag adds a new member to an already-placed cluster. */
@@ -875,6 +881,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   resolveItemOverlaps: (boardId, anchorItemIds) =>
     get().updateProject((data) => resolveItemOverlapsOp(data, boardId, anchorItemIds)),
+
+  detachClustersFrom: (boardId, categoryId, childCategoryIds) =>
+    get().updateProject((data) => detachClustersFromOp(data, boardId, categoryId, childCategoryIds)),
 
   renestClustersCleanly: (boardId, parentCategoryId, newChildCategoryIds) =>
     get().updateProject((data) => renestClustersCleanlyOp(data, boardId, parentCategoryId, newChildCategoryIds)),

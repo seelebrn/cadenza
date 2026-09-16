@@ -22,6 +22,11 @@ function fillOpacityForDepth(depth: number): string {
 // distinct from a nest-target's highlight (that one reuses the dragged
 // cluster's own color, since it's a more direct "drop here" cue).
 const ENCLOSED_BY_RESIZE_COLOR = '#3b82f6'
+// The opposite cue: "the cluster being resized is about to let you go" —
+// a nested cluster no longer fully inside the shrinking frame, detached on
+// release. Amber, so it reads as a warning-ish change rather than the
+// blue "joining" one.
+const EXCLUDED_BY_RESIZE_COLOR = '#d97706'
 
 interface ClusterFrameProps {
   cluster: BoardCluster
@@ -45,6 +50,10 @@ interface ClusterFrameProps {
    * currently fully enclosed by that growing frame — it's about to become
    * that cluster's child on release. */
   isEnclosedByResize: boolean
+  /** True while this cluster's own superordinate is being resized and this
+   * one no longer fully fits inside the shrinking frame — it's about to be
+   * detached (become top-level) on release. */
+  isExcludedByResize: boolean
   /** While true, the header's mousedown picks this cluster as a link
    * endpoint (onPick) instead of starting a move — link-mode and the
    * normal drag-to-nest gesture would otherwise be indistinguishable, both
@@ -85,6 +94,7 @@ function ClusterFrame({
   resizePreview,
   isNestTarget,
   isEnclosedByResize,
+  isExcludedByResize,
   isLinkMode,
   isLinkPicked,
   isDefaultBoard,
@@ -138,22 +148,28 @@ function ClusterFrame({
       )}
       <div
         className={`absolute select-none rounded-lg border-2 transition-opacity duration-150 ${
-          isNestTarget || isEnclosedByResize ? 'border-solid' : 'border-dashed'
+          isNestTarget || isEnclosedByResize || isExcludedByResize ? 'border-solid' : 'border-dashed'
         }`}
         style={{
           left: x,
           top: y,
           width,
           height,
-          borderColor: isEnclosedByResize ? ENCLOSED_BY_RESIZE_COLOR : category.color,
+          borderColor: isEnclosedByResize
+            ? ENCLOSED_BY_RESIZE_COLOR
+            : isExcludedByResize
+              ? EXCLUDED_BY_RESIZE_COLOR
+              : category.color,
           backgroundColor: `${category.color}${fillOpacityForDepth(depth)}`,
           boxShadow: isNestTarget
             ? `0 0 0 3px ${category.color}`
             : isEnclosedByResize
               ? `0 0 0 3px ${ENCLOSED_BY_RESIZE_COLOR}`
-              : isLinkPicked
-                ? `0 0 0 3px #0ea5e9`
-                : undefined,
+              : isExcludedByResize
+                ? `0 0 0 3px ${EXCLUDED_BY_RESIZE_COLOR}`
+                : isLinkPicked
+                  ? `0 0 0 3px #0ea5e9`
+                  : undefined,
           cursor: isLinkMode ? 'crosshair' : undefined,
           opacity: isDimmed ? 0.3 : 1
         }}
@@ -179,6 +195,14 @@ function ClusterFrame({
             style={{ backgroundColor: ENCLOSED_BY_RESIZE_COLOR }}
           >
             Will become a child
+          </span>
+        )}
+        {isExcludedByResize && (
+          <span
+            className="pointer-events-none absolute -top-2.5 right-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-medium text-white shadow"
+            style={{ backgroundColor: EXCLUDED_BY_RESIZE_COLOR }}
+          >
+            Will be taken out
           </span>
         )}
       <div

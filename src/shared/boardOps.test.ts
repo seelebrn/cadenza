@@ -21,6 +21,7 @@ import {
   createClusterWithNewCategory,
   deleteBoard,
   deleteCluster,
+  detachClustersFrom,
   describeBoardItem,
   findAlignmentSnap,
   findClusterAtPoint,
@@ -52,6 +53,7 @@ import {
   resolveGroupClusterReassignment,
   resolveItemOverlaps,
   resolveResizeEnclosure,
+  resolveResizeExclusion,
   resolveSiblingOverlaps,
   setBoardClusterFrameSize,
   setBoardClusterLinkStyle,
@@ -3116,5 +3118,70 @@ describe('clusters inside a superordinate always sit on its grid', () => {
     expect(getStructuralNestingEdges(visible, data.categories)).toEqual([])
     const soBox = visible.find((c) => c.categoryId === 'SO')!
     for (const id of ['A', 'B']) expect(rectContains(soBox, visible.find((c) => c.categoryId === id)!)).toBe(true)
+  })
+})
+
+describe('resize-to-exclude: resolveResizeExclusion + detachClustersFrom', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  function box(categoryId: string, x: number, y: number, width: number, height: number): BoardCluster {
+    return { id: `real:${categoryId}`, boardId: 'b1', categoryId, x, y, width, height, createdAt: '0' }
+  }
+  function setup(): ProjectData {
+    const so = makeCategory('SO')
+    const a = makeCategory('A', { parentCategoryId: 'SO' })
+    const b = makeCategory('B', { parentCategoryId: 'SO' })
+    const c = makeCategory('C', { parentCategoryId: 'SO' })
+    return makeData({ boards: [board], categories: [so, a, b, c], boardClusters: [box('SO', 0, 0, 1000, 1000)] })
+  }
+
+  it('flags exactly the nested clusters that no longer fully fit in the drawn box', () => {
+    const data = setup()
+    const visible = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    const a = visible.find((c) => c.categoryId === 'A')!
+    // A box that keeps A whole but cuts through B and C (3 children -> 2
+    // columns: A and B on the first row, C below).
+    const drawn = { x: 0, y: 0, width: a.x + a.width + 5, height: a.y + a.height + 5 }
+    expect(resolveResizeExclusion(visible, data.categories, drawn, 'SO').sort()).toEqual(['B', 'C'])
+    // The full box excludes nothing.
+    expect(resolveResizeExclusion(visible, data.categories, { x: 0, y: 0, width: 1000, height: 1000 }, 'SO')).toEqual([])
+  })
+
+  // Reported: "I can't resize a SO cluster to exclude some clusters from
+  // it. It instantly goes back to its previous size." A box is never shown
+  // smaller than its contents, so the shrink has to take the excluded
+  // clusters *out* first — then the superordinate can actually be smaller.
+  it('detaches the excluded clusters where they were shown, and the superordinate really shrinks', () => {
+    let data = setup()
+    const visibleBefore = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    const a = visibleBefore.find((c) => c.categoryId === 'A')!
+    const bBefore = visibleBefore.find((c) => c.categoryId === 'B')!
+    const drawn = { x: 0, y: 0, width: a.x + a.width + 20, height: a.y + a.height + 20 }
+
+    data = resizeCluster(data, 'real:SO', drawn.width, drawn.height)
+    data = detachClustersFrom(data, 'b1', 'SO', ['B', 'C'])
+
+    for (const id of ['B', 'C']) expect(data.categories.find((c) => c.id === id)!.parentCategoryId).toBeNull()
+    expect(data.categories.find((c) => c.id === 'A')!.parentCategoryId).toBe('SO')
+
+    const visible = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    const so = visible.find((c) => c.categoryId === 'SO')!
+    // Shrunk to the drawn box (A alone fits in it).
+    expect({ width: so.width, height: so.height }).toEqual({ width: drawn.width, height: drawn.height })
+    expect(rectContains(so, visible.find((c) => c.categoryId === 'A')!)).toBe(true)
+    // B is a top-level cluster now, pinned near where it was shown, and
+    // clear of the shrunk superordinate (pushed if it still overlapped).
+    const b = visible.find((c) => c.categoryId === 'B')!
+    expect(data.boardClusters.some((c) => c.categoryId === 'B')).toBe(true)
+    expect(rectsOverlap(so, b)).toBe(false)
+    expect(Math.abs(b.y - bBefore.y)).toBeLessThan(500)
+    expect(getStructuralNestingEdges(visible, data.categories)).toEqual([])
+  })
+
+  it("leaves a cluster that isn't actually a child alone, and is a no-op for an empty list", () => {
+    const data = setup()
+    expect(detachClustersFrom(data, 'b1', 'SO', [])).toBe(data)
+    const other = makeCategory('other')
+    const withOther = { ...data, categories: [...data.categories, other] }
+    expect(detachClustersFrom(withOther, 'b1', 'SO', ['other'])).toBe(withOther)
   })
 })

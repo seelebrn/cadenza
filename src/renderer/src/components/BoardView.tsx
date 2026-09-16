@@ -21,7 +21,8 @@ import {
   MEMBER_CARD_HEIGHT,
   MEMBER_CARD_WIDTH,
   resolveGroupClusterReassignment,
-  resolveResizeEnclosure
+  resolveResizeEnclosure,
+  resolveResizeExclusion
 } from '@shared/boardOps'
 import type { AlignmentGuide, DistributionGuide } from '@shared/boardOps'
 import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
@@ -156,6 +157,7 @@ function BoardView(): JSX.Element {
   const renestClustersCleanly = useProjectStore((s) => s.renestClustersCleanly)
   const resolveSiblingOverlaps = useProjectStore((s) => s.resolveSiblingOverlaps)
   const resolveItemOverlaps = useProjectStore((s) => s.resolveItemOverlaps)
+  const detachClustersFrom = useProjectStore((s) => s.detachClustersFrom)
   const growClusterToFitOwnMembers = useProjectStore((s) => s.growClusterToFitOwnMembers)
   const growAncestorClustersToFit = useProjectStore((s) => s.growAncestorClustersToFit)
   const reassignRefCategoryMembership = useProjectStore((s) => s.reassignRefCategoryMembership)
@@ -784,6 +786,17 @@ function BoardView(): JSX.Element {
           const resizingCluster = clusters.find((c) => c.id === state.id)
           if (resizingCluster) {
             const box = { x: resizingCluster.x, y: resizingCluster.y, width, height }
+            // Shrinking so a nested cluster no longer fits inside the drawn
+            // box takes it out (detachClustersFrom) — same containment
+            // check the live highlight used, against the final box.
+            // Decided first, from where the children were shown *before*
+            // this resize, so a cluster the box is about to newly enclose
+            // below can't be judged against a box its own arrival then
+            // reshapes.
+            const excluded = resolveResizeExclusion(clusters, currentData.categories, box, state.categoryId)
+            if (excluded.length > 0 && selectedBoardId) {
+              detachClustersFrom(selectedBoardId, state.categoryId, excluded)
+            }
             const newlyEnclosed = resolveResizeEnclosure(clusters, currentData.categories, box, state.categoryId)
             // Children this cluster already had stay exactly where they
             // are — pinned before anything joins them, so that holds for
@@ -945,6 +958,20 @@ function BoardView(): JSX.Element {
     const height = Math.max(MIN_CLUSTER_HEIGHT, dragState.startHeight + liveDelta.dy)
     const box = { x: resizingCluster.x, y: resizingCluster.y, width, height }
     return new Set(resolveResizeEnclosure(clusters, data.categories, box, dragState.categoryId))
+  }, [data, dragState, liveDelta, clusters])
+
+  // The mirror image: while shrinking a superordinate, live-highlights
+  // which of its own nested clusters no longer fully fit inside the frame
+  // — the set that gets detached on release (the resize commit re-runs the
+  // same check against the final size).
+  const resizeExcludedCategoryIds = useMemo(() => {
+    if (!data || dragState?.kind !== 'cluster-resize') return new Set<string>()
+    const resizingCluster = clusters.find((c) => c.id === dragState.id)
+    if (!resizingCluster) return new Set<string>()
+    const width = Math.max(MIN_CLUSTER_WIDTH, dragState.startWidth + liveDelta.dx)
+    const height = Math.max(MIN_CLUSTER_HEIGHT, dragState.startHeight + liveDelta.dy)
+    const box = { x: resizingCluster.x, y: resizingCluster.y, width, height }
+    return new Set(resolveResizeExclusion(clusters, data.categories, box, dragState.categoryId))
   }, [data, dragState, liveDelta, clusters])
 
   // Shared endpoint/midpoint geometry for each link — computed once and used
@@ -1585,9 +1612,9 @@ function BoardView(): JSX.Element {
           arranged automatically; drop it on empty space to take it out) · hold Shift while dragging a card near
           another to link them (a plain drop never links); linked cards move together (Ctrl/Cmd+drag to move just
           one) · drag a cluster into another to nest it there (clusters inside a superordinate are arranged
-          automatically and it grows to hold them; drag one out, or shift+drag it, to take it out) · resize a
-          top-level cluster around others to nest them · click the × on a connector to unlink · right-click a
-          code/note card for its full info and verbatim excerpts
+          automatically and it grows to hold them; drag one out, shift+drag it, or shrink the superordinate past
+          it, to take it out) · resize a top-level cluster around others to nest them · click the × on a
+          connector to unlink · right-click a code/note card for its full info and verbatim excerpts
           {!currentBoard.isDefault &&
             ' · "Link clusters" then click two clusters to draw a labeled thematic-map relationship between them'}
         </p>
@@ -1740,6 +1767,7 @@ function BoardView(): JSX.Element {
                   resizePreview={dragNestTarget?.targetClusterId === cluster.id ? dragNestTarget.growSize : null}
                   isNestTarget={dragNestTarget?.targetClusterId === cluster.id}
                   isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}
+                  isExcludedByResize={resizeExcludedCategoryIds.has(cluster.categoryId)}
                   isLinkMode={linkMode}
                   isLinkPicked={linkFromCategoryId === category.id}
                   isDimmed={focusConnectedCategoryIds !== null && !focusConnectedCategoryIds.has(category.id)}

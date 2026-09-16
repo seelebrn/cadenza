@@ -157,6 +157,27 @@ export function findClustersEnclosedBy(
 }
 
 /**
+ * The direct children of `categoryId` that a resize of its frame to `box`
+ * leaves no longer fully inside it — the ones that resize means to take
+ * *out*. Judged against where each child is actually shown (its slot in
+ * the parent's grid), so what the live highlight marks is exactly what
+ * detaches on release. Used by both the highlight and the commit.
+ */
+export function resolveResizeExclusion(
+  clusters: BoardCluster[],
+  categories: CategoryRecord[],
+  box: Rect,
+  categoryId: string
+): string[] {
+  const outer: BoardCluster = { id: '', boardId: '', categoryId, createdAt: '', ...box }
+  return categories
+    .filter((c) => c.parentCategoryId === categoryId)
+    .map((c) => clusters.find((cl) => cl.categoryId === c.id))
+    .filter((cl): cl is BoardCluster => cl !== undefined && !clusterRectContains(outer, cl))
+    .map((cl) => cl.categoryId)
+}
+
+/**
  * The category ids a resize of `resizingCategoryId`'s frame to `box`
  * should newly nest — findClustersEnclosedBy, narrowed to what can
  * actually *become* a direct child:
@@ -1565,6 +1586,64 @@ export function resolveItemOverlaps(data: ProjectData, boardId: string, anchorIt
     settled.push(rect)
   }
   return next
+}
+
+/**
+ * Takes the given direct children of `categoryId` out of it — the resize
+ * counterpart of drag-out: shrinking a superordinate so a nested cluster
+ * no longer fits inside the drawn box means "this doesn't belong in here
+ * anymore." A superordinate is always shown at least as big as its
+ * contents, so without this a shrink simply bounced back to the old size;
+ * with it, the excluded clusters leave first and the superordinate is free
+ * to shrink to whatever remains.
+ *
+ * Each detached cluster becomes a top-level cluster pinned exactly where
+ * it was being shown (its sub-clusters and cards follow, being on its
+ * grid); the root-level group is pinned before it joins (see
+ * materializeChildClusters), and the superordinate then pushes anything
+ * it still overlaps clear (resolveSiblingOverlaps) — a partly-covered
+ * cluster ends up beside the shrunk box rather than under its edge.
+ */
+export function detachClustersFrom(
+  data: ProjectData,
+  boardId: string,
+  categoryId: string,
+  childCategoryIds: string[]
+): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  if (!board || childCategoryIds.length === 0) return data
+
+  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
+  const visibleByCategoryId = new Map(
+    getVisibleBoardClusters(board, explicitClusters, data.categories).map((c) => [c.categoryId, c])
+  )
+
+  const toDetach = childCategoryIds.filter((childId) => {
+    const child = data.categories.find((c) => c.id === childId)
+    return child?.parentCategoryId === categoryId && visibleByCategoryId.has(childId)
+  })
+  if (toDetach.length === 0) return data
+
+  let next = materializeChildClusters(data, boardId, null)
+  for (const childId of toDetach) {
+    const shown = visibleByCategoryId.get(childId)!
+    const stored = next.boardClusters.find((c) => c.boardId === boardId && c.categoryId === childId)
+    if (stored) {
+      next = moveCluster(next, stored.id, shown.x, shown.y)
+      next = resizeCluster(next, stored.id, shown.width, shown.height)
+    } else {
+      next = createClusterForCategory(next, {
+        boardId,
+        categoryId: childId,
+        x: shown.x,
+        y: shown.y,
+        width: shown.width,
+        height: shown.height
+      }).data
+    }
+    next = reparentCategory(next, childId, null)
+  }
+  return resolveSiblingOverlaps(next, boardId, categoryId)
 }
 
 /** Creates a brand-new category and places it as a cluster on a board in one

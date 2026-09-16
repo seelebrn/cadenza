@@ -45,8 +45,9 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   cluster can't rearrange its neighbors, and "Reset placement" can no longer leave a nested
   cluster orphaned. Free placement, and resizing a cluster around others to nest them, are for
   the board's top level. To take a cluster out of its superordinate, drag it out (or shift+drag
-  it) — shrinking the superordinate no longer detaches anything, since it now always holds its
-  contents.
+  it), or shrink the superordinate so the cluster no longer fits inside the box you draw — it's
+  highlighted amber while you drag ("Will be taken out"), detached in place on release, and
+  the superordinate then shrinks to what's left.
 - Cards inside a cluster are now always arranged in a grid automatically, and the cluster sizes
   itself to hold them — dropping a card into a cluster files it at its place in the grid rather
   than leaving it wherever it was released, so nothing can end up stranded, stacked, or pushed

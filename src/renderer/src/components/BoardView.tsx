@@ -47,20 +47,28 @@ const MAX_ZOOM = 2.5
 const ZOOM_WHEEL_SENSITIVITY = 0.0015
 // Empty margin left around everything when "Fit view" zooms to show it all.
 const FIT_VIEW_PADDING = 60
-// How close two cards must get while dragging to snap/link; how far an
-// already-linked pair must be dragged apart to sever automatically.
+// How close two cards must get while dragging *with Shift held* to
+// snap/link; how far an already-linked pair must be dragged apart to sever
+// automatically. Snapping used to be automatic for any drag that ended
+// near another card — which made it impossible to drop a code into a
+// cluster with no free slot left (the drop necessarily lands on a card, so
+// it necessarily linked to it), and in general meant a link was created
+// as a side effect of placement rather than as a choice. Linking is now an
+// explicit gesture: hold Shift while dragging (live — pressing it partway
+// through a drag works) and the snap preview + link happen; release it
+// and the drop is a plain move.
 const SNAP_DISTANCE = 70
 const UNLINK_DISTANCE = 200
 // findSnapTarget itself has no minimum drag distance — without this, an
 // item picked up while already within SNAP_DISTANCE of a neighbor (common
 // in the default board's auto-packed grid layout) snaps to it the instant
 // it's grabbed, before the mouse has moved at all: it visibly jumps on a
-// plain click, and — since handleMouseUp runs the exact same check against
-// the final (here, zero) delta — a click with no drag at all could commit
-// that snap as a real position change and a new link the user never meant
-// to create. Gating both the live preview and the commit on having moved
-// at least this many canvas pixels since mousedown keeps snapping for an
-// actual drag gesture while treating a plain click as a no-op.
+// plain (Shift+)click, and — since handleMouseUp runs the exact same check
+// against the final (here, zero) delta — a click with no drag at all could
+// commit that snap as a real position change and a new link the user never
+// meant to create. Gating both the live preview and the commit on having
+// moved at least this many canvas pixels since mousedown keeps snapping for
+// an actual drag gesture while treating a plain click as a no-op.
 const MIN_DRAG_DISTANCE_FOR_SNAP = 4
 // Smart-guide accent — deliberately not any cluster's own color (which
 // already means something else, e.g. a nest-target highlight) and not the
@@ -182,7 +190,12 @@ function BoardView(): JSX.Element {
   const [newClusterName, setNewClusterName] = useState('')
   const [newClusterKind, setNewClusterKind] = useState<CategoryKind>('theme')
   const [dragState, setDragState] = useState<DragState | null>(null)
-  const [liveDelta, setLiveDelta] = useState({ dx: 0, dy: 0 })
+  // shiftKey rides along with the pointer delta: snap-linking is an
+  // explicit, held-modifier gesture (see SNAP_DISTANCE), and it's read
+  // live from each pointer event rather than once at mousedown, so Shift
+  // can be pressed (or released) partway through a drag and the snap
+  // preview follows immediately.
+  const [liveDelta, setLiveDelta] = useState({ dx: 0, dy: 0, shiftKey: false })
   const [zoom, setZoom] = useState(1)
   // Thematic-map cluster links: link mode replaces the normal drag gesture
   // (see ClusterFrame's onPick) rather than racing it, since dragging one
@@ -476,7 +489,8 @@ function BoardView(): JSX.Element {
     function handleMouseMove(e: MouseEvent): void {
       setLiveDelta({
         dx: (e.clientX - state.startMouseX) / zoom,
-        dy: (e.clientY - state.startMouseY) / zoom
+        dy: (e.clientY - state.startMouseY) / zoom,
+        shiftKey: e.shiftKey
       })
     }
 
@@ -495,7 +509,7 @@ function BoardView(): JSX.Element {
           const rawY = grabbedStart.y + dy
           const candidates = items.filter((i) => !state.groupItemIds.includes(i.id))
           const snap =
-            Math.hypot(dx, dy) >= MIN_DRAG_DISTANCE_FOR_SNAP
+            e.shiftKey && Math.hypot(dx, dy) >= MIN_DRAG_DISTANCE_FOR_SNAP
               ? findSnapTarget(candidates, state.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
               : null
           const adjustX = snap ? snap.snappedX - rawX : 0
@@ -821,7 +835,7 @@ function BoardView(): JSX.Element {
         }
       })
       setDragState(null)
-      setLiveDelta({ dx: 0, dy: 0 })
+      setLiveDelta({ dx: 0, dy: 0, shiftKey: false })
     }
 
     window.addEventListener('mousemove', handleMouseMove)
@@ -855,7 +869,7 @@ function BoardView(): JSX.Element {
       let adjustX = 0
       let adjustY = 0
       let isGrabbedSnapping = false
-      if (grabbedStart && Math.hypot(liveDelta.dx, liveDelta.dy) >= MIN_DRAG_DISTANCE_FOR_SNAP) {
+      if (grabbedStart && liveDelta.shiftKey && Math.hypot(liveDelta.dx, liveDelta.dy) >= MIN_DRAG_DISTANCE_FOR_SNAP) {
         const rawX = grabbedStart.x + liveDelta.dx
         const rawY = grabbedStart.y + liveDelta.dy
         const candidates = items.filter((i) => !dragState.groupItemIds.includes(i.id))
@@ -1577,10 +1591,10 @@ function BoardView(): JSX.Element {
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
           {currentBoard.isDefault &&
             'Every code, note, and cluster is shown automatically on this default board. '}
-          Ctrl/Cmd+scroll to zoom · drag two cards close together to link them (they snap), and linked/clustered
-          cards move together (shift+drag to move just one) · drag a cluster into another to nest it as a
-          superordinate group (shift+drag to pull it out) · click the × on a connector to unlink · right-click a
-          code/note card for its full info and verbatim excerpts
+          Ctrl/Cmd+scroll to zoom · hold Shift while dragging a card near another to link them (they snap; a
+          plain drop never links), and linked/clustered cards move together (Ctrl/Cmd+drag to move just one) ·
+          drag a cluster into another to nest it as a superordinate group (shift+drag to pull it out) · click
+          the × on a connector to unlink · right-click a code/note card for its full info and verbatim excerpts
           {!currentBoard.isDefault &&
             ' · "Link clusters" then click two clusters to draw a labeled thematic-map relationship between them'}
         </p>
@@ -1840,9 +1854,11 @@ function BoardView(): JSX.Element {
                     // its actual id, since item.id (a "virtual:..." marker)
                     // won't exist in boardItems for moveItem to find.
                     const draggedId = realId ?? item.id
-                    // Shift+drag is the escape hatch: move just this one
-                    // card, ignoring whatever it's linked to.
-                    const group = e.shiftKey ? new Set([draggedId]) : getLinkedGroup(links, draggedId)
+                    // Ctrl/Cmd+drag is the escape hatch: move just this one
+                    // card, ignoring whatever it's linked to. (Shift is the
+                    // snap-link modifier, held during the drag — see
+                    // SNAP_DISTANCE.)
+                    const group = e.ctrlKey || e.metaKey ? new Set([draggedId]) : getLinkedGroup(links, draggedId)
                     // Every snap-link created from here on always connects
                     // two already-real items (see the mouseup handler's own
                     // materialize-before-linking comment), but a link from

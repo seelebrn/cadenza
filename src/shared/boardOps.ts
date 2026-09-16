@@ -1315,6 +1315,12 @@ export function growClusterToFitOwnMembers(data: ProjectData, boardId: string, c
     cluster = next.boardClusters.find((c) => c.id === created.clusterId)
     if (!cluster) return next
   }
+  // Pin the siblings first: growing this box repacks any still-virtual
+  // sibling around it on the very next read (and past the parent's frozen
+  // edge, if that's where the packer's next free column lands). Explicit
+  // siblings instead get pushed the minimal distance by
+  // resolveSiblingOverlaps below, with their ancestors grown to match.
+  next = materializeSiblingClusters(next, boardId, categoryId)
   next = resizeCluster(next, cluster.id, width, height)
   return resolveSiblingOverlaps(next, boardId, categoryId)
 }
@@ -1343,11 +1349,21 @@ export function growAncestorClustersToFit(data: ProjectData, boardId: string, ca
 
     const explicitClusters = next.boardClusters.filter((c) => c.boardId === boardId)
     const visible = getVisibleBoardClusters(board, explicitClusters, next.categories)
-    const childBox = visible.find((c) => c.categoryId === childCategoryId)
     const parentBox = visible.find((c) => c.categoryId === parentCategoryId)
-    if (!childBox || !parentBox) break
+    if (!parentBox) break
 
-    const size = computeAccommodatingSize(parentBox, childBox, CLUSTER_NEST_PADDING)
+    // Fit *every* child of this parent, not just the one that changed: a
+    // still-virtual sibling is repacked around the changed one's bigger
+    // box on every read, and can land past the parent's frozen edge just
+    // the same — reported as a superordinate that grew in one direction
+    // only, with two untouched clusters left outside its bottom edge.
+    const childBoxes = visible.filter(
+      (c) => next.categories.find((cat) => cat.id === c.categoryId)?.parentCategoryId === parentCategoryId
+    )
+    let size = { width: parentBox.width, height: parentBox.height }
+    for (const box of childBoxes) {
+      size = computeAccommodatingSize({ x: parentBox.x, y: parentBox.y, ...size }, box, CLUSTER_NEST_PADDING)
+    }
     if (size.width === parentBox.width && size.height === parentBox.height) break
 
     let parentCluster = explicitClusters.find((c) => c.categoryId === parentCategoryId)
@@ -1364,6 +1380,10 @@ export function growAncestorClustersToFit(data: ProjectData, boardId: string, ca
       parentCluster = next.boardClusters.find((c) => c.id === created.clusterId)
       if (!parentCluster) break
     }
+    // Same first-touch rule as growClusterToFitOwnMembers: pin this
+    // parent's own siblings before its box changes, so they get pushed
+    // (minimally, ancestors grown) rather than silently repacked.
+    next = materializeSiblingClusters(next, boardId, parentCategoryId)
     next = resizeCluster(next, parentCluster.id, size.width, size.height)
     // Growing this box can run it into one of *its* own neighbors — push
     // that neighbor to free space rather than leaving it covered.

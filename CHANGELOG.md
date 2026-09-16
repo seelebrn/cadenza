@@ -33,6 +33,19 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   released over (or, when it snapped, on top of the next card along). The card that was already
   there now moves over to free space and the cluster grows to fit — the dropped card stays where
   you put it. Cards never stack anywhere on the board after a drop.
+- Dropping a code into a cluster nested in a superordinate grew the superordinate for that one
+  cluster only — two of its other, untouched clusters could be pushed out past its bottom edge
+  (with connector lines back to it) and it never grew to keep them. A superordinate now always
+  grows to keep containing every cluster inside it.
+
+### Changed
+- Linking two cards on the board is now an explicit gesture: hold **Shift** while dragging a card
+  near another to snap-link them. A plain drop never creates a link anymore (it used to whenever
+  the drop happened to land near another card — which also made it impossible to drop a code
+  into a full cluster without linking it to whatever was underneath). Shift can be pressed or
+  released partway through a drag; the snap preview follows it.
+- Moving a single card out of its linked group is now **Ctrl/Cmd**+drag (was Shift+drag).
+  Shift+drag on a *cluster* still pulls it out of its superordinate, as before.
 
 ## [0.4.3] - 2026-09-16
 

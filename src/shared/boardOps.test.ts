@@ -796,6 +796,42 @@ describe('growClusterToFitOwnMembers', () => {
     expect(after.x + after.width).toBeGreaterThanOrEqual(350 + MEMBER_CARD_WIDTH)
     expect(after.y + after.height).toBeGreaterThanOrEqual(250 + MEMBER_CARD_HEIGHT)
   })
+
+  // Regression: growing a nested cluster to fit a dropped code repacked its
+  // still-virtual siblings around the bigger box — right out past the
+  // superordinate's frozen edge — and only the grown cluster itself ever
+  // got the superordinate grown for it. Reported as: after a drag between
+  // clusters, the superordinate grew in one direction only, and two of
+  // its clusters ended up outside it with connector lines back to it.
+  it("keeps a superordinate containing its other, untouched children after one of them grows", () => {
+    const so = makeCategory('SO')
+    const d = makeCategory('D', { parentCategoryId: 'SO', codeIds: Array.from({ length: 12 }, (_, i) => `c${i}`) })
+    const e = makeCategory('E', { parentCategoryId: 'SO' })
+    const f = makeCategory('F', { parentCategoryId: 'SO' })
+    const soBox: BoardCluster = { id: 'realSO', boardId: 'b1', categoryId: 'SO', x: 0, y: 0, width: 700, height: 600, createdAt: '0' }
+    const dBox: BoardCluster = { id: 'realD', boardId: 'b1', categoryId: 'D', x: 20, y: 48, width: 280, height: 200, createdAt: '0' }
+    const board = { id: 'b1', name: 'Main', isDefault: true }
+    const data = makeData({
+      boards: [board],
+      categories: [so, d, e, f],
+      codes: Array.from({ length: 12 }, (_, i) => makeCode(`c${i}`)),
+      boardClusters: [soBox, dBox]
+    })
+
+    let next = growClusterToFitOwnMembers(data, 'b1', 'D')
+    next = growAncestorClustersToFit(next, 'b1', 'D')
+
+    const visible = getVisibleBoardClusters(board, next.boardClusters, next.categories)
+    const soAfter = visible.find((c) => c.categoryId === 'SO')!
+    for (const id of ['D', 'E', 'F']) {
+      expect(rectContains(soAfter, visible.find((c) => c.categoryId === id)!)).toBe(true)
+    }
+    for (const a of ['D', 'E', 'F']) {
+      for (const b of ['D', 'E', 'F']) {
+        if (a < b) expect(rectsOverlap(visible.find((c) => c.categoryId === a)!, visible.find((c) => c.categoryId === b)!)).toBe(false)
+      }
+    }
+  })
 })
 
 describe('growAncestorClustersToFit', () => {

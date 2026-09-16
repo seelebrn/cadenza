@@ -2809,3 +2809,61 @@ middle of a packed row leaves no pair stacked; a pushed card's cluster grows to 
 it; true no-op by reference equality when nothing overlaps) — the first three confirmed to fail
 with the resolver toggled off. Full suite green (419/419), typecheck clean, production build
 clean, boot-tested.
+
+### A superordinate grew for the cluster that changed, not for the ones it displaced (2026-09-16)
+
+PDF pair "Before / After drag and drop": "I just dragged a code from a cluster to another so the
+destination cluster has to be resized. The superordinate cluster didn't resize vertically (it
+did horizontally) and two clusters within it, at the bottom, were dragged out of the SO cluster,
+with arrowless lines connecting it to it. The intended behaviour would have been that the
+superordinate cluster resizes, right?"
+
+Right. Reproduced in a unit test straight from the description (a nested cluster growing to fit
+12 codes, two never-touched siblings beside/below it in the same superordinate): after
+`growClusterToFitOwnMembers` + `growAncestorClustersToFit`, the two siblings sat outside the
+superordinate. Two things combined:
+
+- The two clusters at the bottom had never been touched, so they were still virtual — and a
+  virtual sibling is repacked around every explicit footprint on each read (the reservation
+  pass). When the destination cluster's box grew, the packer's next free column for them moved
+  down, straight past the superordinate's frozen bottom edge. Nothing pinned them first: the
+  item-drop path grew the destination cluster without the "pin the packing group before one of
+  them changes" step that cluster move/resize already do.
+- `growAncestorClustersToFit` only ever fit the *one* child it was called for. The superordinate
+  grew horizontally for the destination cluster (which is what the user saw) and never learned
+  that two other children had just been pushed out its bottom.
+
+Fix, both halves: `growClusterToFitOwnMembers` and `growAncestorClustersToFit` now pin the
+changing cluster's siblings (`materializeSiblingClusters`) *before* resizing it — so a sibling
+in the way is pushed the minimal distance by `resolveSiblingOverlaps`, with its ancestors grown,
+instead of silently repacked — and `growAncestorClustersToFit` fits *every* child of each
+ancestor it visits, not just the one it started from, so a superordinate can never be left
+short of any of its own children regardless of how they got where they are.
+
+Verified: the new test fails before the fix (two children outside the superordinate) and
+passes after, also asserting no pair of the three children overlaps. Full suite green
+(420/420), typecheck clean, production build clean, boot-tested.
+
+### Linking is now an explicit gesture: Shift+drag (2026-09-16)
+
+Offered alongside the never-stack fix: dropping onto a card in a full cluster is by definition a
+drop within snap range, so it also created a link. "Yes, I also would very much like that. Tbh,
+I think now that items linking should only occur if the user presses and holds Shift or
+something like that."
+
+Agreed, and it's the better model regardless of the full-cluster case: a link is an analytic
+claim ("these belong together"), and it was being created as a side effect of *placement* —
+any drag that happened to end within 70px of another card. Snap-linking now requires Shift,
+read live from each pointer event (not once at mousedown), so pressing it partway through a
+drag brings up the snap preview immediately and releasing it turns the drop back into a plain
+move. Both the live preview and the commit check the same thing, as before. The existing
+4px drag deadzone stays (a Shift+click without moving still isn't a snap).
+
+Shift was previously the item-drag escape hatch ("move just this one card, ignoring what it's
+linked to"); that moved to Ctrl/Cmd+drag. Shift+drag on a *cluster* (pull it out of its
+superordinate) is untouched — different object, no conflict. Auto-unlink when a linked pair is
+dragged far apart is unchanged too. Updated the board's hint line, the drag-state type comment,
+and the README.
+
+Verified: typecheck clean, full suite green (420/420 — this lives entirely in `BoardView`'s
+pointer handling, no pure-function change), production build clean, boot-tested.

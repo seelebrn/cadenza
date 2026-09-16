@@ -18,7 +18,9 @@ export type DragState =
        * "other side" of a new link. */
       id: string
       /** Every item that moves rigidly together with it (itself plus every
-       * item transitively linked to it, unless shift overrides that). */
+       * item transitively linked to it, unless Ctrl/Cmd at mousedown
+       * overrides that). Shift is *not* recorded here: it's the snap-link
+       * modifier, read live from each pointer event during the drag. */
       groupItemIds: string[]
       startMouseX: number
       startMouseY: number

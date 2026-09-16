@@ -144,6 +144,7 @@ function BoardView(): JSX.Element {
   const moveCluster = useProjectStore((s) => s.moveCluster)
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
   const materializeSiblingClusters = useProjectStore((s) => s.materializeSiblingClusters)
+  const renestClustersCleanly = useProjectStore((s) => s.renestClustersCleanly)
   const growClusterToFitOwnMembers = useProjectStore((s) => s.growClusterToFitOwnMembers)
   const growAncestorClustersToFit = useProjectStore((s) => s.growAncestorClustersToFit)
   const reassignRefCategoryMembership = useProjectStore((s) => s.reassignRefCategoryMembership)
@@ -741,8 +742,26 @@ function BoardView(): JSX.Element {
               state.categoryId,
               ...getDescendantCategoryIds(currentData.categories, state.categoryId)
             ])
-            for (const enclosed of findClustersEnclosedBy(clusters, box, excluded)) {
+            const newlyEnclosed = findClustersEnclosedBy(clusters, box, excluded)
+            for (const enclosed of newlyEnclosed) {
               reparentCategory(enclosed.categoryId, state.categoryId)
+            }
+            // Nesting several clusters into the resizing one at once needs
+            // more than just reparenting: each of them kept whatever
+            // absolute position it had before, unrelated to the resizing
+            // cluster's own children grid — if even one is already
+            // explicit (likely, since it had to already exist somewhere
+            // on the board to get enclosed), it stays frozen there while
+            // the layout packs everyone else fresh around it, landing
+            // them overlapping instead of tiled cleanly. Reported as:
+            // resizing a cluster to enclose several others left them
+            // overlapping and some pushed out past its edge.
+            if (newlyEnclosed.length > 0 && selectedBoardId) {
+              renestClustersCleanly(
+                selectedBoardId,
+                state.categoryId,
+                newlyEnclosed.map((c) => c.categoryId)
+              )
             }
           }
 

@@ -2492,3 +2492,44 @@ the full suite, typecheck, production build, and boot-test. Reviewed every remai
 materializeSiblingClusters/growAncestorClustersToFit/growClusterToFitOwnMembers call site in
 BoardView.tsx afterward to confirm none of the others have the same "only gated for one
 direction of a two-way transition" shape.
+
+### Resizing a cluster to enclose several others at once (2026-09-16)
+
+User attached before/after PDF exports again: "The only thing I did is resizing the large
+superordinate cluster so it now encapsulates 'Note Thématique', 'Convivialité', and
+'Reconnaissance'. The result is messed up clusters inside (overlapping positions) and
+clusters being forced out the supercluster and linked with previously unexisting arrows."
+
+Different code path from the last two fixes: resizing a cluster large enough to fully enclose
+several others (`findClustersEnclosedBy`, "draw a box around them") nests each one with a bare
+`reparentCategory` call, once per enclosed cluster — no stabilization step exists for this
+path at all (unlike single-cluster nesting via drag-onto-another, which already pins the
+destination). Each newly-enclosed cluster keeps whatever absolute position it had *before*
+joining this parent, which has nothing to do with the parent's own children-grid layout. A
+cluster that gets enclosed by a resize has almost always been individually touched already (it
+had to exist somewhere on the board first) — reproduced directly: with one of three enclosed
+clusters already explicit at a position far outside the new parent's box, `getVisibleBoardClusters`
+left it exactly there after reparenting (`rectContains` against the parent: false) while the
+other two, still virtual, packed fresh into the parent's own top-left grid slots — not
+necessarily colliding with the far-away one, but absolutely escaping the supercluster's own
+bounds ("clusters being forced out"), and — since a child no longer spatially contained in its
+parent is exactly what `getStructuralNestingEdges` draws a connector for — surfacing as a
+"previously unexisting arrow" between that stray child and its new parent.
+
+New `renestClustersCleanly` (boardOps.ts): for a batch of clusters newly nested into the same
+parent at once, drops each one's own explicit shape first, then pins the parent's *entire*
+children set — new arrivals and whatever was already there — one at a time through the fresh
+children-grid computation (same "each later one accounts for what's already been pinned"
+mechanism `materializeSiblingClusters` uses), so the whole group ends up as a clean,
+non-overlapping grid, fully contained in the parent, and immediately stable. Finishes by
+growing the parent (and its own ancestors) to fit via the already-tested
+`growAncestorClustersToFit`. Wired into the resize-commit handler's enclosure loop, replacing
+the bare `reparentCategory` calls.
+
+Verified: 3 new unit tests (packs a mix of explicit/virtual newly-enclosed clusters into a
+clean, contained, non-overlapping grid; grows an undersized parent to fit; leaves an
+already-correctly-placed sibling that wasn't part of this batch untouched) — confirmed the
+first scenario really would have escaped the parent's bounds under the old bare-reparent
+approach before writing the fix (no inter-sibling overlap in that particular synthetic case,
+but a clear containment failure, matching "forced out of the supercluster"). Full suite green
+(391/391), typecheck clean, production build clean, boot-tested.

@@ -45,6 +45,7 @@ import {
   reassignRefCategoryMembership,
   removeItemFromBoard,
   renameBoard,
+  renestClustersCleanly,
   resetDefaultBoardClusterLayout,
   resolveGroupClusterReassignment,
   setBoardClusterFrameSize,
@@ -858,6 +859,150 @@ describe('growAncestorClustersToFit', () => {
     })
     const next = growAncestorClustersToFit(data, 'board1', 'B')
     expect(next).toBe(data)
+  })
+})
+
+describe('renestClustersCleanly', () => {
+  function boxesOverlap(a: BoardCluster, b: BoardCluster): boolean {
+    return a.x < b.x + a.width && a.x + a.width > b.x && a.y < b.y + a.height && a.y + a.height > b.y
+  }
+
+  // Regression: reparenting alone (what the resize-to-enclose handler did
+  // before this function existed) leaves each newly-nested cluster at
+  // whatever absolute position it had *before* joining this parent — if
+  // one of them is already explicit (likely: it had to already exist
+  // somewhere on the board to get enclosed by the resize), it stays
+  // frozen there while computeCategoryLayout packs the other, still-
+  // virtual ones fresh right around/on top of it. Reported as: resizing a
+  // cluster to enclose several others left them overlapping instead of
+  // tiled into a clean grid, with some pushed out past its edge.
+  it('packs newly-enclosed clusters into a clean, non-overlapping grid even when one is already explicit', () => {
+    const parent = makeCategory('super')
+    const a = makeCategory('a')
+    const b = makeCategory('b')
+    const c = makeCategory('c')
+    const baseData = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, a, b, c]
+    })
+    // "a" already has an explicit shape from some unrelated earlier
+    // interaction, sitting far away from where it's about to be enclosed.
+    const aExplicit: BoardCluster = {
+      id: 'realA',
+      boardId: 'board1',
+      categoryId: 'a',
+      x: 5000,
+      y: 5000,
+      width: 280,
+      height: 200,
+      createdAt: '0'
+    }
+    const data = { ...baseData, boardClusters: [aExplicit] }
+
+    // The resize itself (materializing "super" at a size that encloses
+    // a/b/c) is the caller's job in BoardView — here it's simulated by
+    // giving "super" a big enough explicit shape directly.
+    const superBox: BoardCluster = {
+      id: 'realSuper',
+      boardId: 'board1',
+      categoryId: 'super',
+      x: 0,
+      y: 0,
+      width: 2000,
+      height: 2000,
+      createdAt: '0'
+    }
+    const withParentAndReparent = {
+      ...data,
+      boardClusters: [...data.boardClusters, superBox],
+      categories: [
+        parent,
+        { ...a, parentCategoryId: 'super' },
+        { ...b, parentCategoryId: 'super' },
+        { ...c, parentCategoryId: 'super' }
+      ]
+    }
+
+    const next = renestClustersCleanly(withParentAndReparent, 'board1', 'super', ['a', 'b', 'c'])
+
+    const childBoxes = ['a', 'b', 'c'].map((id) => next.boardClusters.find((cl) => cl.categoryId === id)!)
+    for (const box of childBoxes) expect(box).toBeDefined()
+    for (let i = 0; i < childBoxes.length; i++) {
+      for (let j = i + 1; j < childBoxes.length; j++) {
+        expect(boxesOverlap(childBoxes[i], childBoxes[j])).toBe(false)
+      }
+    }
+    const parentBox = next.boardClusters.find((cl) => cl.categoryId === 'super')!
+    for (const box of childBoxes) {
+      expect(rectContains(parentBox, box)).toBe(true)
+    }
+    // In particular, "a" no longer sits at its old, unrelated position.
+    const aAfter = next.boardClusters.find((cl) => cl.categoryId === 'a')!
+    expect(aAfter.x).not.toBe(5000)
+    expect(aAfter.y).not.toBe(5000)
+  })
+
+  it('grows the parent to fit if its own (possibly manually-set) size is too small for the newly-packed children', () => {
+    const parent = makeCategory('super', { parentCategoryId: null })
+    const a = makeCategory('a', { parentCategoryId: 'super' })
+    const b = makeCategory('b', { parentCategoryId: 'super' })
+    const tooSmallSuper: BoardCluster = {
+      id: 'realSuper',
+      boardId: 'board1',
+      categoryId: 'super',
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 250,
+      createdAt: '0'
+    }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, a, b],
+      boardClusters: [tooSmallSuper]
+    })
+
+    const next = renestClustersCleanly(data, 'board1', 'super', ['a', 'b'])
+
+    const parentAfter = next.boardClusters.find((cl) => cl.categoryId === 'super')!
+    const childBoxes = ['a', 'b'].map((id) => next.boardClusters.find((cl) => cl.categoryId === id)!)
+    for (const box of childBoxes) expect(rectContains(parentAfter, box)).toBe(true)
+  })
+
+  it('leaves an already-explicit child (not part of newChildCategoryIds) untouched', () => {
+    const parent = makeCategory('super')
+    const already = makeCategory('already', { parentCategoryId: 'super' })
+    const fresh = makeCategory('fresh', { parentCategoryId: 'super' })
+    const alreadyExplicit: BoardCluster = {
+      id: 'realAlready',
+      boardId: 'board1',
+      categoryId: 'already',
+      x: 1234,
+      y: 1234,
+      width: 280,
+      height: 200,
+      createdAt: '0'
+    }
+    const superBox: BoardCluster = {
+      id: 'realSuper',
+      boardId: 'board1',
+      categoryId: 'super',
+      x: 0,
+      y: 0,
+      width: 2000,
+      height: 2000,
+      createdAt: '0'
+    }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, already, fresh],
+      boardClusters: [alreadyExplicit, superBox]
+    })
+
+    const next = renestClustersCleanly(data, 'board1', 'super', ['fresh'])
+
+    const alreadyAfter = next.boardClusters.find((cl) => cl.categoryId === 'already')!
+    expect(alreadyAfter).toEqual(alreadyExplicit)
   })
 })
 

@@ -20,6 +20,9 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 - Moving a code between clusters while snap-linking it to a code already in the destination
   could land a different code from that cluster exactly on top of another one, or leave the
   cluster it left behind auto-resized smaller with its remaining item poking outside it.
+- Resizing a cluster to enclose several others at once left them overlapping or pushed
+  outside its bounds instead of packed into a clean grid, and could make a stray connector
+  line appear between one of them and the cluster it just joined.
 
 ## [0.4.2] - 2026-09-15
 

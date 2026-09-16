@@ -76,6 +76,7 @@ import {
   reassignRefCategoryMembership as reassignRefCategoryMembershipOp,
   removeItemFromBoard as removeItemFromBoardOp,
   renameBoard as renameBoardOp,
+  renestClustersCleanly as renestClustersCleanlyOp,
   resetDefaultBoardClusterLayout as resetDefaultBoardClusterLayoutOp,
   resizeCluster as resizeClusterOp,
   setBoardClusterFrameSize as setBoardClusterFrameSizeOp,
@@ -269,6 +270,14 @@ interface ProjectState {
    * never again shove an untouched sibling into overlapping something
    * else as a side effect. See materializeSiblingClusters' own comment. */
   materializeSiblingClusters: (boardId: string, categoryId: string) => void
+  /** Used when a resize newly encloses one or more other clusters,
+   * nesting them into the resizing cluster all at once — drops each newly-
+   * nested cluster's own explicit shape and re-packs the destination's
+   * entire children set (new arrivals plus whatever was already there)
+   * fresh, so it reads as a clean grid instead of an overlapping mess,
+   * then pins the result and grows the parent to fit it. See
+   * renestClustersCleanly's own comment. */
+  renestClustersCleanly: (boardId: string, parentCategoryId: string, newChildCategoryIds: string[]) => void
   /** Grows (materializing, if still virtual) categoryId's own box to fit
    * its current membership, if it isn't already big enough — call after a
    * board drag adds a new member to an already-placed cluster. */
@@ -843,6 +852,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   materializeSiblingClusters: (boardId, categoryId) =>
     get().updateProject((data) => materializeSiblingClustersOp(data, boardId, categoryId)),
+
+  renestClustersCleanly: (boardId, parentCategoryId, newChildCategoryIds) =>
+    get().updateProject((data) => renestClustersCleanlyOp(data, boardId, parentCategoryId, newChildCategoryIds)),
 
   growClusterToFitOwnMembers: (boardId, categoryId) =>
     get().updateProject((data) => growClusterToFitOwnMembersOp(data, boardId, categoryId)),

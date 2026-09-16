@@ -1205,6 +1205,79 @@ export function growAncestorClustersToFit(data: ProjectData, boardId: string, ca
   return next
 }
 
+/**
+ * Used when several clusters get newly nested into the same parent at
+ * once — a resize that grows a cluster's frame until it fully encloses
+ * one or more others, nesting whichever ones ended up entirely inside it
+ * (see findClustersEnclosedBy) — so the result reads as a clean grid
+ * instead of an overlapping mess.
+ *
+ * Each of `newChildCategoryIds` kept whatever absolute position it had
+ * *before* joining this parent, which has nothing to do with the
+ * parent's own natural children-grid layout. A cluster that's been
+ * enclosed by a resize has usually been individually touched before (it
+ * had to already exist somewhere on the board), so it likely already has
+ * an explicit shape — and computeCategoryLayout leaves an explicit
+ * child's position frozen wherever it already was rather than packing it
+ * into the parent's grid, while any of the *other* newly-enclosed
+ * clusters that are still virtual get packed fresh right on top of it.
+ * Reported as: resizing a cluster to enclose several others left them
+ * overlapping instead of tiled cleanly.
+ *
+ * Drops each newly-nested cluster's own explicit shape first, so all of
+ * them — new arrivals and whatever children the parent already had —
+ * recompute together through the parent's normal children-grid packing,
+ * then immediately (one at a time, so each later one's fresh position
+ * already accounts for the ones just pinned before it — same mechanism
+ * materializeSiblingClusters uses) pins the *entire* resulting children
+ * set at those fresh positions, so the clean layout is also immediately
+ * stable against future reflow. Finally grows the parent (and its own
+ * ancestors, transitively) to actually fit what it now contains.
+ */
+export function renestClustersCleanly(
+  data: ProjectData,
+  boardId: string,
+  parentCategoryId: string,
+  newChildCategoryIds: string[]
+): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  if (!board) return data
+
+  let next: ProjectData = {
+    ...data,
+    boardClusters: data.boardClusters.filter(
+      (c) => !(c.boardId === boardId && newChildCategoryIds.includes(c.categoryId))
+    )
+  }
+
+  const childCategoryIds = next.categories
+    .filter((c) => c.parentCategoryId === parentCategoryId)
+    .map((c) => c.id)
+
+  for (const childId of childCategoryIds) {
+    const explicitClusters = next.boardClusters.filter((c) => c.boardId === boardId)
+    if (explicitClusters.some((c) => c.categoryId === childId)) continue
+    const box = getVisibleBoardClusters(board, explicitClusters, next.categories).find(
+      (c) => c.categoryId === childId
+    )
+    if (!box) continue
+    next = createClusterForCategory(next, {
+      boardId,
+      categoryId: childId,
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height
+    }).data
+  }
+
+  for (const childId of newChildCategoryIds) {
+    next = growAncestorClustersToFit(next, boardId, childId)
+  }
+
+  return next
+}
+
 /** Creates a brand-new category and places it as a cluster on a board in one
  * step — the "+ New cluster" action (no separate promotion step exists). */
 export function createClusterWithNewCategory(

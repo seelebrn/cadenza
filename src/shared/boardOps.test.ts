@@ -29,6 +29,7 @@ import {
   findClusterForCategoryOnBoard,
   findClustersEnclosedBy,
   findDistributionSnap,
+  findNestTarget,
   findSnapTarget,
   forgetItemPositionIfUnclustered,
   getClusterMemberItems,
@@ -3558,5 +3559,67 @@ describe('parent changes outside a board drag keep everything where it is', () =
     expect(forgetItemPositionIfUnclustered(data, 'b1', 'code', 'c1')).toBe(data)
     const removed = { ...data, categories: [{ ...a, codeIds: [] }] }
     expect(forgetItemPositionIfUnclustered(removed, 'b1', 'code', 'c1').boardItems).toEqual([])
+  })
+})
+
+describe('findNestTarget', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  function box(categoryId: string, x: number, y: number, width: number, height: number): BoardCluster {
+    return { id: `real:${categoryId}`, boardId: 'b1', categoryId, x, y, width, height, createdAt: '0' }
+  }
+
+  // Reported: "I wanted to add a cluster to a SO cluster, but I couldn't
+  // since it didn't have enough free space. I could only make my moving
+  // cluster a child of a cluster that's already inside."
+  it('a full superordinate can be targeted by dropping on its header, then holds the newcomer on its grid', () => {
+    const so = makeCategory('SO')
+    const kids = ['A', 'B', 'C', 'D'].map((id) => makeCategory(id, { parentCategoryId: 'SO' }))
+    const x = makeCategory('X')
+    let data = makeData({ boards: [board], categories: [so, ...kids, x], boardClusters: [box('SO', 0, 0, 100, 100)] })
+    const visible = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    const soBox = visible.find((c) => c.categoryId === 'SO')!
+    const candidates = visible.filter((c) => c.categoryId !== 'X')
+
+    // Every point of the superordinate's body below its header is a sub-
+    // cluster or a gap too narrow to matter: center-only targeting lands
+    // on a child. Pick the center of child A to show it.
+    const a = visible.find((c) => c.categoryId === 'A')!
+    const aCenter = { x: a.x + a.width / 2, y: a.y + a.height / 2 }
+    expect(findNestTarget(candidates, aCenter, aCenter)!.categoryId).toBe('A')
+
+    // Same center, pointer on the superordinate's header: the superordinate.
+    const onHeader = { x: soBox.x + 40, y: soBox.y + 10 }
+    const target = findNestTarget(candidates, aCenter, onHeader)!
+    expect(target.categoryId).toBe('SO')
+
+    data = reparentCategory(data, 'X', 'SO')
+    const after = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    const soAfter = after.find((c) => c.categoryId === 'SO')!
+    const children = ['A', 'B', 'C', 'D', 'X'].map((id) => after.find((c) => c.categoryId === id)!)
+    for (const child of children) expect(rectContains(soAfter, child)).toBe(true)
+    for (let i = 0; i < children.length; i++) {
+      for (let j = i + 1; j < children.length; j++) expect(rectsOverlap(children[i], children[j])).toBe(false)
+    }
+  })
+
+  it("a nested cluster's header targets that nested cluster, not its superordinate", () => {
+    const so = box('SO', 0, 0, 800, 600)
+    const inner = box('IN', 20, 48, 280, 200)
+    const target = findNestTarget([so, inner], { x: 700, y: 500 }, { x: inner.x + 30, y: inner.y + 10 })
+    expect(target!.categoryId).toBe('IN')
+  })
+
+  it('falls back to the center when the pointer is on no header, and returns null over empty space', () => {
+    const so = box('SO', 0, 0, 800, 600)
+    expect(findNestTarget([so], { x: 400, y: 300 }, { x: 400, y: 300 })!.categoryId).toBe('SO')
+    expect(findNestTarget([so], { x: 2000, y: 2000 }, { x: 2000, y: 2000 })).toBeNull()
+  })
+
+  it('the header band grows with headerReach (zoomed out, the header text overhangs the bar)', () => {
+    const so = box('SO', 0, 100, 800, 600)
+    const justAbove = { x: 40, y: 90 }
+    const far = { x: 2000, y: 2000 }
+    expect(findNestTarget([so], far, justAbove)).toBeNull()
+    expect(findNestTarget([so], far, justAbove, 98)!.categoryId).toBe('SO')
   })
 })

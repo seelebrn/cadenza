@@ -14,6 +14,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 - Double-click a cluster's empty space to zoom the board to fit it; "Fit view" brings the whole
   board back. Double-clicking the name still renames it.
 
+### Fixed
+- A superordinate already full of clusters couldn't take another one: wherever you dropped it,
+  it landed on one of the sub-clusters and nested *there* instead. Dropping a cluster with the
+  pointer on another cluster's header now always puts it directly in that cluster (which grows
+  to hold it), and the preview outline shows the size it will really grow to.
+
 ## [0.4.5] - 2026-09-16
 
 ### Fixed

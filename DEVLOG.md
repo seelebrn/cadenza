@@ -3157,3 +3157,40 @@ board from this session (no interactive Electron here) — what to look for: at 
 should read at normal size and truncate at the frame edge; at 100% nothing should look different;
 a PDF exported while zoomed out should have normal headers; double-clicking empty cluster space
 should zoom to that cluster and "Fit view" should bring the board back.
+
+### Aiming at a full superordinate (2026-09-16)
+
+"I wanted to add a cluster to a SO cluster, but I couldn't since it didn't have enough free
+space. I could only make my moving cluster a child of a cluster that's already inside. We have a
+highlight-to-resize-SO-cluster mechanic, but there it didn't work since it didn't allow for
+enough space to the moving cluster to be placed in the SO."
+
+Not a space problem — under the grid model a superordinate grows to hold whatever joins it. It
+was a *targeting* problem: a dropped cluster nested into whatever cluster its frame's **center**
+landed on, smallest first. A full superordinate's interior is almost entirely covered by its own
+sub-clusters (the rest is gaps narrower than any frame's half-width), so every drop landed on a
+sub-cluster and nested one level too deep. The superordinate itself was unreachable.
+
+New `findNestTarget`: if the **pointer** is on a cluster's header band, that cluster is the
+target (smallest, if several); otherwise the old center rule. The header is the one part of a
+superordinate never covered by its children, and it's where the "Drop to nest here" badge
+already appears. To know the pointer's canvas position during a cluster drag, the drag state now
+records where on the frame it was grabbed (`grabOffsetX/Y`, canvas units); the pointer is the
+frame's live position plus that. The band's height grows with zoom-out by the same factor as the
+counter-scaled header contents from the previous entry, since that's what the user sees and
+aims at. The live highlight and the drop commit call the same function.
+
+The grow preview ("highlight-to-resize") was also still the pre-grid estimate — grow the target
+just enough to contain the dropped frame *where it currently is* — which is the "didn't allow
+enough space" the user saw: it has nothing to do with the size the target actually takes once
+the cluster lands in its grid. On the default board the preview now lays the board out as if the
+drop had already happened and shows the target's real resulting size; curated boards (free
+placement, no grid) keep the old estimate. The preview also now follows the smart-guide-snapped
+delta and the edge clamp, like the drop does.
+
+Verified: 4 new tests — the reported scenario (a superordinate with four sub-clusters: center-only
+targeting lands on a child; the same center with the pointer on the superordinate's header
+targets the superordinate; after nesting it, all five children are inside and non-overlapping), a
+nested cluster's header targets the nested cluster, center fallback and empty space, and the
+header band widening with `headerReach`. Three confirmed to fail with the header rule toggled off.
+Full suite green (441/441), typecheck clean, production build clean, boot-tested.

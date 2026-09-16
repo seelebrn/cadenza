@@ -30,6 +30,12 @@ export type DragState =
       kind: 'cluster-move'
       id: string
       categoryId: string
+      /** Where the pointer grabbed the frame, relative to its top-left, in
+       * canvas units — so the pointer's canvas position during the drag is
+       * the frame's position plus this (used to aim at a cluster's header,
+       * see findNestTarget). */
+      grabOffsetX: number
+      grabOffsetY: number
       /** Shift+drag detaches from the parent cluster instead of evaluating
        * a new one, and doesn't drag descendants' membership assumptions. */
       shiftKey: boolean

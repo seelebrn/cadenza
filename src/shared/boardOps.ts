@@ -72,6 +72,43 @@ export function findClusterAtPoint(clusters: BoardCluster[], px: number, py: num
   return best
 }
 
+/**
+ * Which cluster a dropped cluster nests into.
+ *
+ * With the pointer on a cluster's header band, that cluster — the header
+ * is the one part of a full superordinate that isn't covered by its own
+ * sub-clusters, so it's the only way to aim at the superordinate itself.
+ * Otherwise, whatever the dropped frame's center lands on, smallest first
+ * (findClusterAtPoint). Center-only targeting made a full superordinate
+ * unreachable: every spot inside it is some sub-cluster, so a drop always
+ * nested one level too deep. Reported as: "I wanted to add a cluster to a
+ * SO cluster, but I could only make it a child of a cluster already
+ * inside."
+ *
+ * `headerReach` is the header band's height in canvas units — larger than
+ * the bar itself when zoomed out, since the header's contents are
+ * counter-scaled then (see ClusterFrame) and overhang it evenly above and
+ * below.
+ */
+export function findNestTarget(
+  clusters: BoardCluster[],
+  center: { x: number; y: number },
+  pointer: { x: number; y: number },
+  headerReach: number = CLUSTER_HEADER_HEIGHT
+): BoardCluster | null {
+  const overhang = Math.max(0, headerReach - CLUSTER_HEADER_HEIGHT) / 2
+  let best: BoardCluster | null = null
+  for (const c of clusters) {
+    const onHeader =
+      pointer.x >= c.x &&
+      pointer.x <= c.x + c.width &&
+      pointer.y >= c.y - overhang &&
+      pointer.y <= c.y + CLUSTER_HEADER_HEIGHT + overhang
+    if (onHeader && (!best || c.width * c.height < best.width * best.height)) best = c
+  }
+  return best ?? findClusterAtPoint(clusters, center.x, center.y)
+}
+
 /** Which single cluster a whole linked group of items is leaving/entering
  * on a drag, decided off one reference member (the topmost by y) rather
  * than each member independently checking its own final position. A
@@ -360,7 +397,7 @@ export const CLUSTER_NEST_PADDING = 20
 const COMPACT_LEAF_WIDTH = 220
 const COMPACT_LEAF_HEIGHT = 48
 const CLUSTER_GAP = 40
-const CLUSTER_HEADER_HEIGHT = 28
+export const CLUSTER_HEADER_HEIGHT = 28
 // Also the margin a nested cluster's box is indented by within its
 // parent — kept generous (not just enough for a member card) so a nested
 // cluster's dashed border reads as clearly separate from its parent's,

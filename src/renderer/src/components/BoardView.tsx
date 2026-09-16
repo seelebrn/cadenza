@@ -3,13 +3,14 @@ import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import {
   boxExitPoint,
+  CLUSTER_HEADER_HEIGHT,
   CLUSTER_NEST_PADDING,
   computeAccommodatingSize,
   computeClusterLinkPath,
   computeGridPosition,
   findAlignmentSnap,
-  findClusterAtPoint,
   findDistributionSnap,
+  findNestTarget,
   findSnapTarget,
   getClusterMemberItems,
   getDefaultBoardId,
@@ -198,6 +199,11 @@ function BoardView(): JSX.Element {
   // preview follows immediately.
   const [liveDelta, setLiveDelta] = useState({ dx: 0, dy: 0, shiftKey: false })
   const [zoom, setZoom] = useState(1)
+  // Height, in canvas units, of the band around a cluster's header that
+  // counts as "on the header" when aiming a dropped cluster at it — the
+  // header's contents are counter-scaled when zoomed out (same factor as
+  // ClusterFrame's labelScale), so the band grows with them.
+  const headerReach = CLUSTER_HEADER_HEIGHT * Math.min(3.5, Math.max(1, 1 / zoom))
   // Thematic-map cluster links: link mode replaces the normal drag gesture
   // (see ClusterFrame's onPick) rather than racing it, since dragging one
   // cluster onto another already means "nest it". Directed defaults on
@@ -745,9 +751,12 @@ function BoardView(): JSX.Element {
               ...getDescendantCategoryIds(currentData.categories, state.categoryId)
             ])
             const candidateClusters = clusters.filter((c) => !excluded.has(c.categoryId))
-            const centerX = finalX + state.startWidth / 2
-            const centerY = finalY + state.startHeight / 2
-            const target = findClusterAtPoint(candidateClusters, centerX, centerY)
+            const target = findNestTarget(
+              candidateClusters,
+              { x: finalX + state.startWidth / 2, y: finalY + state.startHeight / 2 },
+              { x: finalX + state.grabOffsetX, y: finalY + state.grabOffsetY },
+              headerReach
+            )
             newParentId = target?.categoryId ?? null
           }
           if (newParentId !== currentParentId) {
@@ -946,26 +955,47 @@ function BoardView(): JSX.Element {
   // instead of the final dx/dy, so the two can never disagree about what
   // counts as a valid target.
   const dragNestTarget = useMemo(() => {
-    if (!data || dragState?.kind !== 'cluster-move' || dragState.shiftKey) return null
-    const finalX = dragState.startX + liveDelta.dx
-    const finalY = dragState.startY + liveDelta.dy
+    if (!data || !currentBoard || dragState?.kind !== 'cluster-move' || dragState.shiftKey) return null
+    const finalX = Math.max(0, dragState.startX + clusterMoveDelta.dx)
+    const finalY = Math.max(0, dragState.startY + clusterMoveDelta.dy)
     const excluded = new Set([
       dragState.categoryId,
       ...getDescendantCategoryIds(data.categories, dragState.categoryId)
     ])
     const candidateClusters = clusters.filter((c) => !excluded.has(c.categoryId))
-    const centerX = finalX + dragState.startWidth / 2
-    const centerY = finalY + dragState.startHeight / 2
-    const target = findClusterAtPoint(candidateClusters, centerX, centerY)
+    const target = findNestTarget(
+      candidateClusters,
+      { x: finalX + dragState.startWidth / 2, y: finalY + dragState.startHeight / 2 },
+      { x: finalX + dragState.grabOffsetX, y: finalY + dragState.grabOffsetY },
+      headerReach
+    )
     if (!target) return null
-    const childRect = { x: finalX, y: finalY, width: dragState.startWidth, height: dragState.startHeight }
-    const size = computeAccommodatingSize(target, childRect, CLUSTER_NEST_PADDING)
+    // The ghost shows the size the target will really have once this
+    // cluster is in its grid — on the default board, by laying the board
+    // out as if the drop had already happened; elsewhere (free placement,
+    // no grid) the old "grow to contain the dropped rect" estimate.
+    let size: { width: number; height: number }
+    const currentParentId = data.categories.find((c) => c.id === dragState.categoryId)?.parentCategoryId ?? null
+    if (currentBoard.isDefault && currentParentId !== target.categoryId) {
+      const simulated = data.categories.map((c) =>
+        c.id === dragState.categoryId ? { ...c, parentCategoryId: target.categoryId } : c
+      )
+      const after = getVisibleBoardClusters(currentBoard, explicitClusters, simulated).find(
+        (c) => c.categoryId === target.categoryId
+      )
+      size = after ? { width: after.width, height: after.height } : { width: target.width, height: target.height }
+    } else if (currentBoard.isDefault) {
+      size = { width: target.width, height: target.height }
+    } else {
+      const childRect = { x: finalX, y: finalY, width: dragState.startWidth, height: dragState.startHeight }
+      size = computeAccommodatingSize(target, childRect, CLUSTER_NEST_PADDING)
+    }
     // A ghost outline is only useful when the target actually needs to
     // grow — but it's still the nest target (and still gets highlighted)
     // when it's already roomy enough to not need one.
     const growSize = size.width === target.width && size.height === target.height ? null : size
     return { targetClusterId: target.id, growSize }
-  }, [data, dragState, liveDelta, clusters])
+  }, [data, currentBoard, explicitClusters, dragState, clusterMoveDelta, clusters, headerReach])
 
   // While resizing a cluster so its frame grows to enclose other existing
   // clusters, live-highlights which ones are currently fully inside the
@@ -1635,7 +1665,8 @@ function BoardView(): JSX.Element {
           zoomed out) · drop a card into a cluster to file it there (cards inside a cluster are
           arranged automatically; drop it on empty space to take it out) · hold Shift while dragging a card near
           another to link them (a plain drop never links); linked cards move together (Ctrl/Cmd+drag to move just
-          one) · drag a cluster into another to nest it there (clusters inside a superordinate are arranged
+          one) · drag a cluster into another to nest it there — drop it with the pointer on a cluster's header to
+          put it directly in that cluster, even when it's full (clusters inside a superordinate are arranged
           automatically and it grows to hold them; drag one out, shift+drag it, or shrink the superordinate past
           it, to take it out) · resize a top-level cluster around others to nest them · click the × on a
           connector to unlink · right-click a code/note card for its full info and verbatim excerpts
@@ -1852,10 +1883,13 @@ function BoardView(): JSX.Element {
                       memberStartPositions[id] = { x: item.x, y: item.y }
                     }
 
+                    const grabRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                     setDragState({
                       kind: 'cluster-move',
                       id: primaryClusterId,
                       categoryId: category.id,
+                      grabOffsetX: (e.clientX - grabRect.left) / zoom,
+                      grabOffsetY: (e.clientY - grabRect.top) / zoom,
                       shiftKey: e.shiftKey,
                       startWidth: cluster.width,
                       startHeight: cluster.height,

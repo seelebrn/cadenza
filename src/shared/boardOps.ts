@@ -505,7 +505,34 @@ export function computeCategoryLayout(
       const innerY =
         actualY + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + (compact ? 0 : ownMemberGridSize(category).height)
       const columnBottoms = new Array<number>(columnCount).fill(innerY)
+
+      // An explicit child keeps its own real position no matter what —
+      // placeCategory below never moves it — but the shortest-column
+      // heuristic used for still-virtual siblings has no idea it's
+      // there unless its footprint is reserved first. Doing that in a
+      // separate pass, before any virtual sibling gets placed, makes
+      // the result independent of which order `children` happens to
+      // list them in: previously, a virtual child processed *before* an
+      // explicit sibling in iteration order could get assigned the
+      // exact same column-bottom slot that sibling's real position
+      // already occupies, landing the two directly on top of each
+      // other. Reported as: enclosing several clusters into a
+      // superordinate one dropped one of them right on top of a
+      // neighbor already inside it, instead of using free space in the
+      // grid.
+      const overriddenChildren = children.filter((child) => explicitOverrides.has(child.id))
+      for (const child of overriddenChildren) {
+        const box = explicitOverrides.get(child.id)!
+        for (let i = 0; i < columnCount; i++) {
+          const colX = innerX + i * (columnWidth + CLUSTER_GAP)
+          const overlapsColumn = box.x < colX + columnWidth && box.x + box.width > colX
+          if (overlapsColumn) columnBottoms[i] = Math.max(columnBottoms[i], box.y + box.height + CLUSTER_GAP)
+        }
+        placeCategory(child, box.x, box.y)
+      }
+
       for (const child of children) {
+        if (explicitOverrides.has(child.id)) continue
         let column = 0
         for (let i = 1; i < columnCount; i++) {
           if (columnBottoms[i] < columnBottoms[column]) column = i
@@ -524,7 +551,24 @@ export function computeCategoryLayout(
   const rootColumnCount = packGridColumnCount(roots.length)
   const rootColumnWidth = gridColumnWidth(rootSizes)
   const columnBottoms = new Array<number>(rootColumnCount).fill(GRID_ORIGIN_Y)
+
+  // Same reservation pass as a children-grid above, and for the same
+  // reason: an explicit root keeps its own real position regardless of
+  // packing, so a still-virtual root must not get shortest-column-
+  // assigned the exact slot it already occupies.
+  const overriddenRoots = roots.filter((r) => explicitOverrides.has(r.id))
+  for (const category of overriddenRoots) {
+    const box = explicitOverrides.get(category.id)!
+    for (let i = 0; i < rootColumnCount; i++) {
+      const colX = GRID_ORIGIN_X + i * (rootColumnWidth + CLUSTER_GAP)
+      const overlapsColumn = box.x < colX + rootColumnWidth && box.x + box.width > colX
+      if (overlapsColumn) columnBottoms[i] = Math.max(columnBottoms[i], box.y + box.height + CLUSTER_GAP)
+    }
+    placeCategory(category, box.x, box.y)
+  }
+
   for (const category of roots) {
+    if (explicitOverrides.has(category.id)) continue
     // Shortest-column-first: a simple masonry pack, not a fixed row/column
     // assignment, so a handful of very tall roots don't lock in a lopsided
     // grid — the next one always goes wherever there's actually the least

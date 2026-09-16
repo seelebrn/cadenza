@@ -2605,3 +2605,52 @@ wasn't independently reproduced — it's most likely the same mechanism, just fo
 whose *frame* also happened to be explicit and far away (rather than virtual), which the fix
 above covers identically since the frame-drop already existed; kept in mind as the first thing
 to re-check if a variant of this is reported again after this fix.
+
+### The masonry packer's real bug: overrides only "worked" by iteration-order luck (2026-09-16)
+
+Immediate follow-up, on the very fix above: "it works better now, BUT now the clusters don't
+disappear, they're dropped right into another existing cluster within the superordinate one...
+make sure clusters don't end up piling one into the other. If there's already a cluster
+present, use the neighboring space in the inner grid."
+
+Went looking for the root cause directly this time instead of reasoning about it purely from
+the report, since the previous several rounds had each turned up a *different* bug in the same
+area — wrote a throwaway test reproducing "one pre-existing explicit sibling + several
+newly-enclosed virtual ones" and printed the actual output. Found it immediately: `old` and one
+of the new arrivals landed at the *exact same* (x, y).
+
+The real bug, buried in `computeCategoryLayout`'s masonry packer (`placeCategory`) itself, not
+in `renestClustersCleanly`: the shortest-column-first loop updates its `columnBottoms`
+bookkeeping using whatever position a child actually gets placed at — for an explicit override,
+that's its own frozen (x, y), completely disconnected from the column/slot the loop nominally
+"assigned" it. That only produces a correct, collision-free result if the override happens to
+be the *first* child the loop processes in whichever column the heuristic would put it in —
+every previous fix in this whole arc (`materializeSiblingClusters`, `renestClustersCleanly`,
+etc.) worked by engineering exactly that lucky ordering for the specific case each one covered,
+never fixing the underlying assumption. The moment a virtual sibling gets processed *before* an
+unrelated override that happens to physically overlap the slot the virtual one is computed into
+(pure category-array order, nothing the user controls), they land on top of each other — this
+is order-dependent in a way that has nothing to do with which cluster the user actually touched.
+
+Fix: split each parent's children-packing loop (and the equivalent root-level one) into two
+passes. First, every already-explicit child in that group reserves whichever grid columns its
+*actual* footprint overlaps (an X-range test against each column, independent of processing
+order) — raising that column's running bottom past it. Only then does the second pass hand out
+slots to the remaining still-virtual children, using bookkeeping that already accounts for
+every override in the group, regardless of where either one sits in the array. An override
+whose real position doesn't land inside any recognized column (dragged somewhere unrelated to
+the grid entirely) simply doesn't reserve anything — matching the prior best-effort behavior for
+that edge case rather than making it worse.
+
+This also directly answers the "the SO cluster wasn't even resized, and it didn't need to be"
+half of the report: packing around the existing occupant, instead of overlapping it, uses space
+that was already free inside the parent's current box — no growth required, exactly what was
+expected. `growAncestorClustersToFit` still runs afterward, unchanged, for the (now much rarer)
+case where the free space genuinely isn't enough.
+
+Verified: new `computeCategoryLayout` test constructs the exact failing shape directly
+(processing order: two virtual siblings, then the override, then a third virtual one) and
+asserts no pair of the four resulting boxes overlaps — confirmed to fail (two land on the exact
+same coordinates) with the fix reverted, passes with it restored. A second, end-to-end test
+through `renestClustersCleanly` covers the same scenario via the actual resize-to-enclose path.
+Full suite green (398/398), typecheck clean, production build clean, boot-tested.

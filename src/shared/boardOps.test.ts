@@ -1006,6 +1006,52 @@ describe('renestClustersCleanly', () => {
     expect(alreadyAfter).toEqual(alreadyExplicit)
   })
 
+  // Regression: an already-explicit sibling left untouched (previous test)
+  // still has to be treated as occupied space when the newly-enclosed ones
+  // get packed around it — otherwise a fresh one can land right on top of
+  // it instead of using free space in the grid. Reported as: resizing a
+  // superordinate cluster to enclose several others dropped one of them
+  // right onto a neighbor already nested inside it.
+  it('packs a newly-enclosed cluster around an already-explicit sibling instead of on top of it', () => {
+    const parent = makeCategory('super')
+    const already = makeCategory('already', { parentCategoryId: 'super' })
+    const fresh = makeCategory('fresh', { parentCategoryId: 'super' })
+    // Positioned at exactly the slot the packer would otherwise hand
+    // "fresh" first (the natural first-column, first-row position).
+    const alreadyExplicit: BoardCluster = {
+      id: 'realAlready',
+      boardId: 'board1',
+      categoryId: 'already',
+      x: 20,
+      y: 48,
+      width: 280,
+      height: 200,
+      createdAt: '0'
+    }
+    const superBox: BoardCluster = {
+      id: 'realSuper',
+      boardId: 'board1',
+      categoryId: 'super',
+      x: 0,
+      y: 0,
+      width: 2000,
+      height: 2000,
+      createdAt: '0'
+    }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, fresh, already],
+      boardClusters: [alreadyExplicit, superBox]
+    })
+
+    const next = renestClustersCleanly(data, 'board1', 'super', ['fresh'])
+
+    const alreadyAfter = next.boardClusters.find((cl) => cl.categoryId === 'already')!
+    const freshAfter = next.boardClusters.find((cl) => cl.categoryId === 'fresh')!
+    expect(alreadyAfter).toEqual(alreadyExplicit)
+    expect(boxesOverlap(alreadyAfter, freshAfter)).toBe(false)
+  })
+
   // Regression: a category being newly nested gets its own frame relocated
   // from wherever it rendered before (here: a root-level virtual position,
   // far from "super") to a fresh spot inside the parent's children grid —
@@ -1850,6 +1896,41 @@ describe('computeCategoryLayout', () => {
     const a = layout.find((l) => l.categoryId === 'A')!
     const b = layout.find((l) => l.categoryId === 'B')!
     expect(rectContains(asCluster(a), asCluster(b))).toBe(true)
+  })
+
+  // Regression: an explicit sibling's real position was only accounted for
+  // by the shortest-column heuristic if it happened to be *processed*
+  // before whichever virtual sibling the heuristic assigns the same
+  // column-bottom slot to — the override's actual footprint was never
+  // checked directly, only used to update column-bottom bookkeeping *if*
+  // it was that column's turn first. A virtual sibling earlier in the
+  // list (so packed into that slot before the override was ever
+  // considered) landed exactly on top of it. Reported as: resizing a
+  // superordinate cluster to enclose several others dropped one of them
+  // right on top of a neighbor already nested inside it, instead of into
+  // free space in the grid.
+  it("packs a virtual sibling around an explicit one's real position, regardless of processing order", () => {
+    const parent = makeCategory('super')
+    const a = makeCategory('a', { parentCategoryId: 'super' })
+    const b = makeCategory('b', { parentCategoryId: 'super' })
+    const old = makeCategory('old', { parentCategoryId: 'super' })
+    const c = makeCategory('c', { parentCategoryId: 'super' })
+    // "old" comes *after* "a" and "b" in category order, and its real
+    // position (set via the override map) happens to coincide with
+    // exactly where the shortest-column heuristic would otherwise put
+    // the first virtual sibling it processes.
+    const overrides = new Map([['old', { x: 20, y: 48, width: 280, height: 200 }]])
+    const layout = computeCategoryLayout([parent, a, b, old, c], overrides)
+
+    const boxes = ['a', 'b', 'old', 'c'].map((id) => asCluster(layout.find((l) => l.categoryId === id)!))
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        expect(rectsOverlap(boxes[i], boxes[j])).toBe(false)
+      }
+    }
+    const oldBox = layout.find((l) => l.categoryId === 'old')!
+    expect(oldBox.x).toBe(20)
+    expect(oldBox.y).toBe(48)
   })
 })
 

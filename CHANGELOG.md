@@ -29,6 +29,11 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   vanished — its items sitting in place with no frame around them, and its (correctly
   repositioned) empty frame showing up elsewhere — if that cluster had any individually-dragged
   member cards. Members now relocate together with their cluster when it's newly nested.
+- The default board's auto-packed grid could land two clusters exactly on top of each other
+  whenever one of them already had a fixed position and a still-unplaced one was packed around
+  it — including resizing a cluster to enclose several others, which could drop one of the
+  newly-enclosed clusters right onto a neighbor already nested inside it. Clusters now always
+  pack into genuinely free space in the grid.
 
 ## [0.4.2] - 2026-09-15
 

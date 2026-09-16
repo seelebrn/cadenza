@@ -745,8 +745,16 @@ describe('growClusterToFitOwnMembers', () => {
       boardClusters: [tooSmall]
     })
     const next = growClusterToFitOwnMembers(data, 'board1', 'A')
-    const grown = next.boardClusters.find((c) => c.categoryId === 'A')!
-    expect(grown.height).toBeGreaterThan(tooSmall.height)
+    // Nothing is written back (the stored size is the user's floor) — the
+    // *shown* box is what holds every card.
+    expect(next.boardClusters.find((c) => c.categoryId === 'A')).toEqual(tooSmall)
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
+    const shown = clusters.find((c) => c.categoryId === 'A')!
+    expect(shown.height).toBeGreaterThan(tooSmall.height)
+    const items = getVisibleBoardItems(DEFAULT_BOARD, [], category.codeIds.map((id) => ({ id })), [], next.categories, clusters)
+    for (const item of items) {
+      expect(rectContains(shown, { ...shown, x: item.x, y: item.y, width: MEMBER_CARD_WIDTH, height: MEMBER_CARD_HEIGHT })).toBe(true)
+    }
   })
 
   it('is a no-op for a still-virtual cluster — its live-computed size already matches its own membership', () => {
@@ -846,7 +854,7 @@ describe('growAncestorClustersToFit', () => {
     expect(rectContains(grownParent, visible.find((c) => c.categoryId === 'B')!)).toBe(true)
   })
 
-  it("brings a stored ancestor shape up to its shown size, and clears the root's neighbors", () => {
+  it("clears the root's free-placed neighbors out of a grown superordinate's way", () => {
     const parent = makeCategory('A')
     const child = makeCategory('B', { parentCategoryId: 'A' })
     const neighbor = makeCategory('N')
@@ -861,8 +869,6 @@ describe('growAncestorClustersToFit', () => {
 
     const next = growAncestorClustersToFit(data, 'board1', 'B')
 
-    const storedParent = next.boardClusters.find((c) => c.categoryId === 'A')!
-    expect(storedParent.width).toBeGreaterThanOrEqual(900)
     const visible = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
     expect(rectsOverlap(visible.find((c) => c.categoryId === 'A')!, visible.find((c) => c.categoryId === 'N')!)).toBe(false)
   })
@@ -1035,9 +1041,6 @@ describe('renestClustersCleanly', () => {
     const parentAfter = visible.find((cl) => cl.categoryId === 'super')!
     const childBoxes = ['a', 'b'].map((id) => visible.find((cl) => cl.categoryId === id)!)
     for (const box of childBoxes) expect(rectContains(parentAfter, box)).toBe(true)
-    // The stored shape is brought up to what's shown, not left lagging.
-    const stored = next.boardClusters.find((cl) => cl.categoryId === 'super')!
-    expect({ width: stored.width, height: stored.height }).toEqual({ width: parentAfter.width, height: parentAfter.height })
   })
 
   it('leaves an already-explicit child (not part of newChildCategoryIds) untouched', () => {
@@ -2900,8 +2903,9 @@ describe('resolveSiblingOverlaps', () => {
       boardClusters: [box('P', 0, 0, 300, 300), box('X', 20, 48, 600, 200), box('R', 350, 0, 280, 200)]
     })
     const next = growAncestorClustersToFit(data, 'b1', 'X')
-    const pAfter = next.boardClusters.find((c) => c.categoryId === 'P')!
-    const rAfter = next.boardClusters.find((c) => c.categoryId === 'R')!
+    const visible = getVisibleBoardClusters(board, next.boardClusters, next.categories)
+    const pAfter = visible.find((c) => c.categoryId === 'P')!
+    const rAfter = visible.find((c) => c.categoryId === 'R')!
     expect(pAfter.width).toBeGreaterThan(300)
     expect(rectsOverlap(pAfter, rAfter)).toBe(false)
   })
@@ -3184,4 +3188,239 @@ describe('resize-to-exclude: resolveResizeExclusion + detachClustersFrom', () =>
     const withOther = { ...data, categories: [...data.categories, other] }
     expect(detachClustersFrom(withOther, 'b1', 'SO', ['other'])).toBe(withOther)
   })
+})
+
+describe('edge cases: containers shrink back, exclusion moves out one level', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  function box(categoryId: string, x: number, y: number, width: number, height: number): BoardCluster {
+    return { id: `real:${categoryId}`, boardId: 'b1', categoryId, x, y, width, height, createdAt: '0' }
+  }
+
+  it('a superordinate grows with its contents and shrinks back to its drawn size when they leave', () => {
+    const so = makeCategory('SO')
+    const big = makeCategory('BIG', { codeIds: Array.from({ length: 16 }, (_, i) => `c${i}`) })
+    let data = makeData({
+      boards: [board],
+      categories: [so, big],
+      codes: Array.from({ length: 16 }, (_, i) => makeCode(`c${i}`)),
+      boardClusters: [box('SO', 0, 0, 400, 300), box('BIG', 2000, 2000, 280, 200)]
+    })
+    const shown = (d: ProjectData): BoardCluster =>
+      getVisibleBoardClusters(board, d.boardClusters, d.categories).find((c) => c.categoryId === 'SO')!
+    expect({ width: shown(data).width, height: shown(data).height }).toEqual({ width: 400, height: 300 })
+
+    data = reparentCategory(data, 'BIG', 'SO')
+    data = growAncestorClustersToFit(data, 'b1', 'BIG')
+    expect(shown(data).width).toBeGreaterThan(400)
+    expect(shown(data).height).toBeGreaterThan(300)
+
+    data = reparentCategory(data, 'BIG', null)
+    data = growAncestorClustersToFit(data, 'b1', 'BIG')
+    expect({ width: shown(data).width, height: shown(data).height }).toEqual({ width: 400, height: 300 })
+  })
+
+  it("excluding a cluster from a nested superordinate makes it the grandparent's child, not a stranded top-level one", () => {
+    const outer = makeCategory('OUTER')
+    const inner = makeCategory('INNER', { parentCategoryId: 'OUTER' })
+    const a = makeCategory('A', { parentCategoryId: 'INNER' })
+    const b = makeCategory('B', { parentCategoryId: 'INNER' })
+    let data = makeData({ boards: [board], categories: [outer, inner, a, b], boardClusters: [box('OUTER', 0, 0, 2000, 2000)] })
+
+    data = detachClustersFrom(data, 'b1', 'INNER', ['B'])
+
+    expect(data.categories.find((c) => c.id === 'B')!.parentCategoryId).toBe('OUTER')
+    expect(data.categories.find((c) => c.id === 'A')!.parentCategoryId).toBe('INNER')
+    const visible = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    const outerBox = visible.find((c) => c.categoryId === 'OUTER')!
+    const innerBox = visible.find((c) => c.categoryId === 'INNER')!
+    const bBox = visible.find((c) => c.categoryId === 'B')!
+    expect(rectContains(outerBox, bBox)).toBe(true)
+    expect(rectContains(outerBox, innerBox)).toBe(true)
+    expect(rectsOverlap(innerBox, bBox)).toBe(false)
+    expect(getStructuralNestingEdges(visible, data.categories)).toEqual([])
+  })
+})
+
+describe('fuzz: random board operations keep every invariant', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+
+  function mulberry32(seed: number): () => number {
+    let a = seed >>> 0
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0
+      let t = a
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+  }
+
+  function checkInvariants(data: ProjectData, label: string): void {
+    const visible = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    const byCat = new Map(visible.map((c) => [c.categoryId, c]))
+    expect(visible.length, `${label}: every category drawn`).toBe(data.categories.length)
+    expect(getStructuralNestingEdges(visible, data.categories), `${label}: no stray edges`).toEqual([])
+    for (const c of visible) {
+      expect(c.x >= 0 && c.y >= 0, `${label}: ${c.categoryId} at non-negative coords`).toBe(true)
+      const parentId = data.categories.find((cat) => cat.id === c.categoryId)!.parentCategoryId
+      if (parentId) expect(rectContains(byCat.get(parentId)!, c), `${label}: ${c.categoryId} inside ${parentId}`).toBe(true)
+    }
+    const byParent = new Map<string | null, BoardCluster[]>()
+    for (const cat of data.categories) {
+      const list = byParent.get(cat.parentCategoryId ?? null) ?? []
+      list.push(byCat.get(cat.id)!)
+      byParent.set(cat.parentCategoryId ?? null, list)
+    }
+    for (const [parent, group] of byParent) {
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          expect(
+            rectsOverlap(group[i], group[j]),
+            `${label}: siblings ${group[i].categoryId}/${group[j].categoryId} under ${parent} overlap`
+          ).toBe(false)
+        }
+      }
+    }
+    const items = getVisibleBoardItems(board, data.boardItems, data.codes, data.notes, data.categories, visible, data.boardLinks)
+    const home = new Map<string, string>()
+    for (const cat of data.categories) for (const id of cat.codeIds) if (!home.has(id)) home.set(id, cat.id)
+    for (const item of items) {
+      expect(item.x >= 0 && item.y >= 0, `${label}: card ${item.refId} at non-negative coords`).toBe(true)
+      const homeId = home.get(item.refId)
+      if (homeId) {
+        const cluster = byCat.get(homeId)!
+        expect(
+          rectContains(cluster, { ...cluster, x: item.x, y: item.y, width: MEMBER_CARD_WIDTH, height: MEMBER_CARD_HEIGHT }),
+          `${label}: card ${item.refId} inside ${homeId}`
+        ).toBe(true)
+      }
+    }
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i]
+        const b = items[j]
+        if (home.get(a.refId) !== home.get(b.refId)) continue
+        // Two hand-placed unclustered cards may sit wherever the user put
+        // them; every other same-home pair must not stack.
+        const bothHandPlaced =
+          home.get(a.refId) === undefined && !a.id.startsWith('virtual:') && !b.id.startsWith('virtual:')
+        if (bothHandPlaced) continue
+        expect(
+          Math.abs(a.x - b.x) < MEMBER_CARD_WIDTH && Math.abs(a.y - b.y) < MEMBER_CARD_HEIGHT,
+          `${label}: cards ${a.refId}/${b.refId} stacked`
+        ).toBe(false)
+      }
+    }
+  }
+
+  for (const seed of [1, 2, 3, 4, 5]) {
+    it(`seed ${seed}`, () => {
+      const rand = mulberry32(seed)
+      function pick<T>(arr: T[]): T {
+        return arr[Math.floor(rand() * arr.length)]
+      }
+      const catIds = ['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']
+      const codeIds = Array.from({ length: 14 }, (_, i) => `k${i}`)
+      let data = makeData({
+        boards: [board],
+        categories: catIds.map((id, i) => makeCategory(id, { codeIds: codeIds.filter((_, k) => k % catIds.length === i) })),
+        codes: codeIds.map(makeCode)
+      })
+      checkInvariants(data, 'initial')
+
+      for (let step = 0; step < 120; step++) {
+        const op = Math.floor(rand() * 7)
+        const label = `seed ${seed} step ${step} op ${op}`
+        const visible = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+        if (op === 0) {
+          // Drop a cluster onto another (nest) or onto empty space (un-nest).
+          const id = pick(catIds)
+          const target = rand() < 0.6 ? pick(catIds.filter((c) => c !== id)) : null
+          const cat = data.categories.find((c) => c.id === id)!
+          if (!cat.parentCategoryId || target === null) {
+            const shown = visible.find((c) => c.categoryId === id)!
+            data = createClusterForCategory(data, {
+              boardId: 'b1',
+              categoryId: id,
+              x: shown.x,
+              y: shown.y,
+              width: shown.width,
+              height: shown.height
+            }).data
+            const stored = data.boardClusters.find((c) => c.categoryId === id)!
+            data = moveCluster(data, stored.id, Math.floor(rand() * 1500), Math.floor(rand() * 1500))
+          }
+          if ((target ?? null) !== (cat.parentCategoryId ?? null)) {
+            data = materializeChildClusters(data, 'b1', target)
+            data = reparentCategory(data, id, target)
+          }
+          data = growAncestorClustersToFit(data, 'b1', id)
+          data = resolveSiblingOverlaps(data, 'b1', id)
+        } else if (op === 1) {
+          // Resize a cluster (enclose / exclude, like the resize commit).
+          const id = pick(catIds)
+          const shown = visible.find((c) => c.categoryId === id)!
+          data = createClusterForCategory(data, {
+            boardId: 'b1',
+            categoryId: id,
+            x: shown.x,
+            y: shown.y,
+            width: shown.width,
+            height: shown.height
+          }).data
+          const stored = data.boardClusters.find((c) => c.categoryId === id)!
+          const width = Math.max(120, Math.floor(rand() * 1400))
+          const height = Math.max(90, Math.floor(rand() * 1000))
+          data = materializeSiblingClusters(data, 'b1', id)
+          data = resizeCluster(data, stored.id, width, height)
+          const drawn = { x: shown.x, y: shown.y, width, height }
+          const excluded = resolveResizeExclusion(visible, data.categories, drawn, id)
+          data = detachClustersFrom(data, 'b1', id, excluded)
+          const enclosed = resolveResizeEnclosure(visible, data.categories, drawn, id)
+          if (enclosed.length > 0) {
+            data = materializeChildClusters(data, 'b1', id)
+            for (const e of enclosed) data = reparentCategory(data, e, id)
+            data = renestClustersCleanly(data, 'b1', id, enclosed)
+          }
+          data = growAncestorClustersToFit(data, 'b1', id)
+          data = resolveSiblingOverlaps(data, 'b1', id)
+        } else if (op === 2) {
+          // Drop a code into a cluster or onto empty space.
+          const code = pick(codeIds)
+          const target = rand() < 0.8 ? pick(catIds) : null
+          data = reassignRefCategoryMembership(data, 'b1', 'code', code, target)
+          if (!target) {
+            const x = Math.floor(rand() * 1500)
+            const y = 1800 + Math.floor(rand() * 300)
+            const added = addItemToBoard(data, 'b1', 'code', code, x, y)
+            data = moveItem(added.data, added.itemId, x, y)
+            data = resolveItemOverlaps(data, 'b1', [added.itemId])
+          } else {
+            data = growClusterToFitOwnMembers(data, 'b1', target)
+          }
+        } else if (op === 3) {
+          data = resetDefaultBoardClusterLayout(data, 'b1')
+        } else {
+          // Move a top-level cluster somewhere (the most common gesture).
+          const roots = data.categories.filter((c) => !c.parentCategoryId)
+          if (roots.length === 0) continue
+          const id = pick(roots).id
+          const shown = visible.find((c) => c.categoryId === id)!
+          data = createClusterForCategory(data, {
+            boardId: 'b1',
+            categoryId: id,
+            x: shown.x,
+            y: shown.y,
+            width: shown.width,
+            height: shown.height
+          }).data
+          const stored = data.boardClusters.find((c) => c.categoryId === id)!
+          data = materializeSiblingClusters(data, 'b1', id)
+          data = moveCluster(data, stored.id, Math.floor(rand() * 1500), Math.floor(rand() * 1500))
+          data = resolveSiblingOverlaps(data, 'b1', id)
+        }
+        checkInvariants(data, label)
+      }
+    })
+  }
 })

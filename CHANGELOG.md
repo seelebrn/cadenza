@@ -6,6 +6,18 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Fixed
+- A superordinate that had grown to hold a cluster (or a cluster that had grown to hold a card)
+  kept that size after the cluster/card left. Containers now shrink back to the size you last
+  drew once their contents leave.
+- Shrinking a superordinate that is itself nested inside another, to take a cluster out, made
+  that cluster top-level while still sitting inside the outer superordinate. It now moves out by
+  one level and becomes the outer superordinate's child.
+- A card or cluster dropped past the board's top/left edge landed at coordinates the canvas
+  never reaches. Drops now stop at the edge.
+- A cluster whose superordinate no longer existed (possible in an older project file) was
+  silently never drawn; it's now shown as a top-level cluster.
+
 ## [0.4.4] - 2026-09-16
 
 ### Fixed

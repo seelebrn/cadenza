@@ -116,19 +116,29 @@ export function normalizeProjectData(raw: ProjectData): ProjectData {
     raw.boardItems ?? []
   )
 
+  const categories = [
+    ...(raw.categories ?? []).map((c) => ({
+      ...c,
+      color: c.color ?? FALLBACK_CATEGORY_COLOR,
+      parentCategoryId: c.parentCategoryId ?? null,
+      definition: c.definition ?? ''
+    })),
+    ...migratedCategories
+  ]
+  // A parent link to a category that no longer exists would make the
+  // category unreachable from any root — the board's layout walks down
+  // from the roots, so it would simply never be drawn, with no error.
+  // Treat it as top-level instead.
+  const categoryIds = new Set(categories.map((c) => c.id))
+  const withResolvedParents = categories.map((c) =>
+    c.parentCategoryId && !categoryIds.has(c.parentCategoryId) ? { ...c, parentCategoryId: null } : c
+  )
+
   return {
     ...raw,
     noteCategories: raw.noteCategories ?? [],
     notes: raw.notes.map((n) => (n.noteCategoryId === undefined ? { ...n, noteCategoryId: null } : n)),
-    categories: [
-      ...(raw.categories ?? []).map((c) => ({
-        ...c,
-        color: c.color ?? FALLBACK_CATEGORY_COLOR,
-        parentCategoryId: c.parentCategoryId ?? null,
-        definition: c.definition ?? ''
-      })),
-      ...migratedCategories
-    ],
+    categories: withResolvedParents,
     boards: ensureDefaultBoard(raw.boards ?? []),
     boardItems,
     boardClusters,

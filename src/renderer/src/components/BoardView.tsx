@@ -527,12 +527,18 @@ function BoardView(): JSX.Element {
           const adjustX = snap ? snap.snappedX - rawX : 0
           const adjustY = snap ? snap.snappedY - rawY : 0
 
+          // Never past the canvas's top/left edge: negative coordinates are
+          // unreachable (the canvas only grows right/down). The whole group
+          // shifts together so it stays rigid.
+          const groupStarts = state.groupItemIds.map((id) => state.startPositions[id]).filter(Boolean)
+          const clampX = Math.max(0, -Math.min(...groupStarts.map((s) => s.x + dx + adjustX)))
+          const clampY = Math.max(0, -Math.min(...groupStarts.map((s) => s.y + dy + adjustY)))
           const finalPositions = new Map<string, Position>()
           for (const memberId of state.groupItemIds) {
             const start = state.startPositions[memberId]
             if (!start) continue
-            const finalX = start.x + dx + adjustX
-            const finalY = start.y + dy + adjustY
+            const finalX = start.x + dx + adjustX + clampX
+            const finalY = start.y + dy + adjustY + clampY
             finalPositions.set(memberId, { x: finalX, y: finalY })
             moveItem(memberId, finalX, finalY)
           }
@@ -690,8 +696,9 @@ function BoardView(): JSX.Element {
           // where the cluster (and everything nested/clustered under it)
           // actually ends up.
           const snap = computeClusterMoveSnap(state, dx, dy, clusters)
-          const finalX = state.startX + snap.dx
-          const finalY = state.startY + snap.dy
+          // Never past the canvas's top/left edge (unreachable there).
+          const finalX = Math.max(0, state.startX + snap.dx)
+          const finalY = Math.max(0, state.startY + snap.dy)
           // Moving this cluster is what's about to materialize it (if it
           // wasn't already) — the first-touch moment every other still-
           // virtual sibling in its current packing group needs to be

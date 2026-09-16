@@ -1213,89 +1213,46 @@ export function materializeChildClusters(
 }
 
 /**
- * Grows an already-placed cluster's stored box just enough to fit a
- * near-square grid of its *current* own codes/notes, if it isn't already
- * big enough — used after a board drag adds a new member to it. Never
- * shrinks an already-roomier box back down.
+ * Called after a board drag adds a member to a cluster. The name is
+ * historical: the box no longer needs growing (see below); this just
+ * keeps the cluster's top-level ancestor clear of its neighbors.
  */
 export function growClusterToFitOwnMembers(data: ProjectData, boardId: string, categoryId: string): ProjectData {
   const board = data.boards.find((b) => b.id === boardId)
   const category = data.categories.find((c) => c.id === categoryId)
   if (!board || !category) return data
 
-  // A still-virtual cluster's size is recomputed from its membership on
-  // every read, so it can never be behind it — only a stored (explicit)
-  // shape can. Its *shown* size already floors at the member grid (see
-  // computeCategoryLayout), so growing the stored shape here changes
-  // nothing visible by itself; it keeps stored and shown in step, and is
-  // what lets the overlap/containment bookkeeping below run off it.
-  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
-  const cluster = explicitClusters.find((c) => c.categoryId === categoryId)
-  if (!cluster) return data
-
-  const needed = computeOwnClusterSize(category)
-  const width = Math.max(cluster.width, needed.width)
-  const height = Math.max(cluster.height, needed.height)
-  if (width === cluster.width && height === cluster.height) return data
-
-  let next = data
-  // Pin the siblings first: growing this box repacks any still-virtual
-  // sibling around it on the very next read (and past the parent's frozen
-  // edge, if that's where the packer's next free column lands). Explicit
-  // siblings instead get pushed the minimal distance by
-  // resolveSiblingOverlaps below, with their ancestors grown to match.
-  next = materializeSiblingClusters(next, boardId, categoryId)
-  next = resizeCluster(next, cluster.id, width, height)
-  return resolveSiblingOverlaps(next, boardId, categoryId)
+  // A box is shown at no less than its own card grid (computeCategoryLayout),
+  // whether its shape is stored or not, so there is nothing to grow here
+  // anymore — and nothing is written back on purpose, so a cluster
+  // shrinks again when cards leave. What can still need doing is at the
+  // top level: a root that just got bigger to fit a new card can overlap a
+  // free-placed neighbor.
+  void board
+  return growAncestorClustersToFit(data, boardId, categoryId)
 }
 
 /**
- * After anything that can change what a nested cluster's ancestors have
- * to hold (a card dropped in, a sub-cluster nested/resized/removed): walks
- * up `categoryId`'s ancestor chain bringing each ancestor's *stored* size
- * up to its *shown* size, then clears the top-level ancestor's neighbors
- * out of its (possibly bigger) way.
+ * After anything that can change what a cluster's ancestors have to hold
+ * (a card dropped in, a sub-cluster nested/resized/removed): clears the
+ * top-level ancestor's free-placed neighbors out of its (possibly bigger)
+ * way.
  *
- * Containment itself never needs fixing anymore — a box is shown at no
- * less than its contents (computeCategoryLayout), so a superordinate
- * always visibly holds everything nested in it. What this does is keep a
- * stored shape from lagging behind what's on screen (so anything reading
- * stored sizes agrees with the picture), and — the part that does matter
- * visually — run resolveSiblingOverlaps at the root, since a root that
- * just grew to fit its contents can now overlap a free-placed neighbor.
+ * Containment itself never needs fixing — a box is shown at no less than
+ * its contents (computeCategoryLayout), so a superordinate always visibly
+ * holds everything nested in it. And nothing is written back to the
+ * stored shape on purpose: a stored size is the user's own floor, so a
+ * container grows with its contents and shrinks back when they leave,
+ * down to whatever the user last drew. What still matters visually is the
+ * root: a root that just grew to fit its contents can now overlap a
+ * free-placed neighbor, which resolveSiblingOverlaps pushes clear.
  */
 export function growAncestorClustersToFit(data: ProjectData, boardId: string, categoryId: string): ProjectData {
-  const board = data.boards.find((b) => b.id === boardId)
-  if (!board) return data
-
-  let next = data
-  let current: string | null = categoryId
-  let root: string | null = null
-
-  while (current) {
-    const category = next.categories.find((c) => c.id === current)
-    if (!category) break
-    root = current
-    const explicitClusters = next.boardClusters.filter((c) => c.boardId === boardId)
-    const stored = explicitClusters.find((c) => c.categoryId === current)
-    if (stored) {
-      const shown = getVisibleBoardClusters(board, explicitClusters, next.categories).find(
-        (c) => c.categoryId === current
-      )
-      if (shown && (shown.width > stored.width || shown.height > stored.height)) {
-        if (!category.parentCategoryId) next = materializeSiblingClusters(next, boardId, current)
-        next = resizeCluster(
-          next,
-          stored.id,
-          Math.max(stored.width, shown.width),
-          Math.max(stored.height, shown.height)
-        )
-      }
-    }
-    current = category.parentCategoryId ?? null
-  }
-
-  return root ? resolveSiblingOverlaps(next, boardId, root) : next
+  const byId = new Map(data.categories.map((c) => [c.id, c]))
+  let root = byId.get(categoryId)
+  if (!root) return data
+  while (root.parentCategoryId && byId.has(root.parentCategoryId)) root = byId.get(root.parentCategoryId)!
+  return resolveSiblingOverlaps(data, boardId, root.id)
 }
 
 /**
@@ -1597,9 +1554,14 @@ export function resolveItemOverlaps(data: ProjectData, boardId: string, anchorIt
  * with it, the excluded clusters leave first and the superordinate is free
  * to shrink to whatever remains.
  *
- * Each detached cluster becomes a top-level cluster pinned exactly where
- * it was being shown (its sub-clusters and cards follow, being on its
- * grid); the root-level group is pinned before it joins (see
+ * Each detached cluster moves out by exactly one level: it becomes a
+ * sibling of the superordinate it left — a child of *its* parent, taking
+ * a slot in that grid, or a top-level cluster if the superordinate was
+ * top-level, pinned exactly where it was being shown (its sub-clusters
+ * and cards follow, being on its grid). Anything else would leave it
+ * either still visually inside the grandparent while not belonging to it,
+ * or jumping out of the grandparent entirely. For a top-level
+ * superordinate, the root group is pinned before the newcomers join (see
  * materializeChildClusters), and the superordinate then pushes anything
  * it still overlaps clear (resolveSiblingOverlaps) — a partly-covered
  * cluster ends up beside the shrunk box rather than under its edge.
@@ -1611,7 +1573,8 @@ export function detachClustersFrom(
   childCategoryIds: string[]
 ): ProjectData {
   const board = data.boards.find((b) => b.id === boardId)
-  if (!board || childCategoryIds.length === 0) return data
+  const superordinate = data.categories.find((c) => c.id === categoryId)
+  if (!board || !superordinate || childCategoryIds.length === 0) return data
 
   const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
   const visibleByCategoryId = new Map(
@@ -1624,26 +1587,29 @@ export function detachClustersFrom(
   })
   if (toDetach.length === 0) return data
 
-  let next = materializeChildClusters(data, boardId, null)
+  const newParentId = superordinate.parentCategoryId ?? null
+  let next = newParentId ? data : materializeChildClusters(data, boardId, null)
   for (const childId of toDetach) {
-    const shown = visibleByCategoryId.get(childId)!
-    const stored = next.boardClusters.find((c) => c.boardId === boardId && c.categoryId === childId)
-    if (stored) {
-      next = moveCluster(next, stored.id, shown.x, shown.y)
-      next = resizeCluster(next, stored.id, shown.width, shown.height)
-    } else {
-      next = createClusterForCategory(next, {
-        boardId,
-        categoryId: childId,
-        x: shown.x,
-        y: shown.y,
-        width: shown.width,
-        height: shown.height
-      }).data
+    if (!newParentId) {
+      const shown = visibleByCategoryId.get(childId)!
+      const stored = next.boardClusters.find((c) => c.boardId === boardId && c.categoryId === childId)
+      if (stored) {
+        next = moveCluster(next, stored.id, shown.x, shown.y)
+        next = resizeCluster(next, stored.id, shown.width, shown.height)
+      } else {
+        next = createClusterForCategory(next, {
+          boardId,
+          categoryId: childId,
+          x: shown.x,
+          y: shown.y,
+          width: shown.width,
+          height: shown.height
+        }).data
+      }
     }
-    next = reparentCategory(next, childId, null)
+    next = reparentCategory(next, childId, newParentId)
   }
-  return resolveSiblingOverlaps(next, boardId, categoryId)
+  return newParentId ? growAncestorClustersToFit(next, boardId, categoryId) : resolveSiblingOverlaps(next, boardId, categoryId)
 }
 
 /** Creates a brand-new category and places it as a cluster on a board in one

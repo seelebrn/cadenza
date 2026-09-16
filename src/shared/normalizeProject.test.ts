@@ -59,6 +59,7 @@ describe('normalizeProjectData', () => {
     const next = normalizeProjectData(
       rawData({
         categories: [
+          { id: 'root', kind: 'theme', name: 'Root', color: '#000000', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
           {
             id: 'c1',
             kind: 'theme',
@@ -74,12 +75,26 @@ describe('normalizeProjectData', () => {
         ]
       })
     )
-    expect(next.categories[0]).toMatchObject({
+    expect(next.categories[1]).toMatchObject({
       color: '#123456',
       definition: 'What this theme means.',
       parentCategoryId: 'root',
       codeIds: ['x']
     })
+  })
+
+  // A parent link to a category that doesn't exist would leave the category
+  // unreachable from any root — the board's layout walks down from the
+  // roots, so it would silently never be drawn.
+  it('clears a parentCategoryId that points to a category that no longer exists', () => {
+    const next = normalizeProjectData(
+      rawData({
+        categories: [
+          { id: 'c1', kind: 'theme', name: 'A', color: '#123456', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'gone', createdAt: '0' }
+        ]
+      })
+    )
+    expect(next.categories[0].parentCategoryId).toBeNull()
   })
 
   it('creates a default board from scratch when there are none', () => {

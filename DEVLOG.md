@@ -3018,3 +3018,61 @@ detaching, the excluded ones are top-level and pinned near where they were, the 
 shown at the drawn size with the remaining child inside, nothing overlaps and no structural edge
 exists; a non-child id and an empty list are left alone). Full suite green (423/423), typecheck clean,
 production build clean, boot-tested.
+
+### Edge-case pass after v0.4.4, with a fuzz test to keep it honest (2026-09-16)
+
+"Could you check for more edge cases? I tested everything I could think of."
+
+Went through the interaction matrix (each drag kind × each modifier × root/nested/virtual/
+explicit × where it lands) on paper, checked the things that had to be checked in code rather
+than assumed, and then wrote a seeded fuzz test so the reasoning isn't the only line of defense.
+Verified sound as-is: Tree/Radial layouts and the Compact/Full frame toggle are only offered on
+curated boards (they set free positions/sizes the default board would now override); deleting a
+category re-homes its children to its own parent; dropping a cluster can't target itself or a
+descendant, and enclosure can't capture an ancestor; Shift on a cluster (un-nest) and Shift on a
+card (snap-link) don't collide; a linked pair across two clusters moves as one unit into wherever
+the dragged member lands (by design — the earlier "whole group follows" rule), and dragging a
+member *within* its own cluster changes nothing.
+
+Found and fixed, from reasoning:
+
+- **A container kept a grown size forever.** `growAncestorClustersToFit` and
+  `growClusterToFitOwnMembers` wrote the shown size back to the stored shape, so a superordinate
+  grown to fit a dropped-in cluster stayed that big after the cluster left again. Neither writes
+  anything back now: a stored size is the user's own floor, so a container grows with its
+  contents and shrinks back to what the user last drew when they leave. Both functions reduce to
+  "clear the top-level ancestor's neighbors out of its way," which is the only part that was ever
+  visible. Test: nest a big cluster, un-nest it, the superordinate is back at its drawn size.
+- **Excluding a cluster from a *nested* superordinate stranded it.** `detachClustersFrom` always
+  made the excluded cluster top-level, pinned where it was shown — which, for a superordinate
+  that is itself nested, is *inside the grandparent*: a top-level cluster sitting in another's
+  box, belonging to nothing, and the overlap push couldn't help (the shrunk superordinate isn't
+  top-level, so it had no free-placed siblings to push). An excluded cluster now moves out by
+  exactly one level — it becomes a child of the superordinate's own parent, on that grid — and
+  only becomes top-level when the superordinate was. Test covers the nested case: the excluded
+  cluster is the grandparent's child, inside it, clear of its former parent, no stray edge.
+- **A drop past the canvas's top/left edge landed at negative coordinates**, which the canvas
+  never grows to reach (it only grows right/down) — the item or cluster was effectively lost.
+  Both drop commits now clamp to ≥ 0; a linked group shifts as a whole so it stays rigid.
+- **A category whose parent no longer exists was silently never drawn** — the layout walks down
+  from the roots, and such a category is reachable from none. Could only come from an older file
+  or a bug elsewhere, but the cost of an invisible cluster with no error is high;
+  `normalizeProjectData` now clears a dangling `parentCategoryId` on load (test added).
+
+The fuzz: five seeded runs of 120 random operations each over 8 clusters and 14 codes — nest /
+un-nest a cluster (onto another or onto empty space), resize a cluster (enclosing and excluding,
+exactly as the resize commit sequences it), drop a code into a cluster or onto empty space, move
+a top-level cluster, reset placement — checking after every step that every category is drawn,
+every nested cluster is inside its parent, no two siblings (top-level included) overlap, there is
+no structural edge, every clustered card is inside its cluster, no two cards that share a home
+stack, and nothing sits at negative coordinates. All five seeds pass. It runs as part of the
+normal suite (deterministic, ~1s), so any future change to the layout core that breaks an
+invariant fails loudly with the seed, step and operation in the message.
+
+Still a design question, not changed: a cluster-move's nest target is whatever cluster contains
+the dropped frame's *center*, smallest first, with no size check — dragging a big superordinate
+so its center crosses a small leaf nests the big one into the small one (which then grows around
+it). Harmless under the grid model, but surprising; a "target must be at least as large as what's
+dropped" rule is a one-line change if wanted.
+
+Full suite green (431/431), typecheck clean, production build clean, boot-tested.

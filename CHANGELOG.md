@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-09-16
+
 ### Fixed
 - Dropping an item into an already-placed cluster that was too small let existing member
   cards spill outside its box, instead of the cluster growing to fit.

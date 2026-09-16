@@ -3076,3 +3076,46 @@ it). Harmless under the grid model, but surprising; a "target must be at least a
 dropped" rule is a one-line change if wanted.
 
 Full suite green (431/431), typecheck clean, production build clean, boot-tested.
+
+### No unnecessary movement: deleting a superordinate, and the Workspace-tree paths (2026-09-16)
+
+"When deleting a SO cluster, and maybe in other cases, the orphan clusters are moved in remote
+places, which do not seem necessary (or is it?). Could you do a few more checks to fix
+unnecessary movements?"
+
+Not necessary — and "maybe in other cases" was right. Every parent or membership change that
+doesn't come from a board drag went through code written before the grid model, and each one
+moved things it had no reason to move:
+
+- **Deleting a superordinate** (from the board, the Workspace tree, or Analysis > Clusters)
+  promotes its children one level, which is right — but when that level is the top, each child's
+  stored position suddenly applies again. While nested it sat on the parent's grid and its
+  stored x/y was ignored, so that stored position is typically stale (wherever it was before it
+  was ever nested); a never-touched child got a fresh masonry slot instead. Either way: a jump to
+  somewhere remote. New `deleteCategoryOnBoard`: when the deleted cluster is top-level, its
+  children are first pinned at exactly where they're shown (`pinClustersAtShownPositions`, the
+  same "stay where it is" the resize-exclusion already used, now shared) and the top-level group
+  is pinned too, so nothing else repacks; then the ordinary delete runs. When the deleted cluster
+  is itself nested, its children just join the grandparent's grid (automatic).
+- **Nesting / un-nesting from the Workspace tree** did a *full board reset* — every cluster
+  reflowed for one tree drag. That was the honest answer back when a stored position could be
+  stranded by its parent moving; it can't anymore. New `reparentCategoryOnBoard`: into a target,
+  the cluster simply takes its slot in the target's grid (the top-level group is pinned first so
+  the root it left doesn't make the others repack); out to the top level, it's pinned where it
+  was shown and then pushed clear of the superordinate it just left (which still surrounds that
+  spot). A refused reparent (a cycle) changes nothing.
+- **Adding / removing a code or note in a cluster from the tree** also did a full board reset.
+  Adding now needs nothing at all (the card takes its grid slot; the box sizes itself); removing
+  forgets the card's stale stored position (`forgetItemPositionIfUnclustered`, only once it's in
+  no cluster) so it lands in the flat unclustered area rather than wherever it sat before it was
+  ever clustered. The `...AndReflowBoard` action names are kept (they're what the tree components
+  call); `reflowDefaultBoard` itself is gone.
+
+Verified: 6 new tests — deleting a top-level superordinate leaves every child (and an unrelated
+top-level cluster) at exactly its previous shown position, top-level, non-overlapping; deleting
+a nested one hands its children to the grandparent's grid; tree un-nesting pins the cluster where
+it was, pushes it just clear of its former superordinate (not somewhere remote), moves no other
+top-level cluster, and leaves no structural edge; tree nesting puts the cluster on the target grid
+and moves no other top-level cluster; a refused reparent is a strict no-op; the forget-position
+helper only acts once the card is in no cluster. The fuzz still passes. Full suite green (437/437),
+typecheck clean, production build clean, boot-tested.

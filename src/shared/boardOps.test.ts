@@ -20,6 +20,7 @@ import {
   createClusterForCategory,
   createClusterWithNewCategory,
   deleteBoard,
+  deleteCategoryOnBoard,
   deleteCluster,
   detachClustersFrom,
   describeBoardItem,
@@ -29,6 +30,7 @@ import {
   findClustersEnclosedBy,
   findDistributionSnap,
   findSnapTarget,
+  forgetItemPositionIfUnclustered,
   getClusterMemberItems,
   getDefaultBoardId,
   getLinkedGroup,
@@ -49,6 +51,7 @@ import {
   removeItemFromBoard,
   renameBoard,
   renestClustersCleanly,
+  reparentCategoryOnBoard,
   resetDefaultBoardClusterLayout,
   resolveGroupClusterReassignment,
   resolveItemOverlaps,
@@ -3423,4 +3426,137 @@ describe('fuzz: random board operations keep every invariant', () => {
       }
     })
   }
+})
+
+describe('parent changes outside a board drag keep everything where it is', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  function box(categoryId: string, x: number, y: number, width: number, height: number): BoardCluster {
+    return { id: `real:${categoryId}`, boardId: 'b1', categoryId, x, y, width, height, createdAt: '0' }
+  }
+  function shownMap(d: ProjectData): Map<string, BoardCluster> {
+    return new Map(getVisibleBoardClusters(board, d.boardClusters, d.categories).map((c) => [c.categoryId, c]))
+  }
+  function samePlace(a: BoardCluster, b: BoardCluster): boolean {
+    return a.x === b.x && a.y === b.y
+  }
+
+  // Reported: "when deleting a SO cluster, the orphan clusters are moved in
+  // remote places."
+  it('deleting a top-level superordinate leaves its children exactly where they were shown', () => {
+    const so = makeCategory('SO')
+    const a = makeCategory('A', { parentCategoryId: 'SO', codeIds: ['c1'] })
+    const b = makeCategory('B', { parentCategoryId: 'SO', codeIds: ['c2'] })
+    const r = makeCategory('R', { codeIds: ['c3'] })
+    const data = makeData({
+      boards: [board],
+      categories: [so, a, b, r],
+      codes: ['c1', 'c2', 'c3'].map(makeCode),
+      boardClusters: [box('SO', 100, 100, 1000, 800), box('A', 5000, 5000, 280, 200)]
+    })
+    const before = shownMap(data)
+
+    const next = deleteCategoryOnBoard(data, 'b1', 'SO')
+
+    expect(next.categories.find((c) => c.id === 'SO')).toBeUndefined()
+    const after = shownMap(next)
+    for (const id of ['A', 'B', 'R']) {
+      expect(next.categories.find((c) => c.id === id)!.parentCategoryId).toBeNull()
+      expect(samePlace(before.get(id)!, after.get(id)!), `${id} stays put`).toBe(true)
+    }
+    const roots = ['A', 'B', 'R'].map((id) => after.get(id)!)
+    for (let i = 0; i < roots.length; i++) {
+      for (let j = i + 1; j < roots.length; j++) expect(rectsOverlap(roots[i], roots[j])).toBe(false)
+    }
+  })
+
+  it("deleting a nested superordinate hands its children to the grandparent's grid", () => {
+    const outer = makeCategory('OUTER')
+    const inner = makeCategory('INNER', { parentCategoryId: 'OUTER' })
+    const a = makeCategory('A', { parentCategoryId: 'INNER' })
+    const b = makeCategory('B', { parentCategoryId: 'INNER' })
+    const data = makeData({ boards: [board], categories: [outer, inner, a, b], boardClusters: [box('OUTER', 0, 0, 2000, 2000)] })
+
+    const next = deleteCategoryOnBoard(data, 'b1', 'INNER')
+
+    const after = shownMap(next)
+    for (const id of ['A', 'B']) {
+      expect(next.categories.find((c) => c.id === id)!.parentCategoryId).toBe('OUTER')
+      expect(rectContains(after.get('OUTER')!, after.get(id)!)).toBe(true)
+    }
+    expect(rectsOverlap(after.get('A')!, after.get('B')!)).toBe(false)
+  })
+
+  // Previously a tree drag reset the whole board's layout.
+  it('un-nesting from the tree pins the cluster where it was, pushes it clear of its former superordinate, and moves nothing else', () => {
+    const so = makeCategory('SO')
+    const x = makeCategory('X', { parentCategoryId: 'SO', codeIds: ['c1'] })
+    const r1 = makeCategory('R1', { codeIds: ['c2'] })
+    const r2 = makeCategory('R2', { codeIds: ['c3'] })
+    const data = makeData({
+      boards: [board],
+      categories: [so, x, r1, r2],
+      codes: ['c1', 'c2', 'c3'].map(makeCode),
+      boardClusters: [box('SO', 0, 0, 600, 500)]
+    })
+    const before = shownMap(data)
+
+    const next = reparentCategoryOnBoard(data, 'b1', 'X', null)
+
+    expect(next.categories.find((c) => c.id === 'X')!.parentCategoryId).toBeNull()
+    const after = shownMap(next)
+    expect(samePlace(before.get('R1')!, after.get('R1')!)).toBe(true)
+    expect(samePlace(before.get('R2')!, after.get('R2')!)).toBe(true)
+    expect(samePlace(before.get('SO')!, after.get('SO')!)).toBe(true)
+    const roots = ['SO', 'X', 'R1', 'R2'].map((id) => after.get(id)!)
+    for (let i = 0; i < roots.length; i++) {
+      for (let j = i + 1; j < roots.length; j++) expect(rectsOverlap(roots[i], roots[j])).toBe(false)
+    }
+    // Pushed just clear of the superordinate, not sent somewhere remote.
+    expect(after.get('X')!.x).toBeLessThan(1200)
+    expect(after.get('X')!.y).toBeLessThan(1200)
+    expect(getStructuralNestingEdges([...after.values()], next.categories)).toEqual([])
+  })
+
+  it('nesting from the tree puts the cluster on the target grid and moves no other top-level cluster', () => {
+    const a = makeCategory('A', { codeIds: ['c1'] })
+    const b = makeCategory('B', { codeIds: ['c2'] })
+    const c = makeCategory('C', { codeIds: ['c3'] })
+    const t = makeCategory('T')
+    const data = makeData({
+      boards: [board],
+      categories: [a, b, c, t],
+      codes: ['c1', 'c2', 'c3'].map(makeCode),
+      boardClusters: [box('T', 1500, 0, 600, 500)]
+    })
+    const before = shownMap(data)
+
+    const next = reparentCategoryOnBoard(data, 'b1', 'A', 'T')
+
+    expect(next.categories.find((c) => c.id === 'A')!.parentCategoryId).toBe('T')
+    const after = shownMap(next)
+    expect(rectContains(after.get('T')!, after.get('A')!)).toBe(true)
+    expect(samePlace(before.get('B')!, after.get('B')!)).toBe(true)
+    expect(samePlace(before.get('C')!, after.get('C')!)).toBe(true)
+    expect(samePlace(before.get('T')!, after.get('T')!)).toBe(true)
+  })
+
+  it('a reparent the category ops refuse (a cycle) changes nothing', () => {
+    const p = makeCategory('P')
+    const q = makeCategory('Q', { parentCategoryId: 'P' })
+    const data = makeData({ boards: [board], categories: [p, q] })
+    expect(reparentCategoryOnBoard(data, 'b1', 'P', 'Q')).toBe(data)
+  })
+
+  it('forgetItemPositionIfUnclustered drops a stale stored position only once the card is in no cluster', () => {
+    const a = makeCategory('A', { codeIds: ['c1'] })
+    const data = makeData({
+      boards: [board],
+      categories: [a],
+      codes: [makeCode('c1')],
+      boardItems: [{ id: 'i1', boardId: 'b1', refType: 'code', refId: 'c1', x: 9000, y: 9000 }]
+    })
+    expect(forgetItemPositionIfUnclustered(data, 'b1', 'code', 'c1')).toBe(data)
+    const removed = { ...data, categories: [{ ...a, codeIds: [] }] }
+    expect(forgetItemPositionIfUnclustered(removed, 'b1', 'code', 'c1').boardItems).toEqual([])
+  })
 })

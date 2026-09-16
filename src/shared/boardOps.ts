@@ -14,6 +14,7 @@ import { nanoid } from 'nanoid'
 import {
   addMemberByRefType,
   createCategory,
+  deleteCategory,
   getDescendantCategoryIds,
   isCategoryMember,
   reconcileSoleCategoryMembership,
@@ -1545,6 +1546,122 @@ export function resolveItemOverlaps(data: ProjectData, boardId: string, anchorIt
   return next
 }
 
+/** Gives each of `categoryIds` a stored shape at exactly where it is
+ * currently shown (moving/resizing an existing stored shape to match).
+ * This is what "stays where it is" means for a cluster about to become
+ * top-level: while nested it sat on its parent's grid and its stored
+ * position (if any) was ignored — so that stored position is likely
+ * stale, and a still-virtual one would otherwise get a fresh masonry slot
+ * somewhere else entirely. */
+export function pinClustersAtShownPositions(data: ProjectData, boardId: string, categoryIds: string[]): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  if (!board || categoryIds.length === 0) return data
+  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
+  const visibleByCategoryId = new Map(
+    getVisibleBoardClusters(board, explicitClusters, data.categories).map((c) => [c.categoryId, c])
+  )
+  let next = data
+  for (const categoryId of categoryIds) {
+    const shown = visibleByCategoryId.get(categoryId)
+    if (!shown) continue
+    const stored = next.boardClusters.find((c) => c.boardId === boardId && c.categoryId === categoryId)
+    if (stored) {
+      next = moveCluster(next, stored.id, shown.x, shown.y)
+      next = resizeCluster(next, stored.id, shown.width, shown.height)
+    } else {
+      next = createClusterForCategory(next, {
+        boardId,
+        categoryId,
+        x: shown.x,
+        y: shown.y,
+        width: shown.width,
+        height: shown.height
+      }).data
+    }
+  }
+  return next
+}
+
+function rootAncestorId(categories: CategoryRecord[], categoryId: string): string {
+  const byId = new Map(categories.map((c) => [c.id, c]))
+  let current = byId.get(categoryId)
+  while (current?.parentCategoryId && byId.has(current.parentCategoryId)) current = byId.get(current.parentCategoryId)
+  return current?.id ?? categoryId
+}
+
+/**
+ * A parent change that doesn't come from a board drag (the Workspace
+ * codebook/notes trees, Analysis > Clusters), applied so that nothing on
+ * the board moves that didn't have to. Nesting into a target: the cluster
+ * simply takes its slot in the target's grid, the target grows to hold
+ * it, and the top-level group is pinned first so the root it left behind
+ * doesn't make the other top-level clusters repack. Un-nesting to the top
+ * level: it's pinned exactly where it was shown, then pushed clear of the
+ * superordinate it just left (which still surrounds that spot). This used
+ * to reset the whole board's layout instead — every cluster reflowed for
+ * one tree drag.
+ */
+export function reparentCategoryOnBoard(
+  data: ProjectData,
+  boardId: string,
+  categoryId: string,
+  newParentId: string | null
+): ProjectData {
+  const category = data.categories.find((c) => c.id === categoryId)
+  if (!category) return data
+  const oldParentId = category.parentCategoryId ?? null
+  if (oldParentId === newParentId) return data
+
+  let next = materializeChildClusters(data, boardId, null)
+  if (newParentId === null) next = pinClustersAtShownPositions(next, boardId, [categoryId])
+  next = reparentCategory(next, categoryId, newParentId)
+  if (next.categories.find((c) => c.id === categoryId)?.parentCategoryId !== newParentId) return data
+
+  if (newParentId === null && oldParentId) {
+    next = resolveSiblingOverlaps(next, boardId, rootAncestorId(next.categories, oldParentId))
+  }
+  return growAncestorClustersToFit(next, boardId, categoryId)
+}
+
+/**
+ * deleteCategory, keeping the deleted cluster's children where they are
+ * shown. They're promoted to its own parent: into that grid if it has one
+ * (automatic), or — when the deleted cluster was top-level — to the top
+ * level, where each would otherwise land at its stale stored position or
+ * a fresh masonry slot far from where it sat. Reported as: "when deleting
+ * a SO cluster, the orphan clusters are moved in remote places."
+ */
+export function deleteCategoryOnBoard(data: ProjectData, boardId: string, categoryId: string): ProjectData {
+  const target = data.categories.find((c) => c.id === categoryId)
+  if (!target) return data
+  let next = data
+  if (!target.parentCategoryId) {
+    const childIds = data.categories.filter((c) => c.parentCategoryId === categoryId).map((c) => c.id)
+    next = materializeChildClusters(next, boardId, null)
+    next = pinClustersAtShownPositions(next, boardId, childIds)
+  }
+  return deleteCategory(next, categoryId)
+}
+
+/**
+ * After a code/note leaves its last cluster somewhere that isn't a board
+ * drag (the Workspace tree): forget its stored board position, so it
+ * lands in the flat unclustered area rather than at a stale position from
+ * before it was ever clustered (ignored while it was).
+ */
+export function forgetItemPositionIfUnclustered(
+  data: ProjectData,
+  boardId: string,
+  refType: 'code' | 'note',
+  refId: string
+): ProjectData {
+  if (data.categories.some((c) => isCategoryMember(c, refType, refId))) return data
+  return {
+    ...data,
+    boardItems: data.boardItems.filter((i) => !(i.boardId === boardId && i.refType === refType && i.refId === refId))
+  }
+}
+
 /**
  * Takes the given direct children of `categoryId` out of it — the resize
  * counterpart of drag-out: shrinking a superordinate so a nested cluster
@@ -1588,27 +1705,12 @@ export function detachClustersFrom(
   if (toDetach.length === 0) return data
 
   const newParentId = superordinate.parentCategoryId ?? null
-  let next = newParentId ? data : materializeChildClusters(data, boardId, null)
-  for (const childId of toDetach) {
-    if (!newParentId) {
-      const shown = visibleByCategoryId.get(childId)!
-      const stored = next.boardClusters.find((c) => c.boardId === boardId && c.categoryId === childId)
-      if (stored) {
-        next = moveCluster(next, stored.id, shown.x, shown.y)
-        next = resizeCluster(next, stored.id, shown.width, shown.height)
-      } else {
-        next = createClusterForCategory(next, {
-          boardId,
-          categoryId: childId,
-          x: shown.x,
-          y: shown.y,
-          width: shown.width,
-          height: shown.height
-        }).data
-      }
-    }
-    next = reparentCategory(next, childId, newParentId)
+  let next = data
+  if (!newParentId) {
+    next = materializeChildClusters(next, boardId, null)
+    next = pinClustersAtShownPositions(next, boardId, toDetach)
   }
+  for (const childId of toDetach) next = reparentCategory(next, childId, newParentId)
   return newParentId ? growAncestorClustersToFit(next, boardId, categoryId) : resolveSiblingOverlaps(next, boardId, categoryId)
 }
 

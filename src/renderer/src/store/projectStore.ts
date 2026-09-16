@@ -65,8 +65,11 @@ import {
   createClusterForCategory as createClusterForCategoryOp,
   createClusterWithNewCategory as createClusterWithNewCategoryOp,
   deleteBoard as deleteBoardOp,
+  deleteCategoryOnBoard as deleteCategoryOnBoardOp,
   deleteCluster as deleteClusterOp,
   detachClustersFrom as detachClustersFromOp,
+  forgetItemPositionIfUnclustered as forgetItemPositionIfUnclusteredOp,
+  reparentCategoryOnBoard as reparentCategoryOnBoardOp,
   getDefaultBoardId,
   growAncestorClustersToFit as growAncestorClustersToFitOp,
   growClusterToFitOwnMembers as growClusterToFitOwnMembersOp,
@@ -188,29 +191,28 @@ interface ProjectState {
    * CategoryRecord.definition instead of CodeNode.definition. */
   setCategoryDefinition: (categoryId: string, definition: string) => void
   reparentCategory: (categoryId: string, parentCategoryId: string | null) => void
-  /** Same as reparentCategory, but also resets the default board's cluster
-   * layout so nesting/un-nesting from the Workspace tree (which has no
-   * board-drag position to derive a placement from, unlike nesting via the
-   * board itself) is immediately visible there too — the destination
-   * grows/shrinks and the moved cluster visually separates when pulled
-   * back out, same as if it had been dragged. Use this from the Workspace
-   * codebook/notes trees; BoardView keeps calling plain reparentCategory,
-   * since a board drag already positions everything itself. */
+  /** Same as reparentCategory, but board-aware for a nesting change that
+   * has no board-drag position behind it (the Workspace tree, Analysis):
+   * the cluster takes its slot in the destination's grid, or — when pulled
+   * out to the top level — is pinned exactly where it was shown, and
+   * nothing else on the default board moves. See reparentCategoryOnBoard.
+   * BoardView keeps calling plain reparentCategory, since a board drag
+   * already positions everything itself. */
   reparentCategoryAndReflowBoard: (categoryId: string, parentCategoryId: string | null) => void
+  /** Deletes a category; its children are promoted one level and, on the
+   * default board, stay exactly where they were shown. */
   deleteCategory: (categoryId: string) => void
   addCodeToCategory: (categoryId: string, codeId: string) => void
   removeCodeFromCategory: (categoryId: string, codeId: string) => void
   addNoteToCategory: (categoryId: string, noteId: string) => void
   removeNoteFromCategory: (categoryId: string, noteId: string) => void
-  /** Same "also reflow the default board's cluster layout" reasoning as
-   * reparentCategoryAndReflowBoard, applied to plain membership changes:
-   * a code/note joining or leaving a cluster from the Workspace tree has
-   * no board-drag position to size/place it from, so without this the
-   * destination cluster's frame doesn't grow/shrink to fit and the
-   * member ends up positioned outside it. Use these from the Workspace
-   * codebook/notes trees; BoardView keeps calling the plain actions,
-   * since dragging an item into/out of a cluster on the board already
-   * positions everything itself. */
+  /** Board-aware membership changes for the Workspace codebook/notes trees
+   * (no board-drag position behind them). A card joining a cluster simply
+   * takes its grid slot there (the cluster sizes itself); a card leaving
+   * its last cluster forgets its stale stored position so it lands in the
+   * flat unclustered area. Nothing else on the board moves. BoardView
+   * keeps calling the plain actions, since dragging an item into/out of a
+   * cluster on the board already positions everything itself. */
   addCodeToCategoryAndReflowBoard: (categoryId: string, codeId: string) => void
   removeCodeFromCategoryAndReflowBoard: (categoryId: string, codeId: string) => void
   addNoteToCategoryAndReflowBoard: (categoryId: string, noteId: string) => void
@@ -376,19 +378,6 @@ function scheduleAutosave(get: () => ProjectState): void {
   autosaveTimer = setTimeout(() => {
     void get().save()
   }, AUTOSAVE_DELAY_MS)
-}
-
-/** Resets the default board's cluster layout — see resetDefaultBoardClusterLayout
- * for why a full reset rather than an incremental patch. `boards` should be
- * a snapshot from before the change that triggered this (boards themselves
- * are never touched by a reparent/membership change, so using the
- * pre-change list is equivalent and avoids re-reading get().data just for
- * this). Shared by every "...AndReflowBoard" action below. */
-function reflowDefaultBoard(get: () => ProjectState, boards: BoardRecord[]): void {
-  const defaultBoardId = getDefaultBoardId(boards)
-  if (defaultBoardId) {
-    get().updateProject((data) => resetDefaultBoardClusterLayoutOp(data, defaultBoardId))
-  }
 }
 
 const MAX_HISTORY = 50
@@ -721,18 +710,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   reparentCategory: (categoryId, parentCategoryId) =>
     get().updateProject((data) => reparentCategoryOp(data, categoryId, parentCategoryId)),
 
-  reparentCategoryAndReflowBoard: (categoryId, parentCategoryId) => {
-    const before = get().data
-    if (!before) return
-    const category = before.categories.find((c) => c.id === categoryId)
-    const changed = Boolean(category) && category!.parentCategoryId !== parentCategoryId
-    get().withBatch(() => {
-      get().reparentCategory(categoryId, parentCategoryId)
-      if (changed) reflowDefaultBoard(get, before.boards)
-    })
-  },
+  reparentCategoryAndReflowBoard: (categoryId, parentCategoryId) =>
+    get().updateProject((data) => {
+      const defaultBoardId = getDefaultBoardId(data.boards)
+      return defaultBoardId
+        ? reparentCategoryOnBoardOp(data, defaultBoardId, categoryId, parentCategoryId)
+        : reparentCategoryOp(data, categoryId, parentCategoryId)
+    }),
 
-  deleteCategory: (categoryId) => get().updateProject((data) => deleteCategoryOp(data, categoryId)),
+  deleteCategory: (categoryId) =>
+    get().updateProject((data) => {
+      const defaultBoardId = getDefaultBoardId(data.boards)
+      return defaultBoardId ? deleteCategoryOnBoardOp(data, defaultBoardId, categoryId) : deleteCategoryOp(data, categoryId)
+    }),
 
   addCodeToCategory: (categoryId, codeId) =>
     get().updateProject((data) => addCodeToCategoryOp(data, categoryId, codeId)),
@@ -746,41 +736,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   removeNoteFromCategory: (categoryId, noteId) =>
     get().updateProject((data) => removeNoteFromCategoryOp(data, categoryId, noteId)),
 
-  addCodeToCategoryAndReflowBoard: (categoryId, codeId) => {
-    const before = get().data
-    if (!before) return
-    get().withBatch(() => {
-      get().addCodeToCategory(categoryId, codeId)
-      reflowDefaultBoard(get, before.boards)
-    })
-  },
+  addCodeToCategoryAndReflowBoard: (categoryId, codeId) =>
+    get().updateProject((data) => {
+      const next = addCodeToCategoryOp(data, categoryId, codeId)
+      const defaultBoardId = getDefaultBoardId(next.boards)
+      return defaultBoardId ? growClusterToFitOwnMembersOp(next, defaultBoardId, categoryId) : next
+    }),
 
-  removeCodeFromCategoryAndReflowBoard: (categoryId, codeId) => {
-    const before = get().data
-    if (!before) return
-    get().withBatch(() => {
-      get().removeCodeFromCategory(categoryId, codeId)
-      reflowDefaultBoard(get, before.boards)
-    })
-  },
+  removeCodeFromCategoryAndReflowBoard: (categoryId, codeId) =>
+    get().updateProject((data) => {
+      const next = removeCodeFromCategoryOp(data, categoryId, codeId)
+      const defaultBoardId = getDefaultBoardId(next.boards)
+      return defaultBoardId ? forgetItemPositionIfUnclusteredOp(next, defaultBoardId, 'code', codeId) : next
+    }),
 
-  addNoteToCategoryAndReflowBoard: (categoryId, noteId) => {
-    const before = get().data
-    if (!before) return
-    get().withBatch(() => {
-      get().addNoteToCategory(categoryId, noteId)
-      reflowDefaultBoard(get, before.boards)
-    })
-  },
+  addNoteToCategoryAndReflowBoard: (categoryId, noteId) =>
+    get().updateProject((data) => {
+      const next = addNoteToCategoryOp(data, categoryId, noteId)
+      const defaultBoardId = getDefaultBoardId(next.boards)
+      return defaultBoardId ? growClusterToFitOwnMembersOp(next, defaultBoardId, categoryId) : next
+    }),
 
-  removeNoteFromCategoryAndReflowBoard: (categoryId, noteId) => {
-    const before = get().data
-    if (!before) return
-    get().withBatch(() => {
-      get().removeNoteFromCategory(categoryId, noteId)
-      reflowDefaultBoard(get, before.boards)
-    })
-  },
+  removeNoteFromCategoryAndReflowBoard: (categoryId, noteId) =>
+    get().updateProject((data) => {
+      const next = removeNoteFromCategoryOp(data, categoryId, noteId)
+      const defaultBoardId = getDefaultBoardId(next.boards)
+      return defaultBoardId ? forgetItemPositionIfUnclusteredOp(next, defaultBoardId, 'note', noteId) : next
+    }),
 
   removeSegmentFromCategory: (categoryId, segmentId) =>
     get().updateProject((data) => removeSegmentFromCategoryOp(data, categoryId, segmentId)),

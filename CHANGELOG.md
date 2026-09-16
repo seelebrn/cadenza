@@ -17,6 +17,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   never reaches. Drops now stop at the edge.
 - A cluster whose superordinate no longer existed (possible in an older project file) was
   silently never drawn; it's now shown as a top-level cluster.
+- Deleting a superordinate cluster sent its sub-clusters to remote places on the board. They now
+  stay exactly where they were.
+- Nesting or un-nesting a cluster, or adding/removing a code or note in a cluster, from the
+  Workspace tree used to rearrange the whole board. Now only the cluster or card concerned
+  moves: into the destination's grid, or — when pulled out to the top level — kept right where
+  it was (a card taken out of its last cluster goes to the unclustered area).
 
 ## [0.4.4] - 2026-09-16
 

@@ -39,6 +39,13 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   grows to keep containing every cluster inside it.
 
 ### Changed
+- Cards inside a cluster are now always arranged in a grid automatically, and the cluster sizes
+  itself to hold them — dropping a card into a cluster files it at its place in the grid rather
+  than leaving it wherever it was released, so nothing can end up stranded, stacked, or pushed
+  out, and "Reset placement" can no longer change where a clustered card sits. Grid order follows
+  the codebook; Shift-linked cards sit side by side. Free placement still applies to cards that
+  aren't in any cluster. (Hand-arranging cards *within* a cluster is no longer possible — use
+  sub-clusters for that.)
 - Linking two cards on the board is now an explicit gesture: hold **Shift** while dragging a card
   near another to snap-link them. A plain drop never creates a link anymore (it used to whenever
   the drop happened to land near another card — which also made it impossible to drop a code

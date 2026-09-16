@@ -306,8 +306,8 @@ function BoardView(): JSX.Element {
 
   const items = useMemo<BoardItem[]>(() => {
     if (!data || !currentBoard) return []
-    return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes, data.categories, clusters)
-  }, [data, currentBoard, explicitItems, clusters])
+    return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes, data.categories, clusters, links)
+  }, [data, currentBoard, explicitItems, clusters, links])
 
   /** Turns a possibly-virtual cluster into a real, persisted BoardCluster
    * (a no-op returning the same id if it already is one) — needed before
@@ -1591,10 +1591,12 @@ function BoardView(): JSX.Element {
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
           {currentBoard.isDefault &&
             'Every code, note, and cluster is shown automatically on this default board. '}
-          Ctrl/Cmd+scroll to zoom · hold Shift while dragging a card near another to link them (they snap; a
-          plain drop never links), and linked/clustered cards move together (Ctrl/Cmd+drag to move just one) ·
-          drag a cluster into another to nest it as a superordinate group (shift+drag to pull it out) · click
-          the × on a connector to unlink · right-click a code/note card for its full info and verbatim excerpts
+          Ctrl/Cmd+scroll to zoom · drop a card into a cluster to file it there (cards inside a cluster are
+          arranged automatically; drop it on empty space to take it out) · hold Shift while dragging a card near
+          another to link them (a plain drop never links); linked cards move together (Ctrl/Cmd+drag to move just
+          one) · drag a cluster into another to nest it as a superordinate group (shift+drag to pull it out) ·
+          click the × on a connector to unlink · right-click a code/note card for its full info and verbatim
+          excerpts
           {!currentBoard.isDefault &&
             ' · "Link clusters" then click two clusters to draw a labeled thematic-map relationship between them'}
         </p>

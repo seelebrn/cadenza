@@ -2867,3 +2867,62 @@ and the README.
 
 Verified: typecheck clean, full suite green (420/420 — this lives entirely in `BoardView`'s
 pointer handling, no pure-function change), production build clean, boot-tested.
+
+### Clustered cards live on the grid, full stop (2026-09-16)
+
+"Could we make it so on dragging a card to a cluster, the cards are rearranged in a grid
+automatically, rather than just floating in sometimes awkward places? That means the cluster
+may have to autoresize too. Is it a good design decision in your opinion? I'm hesitating,
+because it may have consequences, but sometimes, the cluster doesn't resize and the other cards
+are 'pushed' in some directions, resulting in a card effectively leaving the cluster on pressing
+'Reset placement'."
+
+Recommended yes, and this is the change that retires the whole bug family this log has been
+documenting for two days. Every one of those bugs came from one root: a card inside a cluster
+had *two* sources of truth for where it is — its stored free-form position and the cluster's
+grid — and every operation (drop, membership change, cluster move/resize/nest, growth, reset)
+had to keep them consistent by hand, one transition at a time. The "card leaves the cluster on
+Reset" symptom is that disagreement made visible: a card sitting in a cluster's area without
+being a member (nothing grew for it, nothing moved it), until Reset showed where it really
+belonged. Agreed with the user: linked cards kept adjacent; otherwise codebook order.
+
+The rule now, on the default board: **a clustered card always renders at its grid slot.** In
+`getVisibleBoardItems`, a card that's a member of some category takes its slot position whether
+or not it has a stored `BoardItem` — an explicit one keeps only its *identity* (so links and
+drags keep resolving it) and its stored x/y is ignored. Slots are assigned per cluster in
+codebook order, except that a member's Shift-linked partners in the same cluster take the slots
+right after it (breadth-first, partners in codebook order), so a linked pair still reads as a
+pair. `getVisibleBoardItems` takes the board's links for that. Free placement — and the
+overlap-pushing from the previous entries — now applies only to cards that are in no cluster
+(`resolveItemOverlaps` skips clustered refs entirely).
+
+The cluster side of the same rule: an explicit box is a *floor*, never a ceiling on its own
+cards. `computeCategoryLayout` shows a stored shape at no less than its own member grid's size
+(`ownMemberMinSize`; zero for an empty cluster, so an empty box stays exactly what the user
+drew), and `getVisibleBoardClusters` returns that shown size on the explicit shape — so a box
+shrunk by hand, or sized before more cards were dropped in, simply shows at the grid's size
+instead of letting cards hang out. Every containment/overlap computation already runs off the
+shown boxes (`resolveSiblingOverlaps` was the one that read stored sizes; fixed to use shown).
+`growClusterToFitOwnMembers` now grows the *stored* box to match (keeping stored and shown in
+step for anything else that reads it); a virtual cluster never needs it.
+
+What got simpler as a result: `reassignRefCategoryMembership` no longer pins every member of
+the categories being left/joined first (`materializeClusterMemberItems`) — that existed purely
+to keep a renumbered slot from landing on a hand-placed card, which can no longer happen;
+`growClusterToFitOwnMembers` no longer fits hand-placed rects (there are none inside a cluster).
+What stays: all the cluster-level work (pin-before-change, overlap pushing, ancestor growth,
+enclosure/detach) — clusters still have real stored positions, so that machinery is still what
+keeps *them* honest.
+
+The consequence the user was hesitant about, stated plainly: you can't hand-arrange cards
+*within* a cluster anymore — a drag inside a cluster returns the card to its slot. Spatial
+sub-grouping is what sub-clusters (and links) are for.
+
+Verified: 3 new tests (an explicit clustered card renders at its slot with its id kept; linked
+members get consecutive slots even when codebook order separates them; an explicit box smaller
+than its grid is shown at the grid's size with every card inside, and an empty box is left as
+drawn), two existing tests rewritten to the new contract (the old "an explicit item keeps its
+position regardless of membership" now asserts the opposite, plus a new one that an unclustered
+explicit item *does* keep it), one obsolete test removed each from `growClusterToFitOwnMembers`
+and `resolveItemOverlaps`. Full suite green (423/423), typecheck clean, production build clean,
+boot-tested.

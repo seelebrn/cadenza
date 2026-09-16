@@ -379,6 +379,18 @@ function ownMemberGridSize(category: CategoryRecord): { width: number; height: n
   }
 }
 
+/** The smallest box that fully contains a category's own member-card grid
+ * (header + padding + the grid) — zero for a category with no cards, so
+ * an empty cluster's box is never forced bigger than the user made it. */
+function ownMemberMinSize(category: CategoryRecord): { width: number; height: number } {
+  const ownGrid = ownMemberGridSize(category)
+  if (ownGrid.width === 0) return { width: 0, height: 0 }
+  return {
+    width: ownGrid.width + CLUSTER_PADDING * 2,
+    height: CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + ownGrid.height
+  }
+}
+
 /**
  * A category's own box size — its header plus a grid of its own directly-
  * held codes/notes — deliberately ignoring any nested children entirely.
@@ -494,7 +506,17 @@ export function computeCategoryLayout(
   // root.
   function computeSize(category: CategoryRecord): { width: number; height: number } {
     const existing = explicitOverrides.get(category.id)
-    if (existing) return { width: existing.width, height: existing.height }
+    if (existing) {
+      // An explicit box is a floor, never a ceiling on its own cards: a
+      // clustered card always renders at its grid slot (getVisibleBoardItems),
+      // so a box left smaller than that grid — shrunk by hand, or sized
+      // before more members were dropped in — is shown at the grid's size
+      // instead of letting cards hang out of it. Nested children are not
+      // part of this floor; a frozen box still packs them into whatever
+      // room it gives them.
+      const floor = compact ? { width: 0, height: 0 } : ownMemberMinSize(category)
+      return { width: Math.max(existing.width, floor.width), height: Math.max(existing.height, floor.height) }
+    }
 
     const children = childrenByParentId.get(category.id) ?? []
     const ownGrid = compact ? { width: 0, height: 0 } : ownMemberGridSize(category)
@@ -536,7 +558,7 @@ export function computeCategoryLayout(
   // how much room was actually needed vs. how it's actually laid out.
   function placeCategory(category: CategoryRecord, x: number, y: number): { y: number; height: number } {
     const existing = explicitOverrides.get(category.id)
-    const size = existing ?? computeSize(category)
+    const size = computeSize(category)
     const actualX = existing ? existing.x : x
     const actualY = existing ? existing.y : y
 
@@ -569,10 +591,11 @@ export function computeCategoryLayout(
       const overriddenChildren = children.filter((child) => explicitOverrides.has(child.id))
       for (const child of overriddenChildren) {
         const box = explicitOverrides.get(child.id)!
+        const size = computeSize(child)
         for (let i = 0; i < columnCount; i++) {
           const colX = innerX + i * (columnWidth + CLUSTER_GAP)
-          const overlapsColumn = box.x < colX + columnWidth && box.x + box.width > colX
-          if (overlapsColumn) columnBottoms[i] = Math.max(columnBottoms[i], box.y + box.height + CLUSTER_GAP)
+          const overlapsColumn = box.x < colX + columnWidth && box.x + size.width > colX
+          if (overlapsColumn) columnBottoms[i] = Math.max(columnBottoms[i], box.y + size.height + CLUSTER_GAP)
         }
         placeCategory(child, box.x, box.y)
       }
@@ -605,10 +628,11 @@ export function computeCategoryLayout(
   const overriddenRoots = roots.filter((r) => explicitOverrides.has(r.id))
   for (const category of overriddenRoots) {
     const box = explicitOverrides.get(category.id)!
+    const size = computeSize(category)
     for (let i = 0; i < rootColumnCount; i++) {
       const colX = GRID_ORIGIN_X + i * (rootColumnWidth + CLUSTER_GAP)
-      const overlapsColumn = box.x < colX + rootColumnWidth && box.x + box.width > colX
-      if (overlapsColumn) columnBottoms[i] = Math.max(columnBottoms[i], box.y + box.height + CLUSTER_GAP)
+      const overlapsColumn = box.x < colX + rootColumnWidth && box.x + size.width > colX
+      if (overlapsColumn) columnBottoms[i] = Math.max(columnBottoms[i], box.y + size.height + CLUSTER_GAP)
     }
     placeCategory(category, box.x, box.y)
   }
@@ -652,19 +676,23 @@ export function getVisibleBoardClusters(
 
   const explicitByCategory = new Map(explicitClusters.map((c) => [c.categoryId, c]))
   const layout = computeCategoryLayout(categories, explicitByCategory)
-  return layout.map(
-    (l) =>
-      explicitByCategory.get(l.categoryId) ?? {
-        id: `virtual:cluster:${l.categoryId}`,
-        boardId: board.id,
-        categoryId: l.categoryId,
-        x: l.x,
-        y: l.y,
-        width: l.width,
-        height: l.height,
-        createdAt: ''
-      }
-  )
+  return layout.map((l) => {
+    const explicit = explicitByCategory.get(l.categoryId)
+    // An explicit shape keeps its identity and position, but its *shown*
+    // size is the layout's — at least its own member grid (see
+    // computeCategoryLayout's computeSize), so cards never hang out of it.
+    if (explicit) return { ...explicit, width: l.width, height: l.height }
+    return {
+      id: `virtual:cluster:${l.categoryId}`,
+      boardId: board.id,
+      categoryId: l.categoryId,
+      x: l.x,
+      y: l.y,
+      width: l.width,
+      height: l.height,
+      createdAt: ''
+    }
+  })
 }
 
 /**
@@ -736,7 +764,8 @@ export function getVisibleBoardItems(
   codes: Array<{ id: string }>,
   notes: Array<{ id: string }>,
   categories: CategoryRecord[] = [],
-  clusters: BoardCluster[] = []
+  clusters: BoardCluster[] = [],
+  links: Array<{ itemAId: string; itemBId: string }> = []
 ): BoardItem[] {
   if (!board.isDefault) return explicitItems
 
@@ -749,20 +778,8 @@ export function getVisibleBoardItems(
   // cards pack into, keyed by cluster id so positionForSlot below doesn't
   // need the category again. Matches exactly what getVisibleBoardClusters'
   // ownMemberGridSize assumed when it sized the cluster's box, so cards
-  // never overflow it.
-  //
-  // Deliberately based on EVERY declared member (explicit ones included),
-  // not just still-virtual ones, even though an explicit member doesn't
-  // occupy a grid slot itself — this has to match the same total memberSlotByRef
-  // below assigns slots across (see its own comment): a member's slot
-  // number is stable and can range anywhere up to the *total* member
-  // count, so the column count used to turn that slot into a row/column
-  // has to be sized for the same total, or a virtual member's slot can
-  // land in a row far beyond what a smaller, virtual-only column count
-  // would produce — rendering it well outside the cluster, in what looks
-  // like a random position (this was tried and reverted: it kept a
-  // cluster's own untouched members from reflowing when an unrelated
-  // member's count changed, but at the cost of exactly this overflow).
+  // never overflow it. Based on every declared member, which is also
+  // exactly the set memberSlotByRef below hands slots to.
   const memberColumnCountByCluster = new Map<string, number>()
   for (const category of categories) {
     const cluster = clusterByCategoryId.get(category.id)
@@ -779,32 +796,49 @@ export function getVisibleBoardItems(
     if (memberCount > 0) memberColumnCountByCluster.set(cluster.id, packGridColumnCount(memberCount))
   }
 
-  // Each member's slot within its home cluster's grid, assigned once up
-  // front (project-wide code order, then project-wide note order — the
-  // same traversal placeRef itself does below) rather than by an
-  // incrementing counter consulted only while placing each ref. A counter
-  // consulted live would skip a member the moment it stops being virtual
-  // (an explicit BoardItem short-circuits placeRef below before ever
-  // reaching that counter) — shifting every other still-virtual member in
-  // this cluster back by one slot and landing it exactly on top of a
-  // neighbor. Precomputing the whole cluster's slots up front, independent
-  // of which members happen to be virtual vs. already materialized, keeps
-  // a sibling's position stable regardless of whether this one has been
-  // touched yet.
+  // Each member's slot within its home cluster's grid: codebook order
+  // (project-wide code order, then note order), except that a member's
+  // linked partners in the same cluster take the slots right after it, so
+  // a linked pair still reads as a pair inside the grid. Assigned once up
+  // front for every member (explicit ones included — on the default board
+  // a clustered card always sits at its slot; see placeRef), so a member's
+  // slot never depends on which of its siblings happen to have been
+  // touched.
+  const refByItemId = new Map(explicitItems.map((i) => [i.id, `${i.refType}:${i.refId}`]))
+  const linkedRefsByRef = new Map<string, string[]>()
+  for (const link of links) {
+    const a = refByItemId.get(link.itemAId)
+    const b = refByItemId.get(link.itemBId)
+    if (!a || !b) continue
+    linkedRefsByRef.set(a, [...(linkedRefsByRef.get(a) ?? []), b])
+    linkedRefsByRef.set(b, [...(linkedRefsByRef.get(b) ?? []), a])
+  }
+  const orderedRefs = [...codes.map((c) => `code:${c.id}`), ...notes.map((n) => `note:${n.id}`)]
+  const rankByRef = new Map(orderedRefs.map((key, index) => [key, index]))
+
   const memberSlotByRef = new Map<string, number>()
   const slotCounterByCluster = new Map<string, number>()
-  function assignSlot(key: string, cluster: BoardCluster): void {
-    const slot = slotCounterByCluster.get(cluster.id) ?? 0
-    memberSlotByRef.set(key, slot)
-    slotCounterByCluster.set(cluster.id, slot + 1)
-  }
-  for (const code of codes) {
-    const cluster = homeClusterByRef.get(`code:${code.id}`)
-    if (cluster) assignSlot(`code:${code.id}`, cluster)
-  }
-  for (const note of notes) {
-    const cluster = homeClusterByRef.get(`note:${note.id}`)
-    if (cluster) assignSlot(`note:${note.id}`, cluster)
+  for (const key of orderedRefs) {
+    const cluster = homeClusterByRef.get(key)
+    if (!cluster || memberSlotByRef.has(key)) continue
+    // This member, then everything transitively linked to it within the
+    // same cluster (breadth-first, partners in codebook order), as one run
+    // of consecutive slots.
+    const seen = new Set([key])
+    const queue = [key]
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      const slot = slotCounterByCluster.get(cluster.id) ?? 0
+      memberSlotByRef.set(current, slot)
+      slotCounterByCluster.set(cluster.id, slot + 1)
+      const partners = (linkedRefsByRef.get(current) ?? [])
+        .filter((p) => homeClusterByRef.get(p) === cluster && !seen.has(p))
+        .sort((a, b) => (rankByRef.get(a) ?? 0) - (rankByRef.get(b) ?? 0))
+      for (const partner of partners) {
+        seen.add(partner)
+        queue.push(partner)
+      }
+    }
   }
 
   function positionForSlot(cluster: BoardCluster, slot: number): { x: number; y: number } {
@@ -826,28 +860,35 @@ export function getVisibleBoardItems(
   function placeRef(refType: 'code' | 'note', refId: string): void {
     const key = `${refType}:${refId}`
     const existing = explicitByRef.get(key)
+    const homeCluster = homeClusterByRef.get(key)
+    const slot = memberSlotByRef.get(key)
+    // A clustered card always sits at its grid slot, whether or not it has
+    // a stored BoardItem — the stored position of an explicit one is
+    // ignored here (only its identity is kept, so links and drags keep
+    // resolving it). A cluster's picture is its membership, nothing else:
+    // no card can be stranded, stacked, or pushed out of its cluster, and
+    // "Reset placement" can't disagree with what's on screen. Free
+    // placement is only for cards that aren't in any cluster.
+    if (homeCluster && slot !== undefined) {
+      const pos = positionForSlot(homeCluster, slot)
+      result.push(existing ? { ...existing, ...pos } : { id: `virtual:${key}`, boardId: board.id, refType, refId, ...pos })
+      return
+    }
     if (existing) {
       result.push(existing)
       return
     }
-    const homeCluster = homeClusterByRef.get(key)
-    const slot = memberSlotByRef.get(key)
-    let pos: { x: number; y: number }
-    if (homeCluster && slot !== undefined) {
-      pos = positionForSlot(homeCluster, slot)
-    } else {
-      // A hand-placed card keeps its spot; an auto-placed one skips any
-      // flat-grid slot such a card already covers — the flat area's origin
-      // moves with the clusters above it, so a slot can land on a card
-      // placed there earlier.
+    // A hand-placed card keeps its spot; an auto-placed one skips any
+    // flat-grid slot such a card already covers — the flat area's origin
+    // moves with the clusters above it, so a slot can land on a card
+    // placed there earlier.
+    let pos = computeGridPosition(autoIndex++, unclusteredOriginY)
+    while (
+      explicitItems.some(
+        (e) => Math.abs(e.x - pos.x) < MEMBER_CARD_WIDTH && Math.abs(e.y - pos.y) < MEMBER_CARD_HEIGHT
+      )
+    ) {
       pos = computeGridPosition(autoIndex++, unclusteredOriginY)
-      while (
-        explicitItems.some(
-          (e) => Math.abs(e.x - pos.x) < MEMBER_CARD_WIDTH && Math.abs(e.y - pos.y) < MEMBER_CARD_HEIGHT
-        )
-      ) {
-        pos = computeGridPosition(autoIndex++, unclusteredOriginY)
-      }
     }
     result.push({ id: `virtual:${key}`, boardId: board.id, refType, refId, ...pos })
   }
@@ -909,7 +950,8 @@ export function materializeClusterMemberItems(data: ProjectData, boardId: string
     data.codes,
     data.notes,
     data.categories,
-    visibleClusters
+    visibleClusters,
+    data.boardLinks.filter((l) => l.boardId === boardId)
   )
 
   let next = data
@@ -954,16 +996,9 @@ export function materializeClusterMemberItems(data: ProjectData, boardId: string
 
 /**
  * Moves a ref's category membership from wherever it currently is to
- * `newCategoryId` (or fully unclusters it, if null) on `boardId` — same
- * end state as calling reconcileSoleCategoryMembership directly, but
- * stabilizing (materializeClusterMemberItems) every category actually
- * involved first, both what the ref is leaving and what it's joining, so
- * the membership change itself can never shift or collide any of their
- * other, still-virtual members. The board-agnostic single-category
- * add/remove helpers this composes (addMemberByRefType,
- * reconcileSoleCategoryMembership) know nothing about item *positions* —
- * this is the one place that connects a category-membership change back
- * to the specific board it needs to stay visually stable on.
+ * `newCategoryId` (or fully unclusters it, if null): removed from every
+ * category it's in except the new one, then added there. The one entry
+ * point a board drag uses for a membership change.
  */
 export function reassignRefCategoryMembership(
   data: ProjectData,
@@ -972,20 +1007,17 @@ export function reassignRefCategoryMembership(
   refId: string,
   newCategoryId: string | null
 ): ProjectData {
-  let next = data
-  const staleCategoryIds = next.categories
-    .filter((cat) => cat.id !== newCategoryId && isCategoryMember(cat, refType, refId))
-    .map((cat) => cat.id)
-
-  for (const categoryId of staleCategoryIds) {
-    next = materializeClusterMemberItems(next, boardId, categoryId)
-  }
-  next = reconcileSoleCategoryMembership(next, refType, refId, newCategoryId)
-
-  if (newCategoryId) {
-    next = materializeClusterMemberItems(next, boardId, newCategoryId)
-    next = addMemberByRefType(next, newCategoryId, refType, refId)
-  }
+  // Clustered cards render at their grid slots regardless of any stored
+  // position (getVisibleBoardItems), so a membership change re-grids both
+  // the category being left and the one being joined consistently on its
+  // own — nothing has to be pinned first anymore. (This used to
+  // materialize every member of both categories to keep a renumbered slot
+  // from landing on a hand-placed card; that class of collision can no
+  // longer occur.) boardId is kept so the store action's board-scoped
+  // signature stays stable.
+  void boardId
+  let next = reconcileSoleCategoryMembership(data, refType, refId, newCategoryId)
+  if (newCategoryId) next = addMemberByRefType(next, newCategoryId, refType, refId)
   return next
 }
 
@@ -1266,55 +1298,32 @@ export function materializeChildClusters(
 }
 
 /**
- * Grows (materializing, if still virtual) a cluster's own box just enough
- * to fit a near-square grid of its *current* own codes/notes, if it isn't
- * already big enough — used after a board drag adds a new member to an
- * already-placed cluster, so the new member's card doesn't just render
- * outside a box that was sized for a smaller membership. Never shrinks an
- * already-roomier box back down.
+ * Grows an already-placed cluster's stored box just enough to fit a
+ * near-square grid of its *current* own codes/notes, if it isn't already
+ * big enough — used after a board drag adds a new member to it. Never
+ * shrinks an already-roomier box back down.
  */
 export function growClusterToFitOwnMembers(data: ProjectData, boardId: string, categoryId: string): ProjectData {
   const board = data.boards.find((b) => b.id === boardId)
   const category = data.categories.find((c) => c.id === categoryId)
   if (!board || !category) return data
 
+  // A still-virtual cluster's size is recomputed from its membership on
+  // every read, so it can never be behind it — only a stored (explicit)
+  // shape can. Its *shown* size already floors at the member grid (see
+  // computeCategoryLayout), so growing the stored shape here changes
+  // nothing visible by itself; it keeps stored and shown in step, and is
+  // what lets the overlap/containment bookkeeping below run off it.
   const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
-  const current = getVisibleBoardClusters(board, explicitClusters, data.categories).find(
-    (c) => c.categoryId === categoryId
-  )
-  if (!current) return data
+  const cluster = explicitClusters.find((c) => c.categoryId === categoryId)
+  if (!cluster) return data
 
   const needed = computeOwnClusterSize(category)
-  let width = Math.max(current.width, needed.width)
-  let height = Math.max(current.height, needed.height)
-  // The grid size above only covers members at their auto-computed slots.
-  // A member dropped by hand sits wherever it was released — its center
-  // inside the box is what made it a member, but the card itself can
-  // still hang out past the right/bottom edge by up to half a card. Fit
-  // those too (same grow-right/down-only rule as computeAccommodatingSize).
-  for (const item of data.boardItems) {
-    if (item.boardId !== boardId || item.refType === 'segment') continue
-    if (!isCategoryMember(category, item.refType, item.refId)) continue
-    width = Math.max(width, item.x + MEMBER_CARD_WIDTH - current.x + CLUSTER_PADDING)
-    height = Math.max(height, item.y + MEMBER_CARD_HEIGHT - current.y + CLUSTER_PADDING)
-  }
-  if (width === current.width && height === current.height) return data
+  const width = Math.max(cluster.width, needed.width)
+  const height = Math.max(cluster.height, needed.height)
+  if (width === cluster.width && height === cluster.height) return data
 
-  let cluster = explicitClusters.find((c) => c.categoryId === categoryId)
   let next = data
-  if (!cluster) {
-    const created = createClusterForCategory(next, {
-      boardId,
-      categoryId,
-      x: current.x,
-      y: current.y,
-      width: current.width,
-      height: current.height
-    })
-    next = created.data
-    cluster = next.boardClusters.find((c) => c.id === created.clusterId)
-    if (!cluster) return next
-  }
   // Pin the siblings first: growing this box repacks any still-virtual
   // sibling around it on the very next read (and past the parent's frozen
   // edge, if that's where the packer's next free column lands). Explicit
@@ -1594,14 +1603,23 @@ export function resolveSiblingOverlaps(data: ProjectData, boardId: string, categ
   const category = data.categories.find((c) => c.id === categoryId)
   if (!board || !category) return data
 
+  // Rects are the *shown* boxes (a stored shape can be shown bigger than
+  // stored — see getVisibleBoardClusters), but only explicit siblings are
+  // candidates to push: a virtual one already packs around every explicit
+  // footprint on its own.
   const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
-  const anchor = explicitClusters.find((c) => c.categoryId === categoryId)
+  const explicitCategoryIds = new Set(explicitClusters.map((c) => c.categoryId))
+  if (!explicitCategoryIds.has(categoryId)) return data
+  const visibleByCategoryId = new Map(
+    getVisibleBoardClusters(board, explicitClusters, data.categories).map((c) => [c.categoryId, c])
+  )
+  const anchor = visibleByCategoryId.get(categoryId)
   if (!anchor) return data
 
   const parentId = category.parentCategoryId ?? null
   const siblings = data.categories
-    .filter((c) => c.id !== categoryId && (c.parentCategoryId ?? null) === parentId)
-    .map((c) => explicitClusters.find((e) => e.categoryId === c.id))
+    .filter((c) => c.id !== categoryId && (c.parentCategoryId ?? null) === parentId && explicitCategoryIds.has(c.id))
+    .map((c) => visibleByCategoryId.get(c.id))
     .filter((c): c is BoardCluster => c !== undefined)
   if (siblings.length === 0) return data
 
@@ -1654,7 +1672,17 @@ export function resolveSiblingOverlaps(data: ProjectData, boardId: string, categ
  * takes part.
  */
 export function resolveItemOverlaps(data: ProjectData, boardId: string, anchorItemIds: string[]): ProjectData {
-  const explicitItems = data.boardItems.filter((i) => i.boardId === boardId)
+  // Only cards that aren't in any cluster: a clustered card renders at its
+  // grid slot regardless of its stored position (see getVisibleBoardItems),
+  // so it can neither cover anything nor be covered by its stored x/y.
+  const clusteredRefs = new Set<string>()
+  for (const category of data.categories) {
+    for (const codeId of category.codeIds) clusteredRefs.add(`code:${codeId}`)
+    for (const noteId of category.noteIds) clusteredRefs.add(`note:${noteId}`)
+  }
+  const explicitItems = data.boardItems.filter(
+    (i) => i.boardId === boardId && !clusteredRefs.has(`${i.refType}:${i.refId}`)
+  )
   const anchorIds = new Set(anchorItemIds)
   const anchors = explicitItems.filter((i) => anchorIds.has(i.id))
   if (anchors.length === 0) return data
@@ -1670,7 +1698,6 @@ export function resolveItemOverlaps(data: ProjectData, boardId: string, anchorIt
     })
 
   let next = data
-  const pushed: BoardItem[] = []
   for (const item of others) {
     let rect = rectOf(item)
     for (let guard = 0; guard < 100; guard++) {
@@ -1678,20 +1705,8 @@ export function resolveItemOverlaps(data: ProjectData, boardId: string, anchorIt
       if (!collider) break
       rect = pushClear(rect, collider, settled, MEMBER_CARD_GAP)
     }
-    if (rect.x !== item.x || rect.y !== item.y) {
-      next = moveItem(next, item.id, rect.x, rect.y)
-      pushed.push(item)
-    }
+    if (rect.x !== item.x || rect.y !== item.y) next = moveItem(next, item.id, rect.x, rect.y)
     settled.push(rect)
-  }
-
-  for (const item of pushed) {
-    if (item.refType === 'segment') continue
-    for (const category of next.categories) {
-      if (!isCategoryMember(category, item.refType, item.refId)) continue
-      next = growClusterToFitOwnMembers(next, boardId, category.id)
-      next = growAncestorClustersToFit(next, boardId, category.id)
-    }
   }
   return next
 }

@@ -776,27 +776,6 @@ describe('growClusterToFitOwnMembers', () => {
     expect(next).toBe(data) // no-op: same reference, not just same values
   })
 
-  // Regression: the grid size only covers members at their auto slots — a
-  // card dropped by hand against the bottom/right edge (center inside, so
-  // it joined) still hung out past the box.
-  it('grows to fit a hand-dropped member card hanging past the edge', () => {
-    const a = makeCategory('A', { codeIds: ['c1'] })
-    const aBox: BoardCluster = { id: 'realA', boardId: 'b1', categoryId: 'A', x: 100, y: 100, width: 300, height: 200, createdAt: '0' }
-    const data = makeData({
-      boards: [{ id: 'b1', name: 'Main', isDefault: true }],
-      categories: [a],
-      codes: [makeCode('c1')],
-      boardClusters: [aBox],
-      boardItems: [{ id: 'i1', boardId: 'b1', refType: 'code', refId: 'c1', x: 350, y: 250 }]
-    })
-
-    const next = growClusterToFitOwnMembers(data, 'b1', 'A')
-
-    const after = next.boardClusters.find((c) => c.categoryId === 'A')!
-    expect(after.x + after.width).toBeGreaterThanOrEqual(350 + MEMBER_CARD_WIDTH)
-    expect(after.y + after.height).toBeGreaterThanOrEqual(250 + MEMBER_CARD_HEIGHT)
-  })
-
   // Regression: growing a nested cluster to fit a dropped code repacked its
   // still-virtual siblings around the bigger box — right out past the
   // superordinate's frozen edge — and only the grown cluster itself ever
@@ -1586,11 +1565,18 @@ describe('getVisibleBoardItems', () => {
     expect(rectContains(clusterA, { id: 'x', boardId: 'b', categoryId: '', x: items[0].x, y: items[0].y, width: 180, height: 64, createdAt: '' })).toBe(true)
   })
 
-  it('an item with an existing explicit position keeps it regardless of cluster membership', () => {
+  it('an explicit clustered item keeps its id but renders at its grid slot, not its stored position', () => {
     const category = makeCategory('cat1', { codeIds: ['code1'] })
     const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], [category])
     const explicit: BoardItem[] = [{ id: 'realItem', boardId: DEFAULT_BOARD.id, refType: 'code', refId: 'code1', x: 9999, y: 9999 }]
     const items = getVisibleBoardItems(DEFAULT_BOARD, explicit, [{ id: 'code1' }], [], [category], clusters)
+    const virtual = getVisibleBoardItems(DEFAULT_BOARD, [], [{ id: 'code1' }], [], [category], clusters)
+    expect(items).toEqual([{ ...explicit[0], x: virtual[0].x, y: virtual[0].y }])
+  })
+
+  it('an explicit item that is in no cluster keeps its stored position', () => {
+    const explicit: BoardItem[] = [{ id: 'realItem', boardId: DEFAULT_BOARD.id, refType: 'code', refId: 'code1', x: 9999, y: 9999 }]
+    const items = getVisibleBoardItems(DEFAULT_BOARD, explicit, [{ id: 'code1' }], [], [], [])
     expect(items).toEqual(explicit)
   })
 
@@ -1814,14 +1800,12 @@ describe('reassignRefCategoryMembership', () => {
     }
   })
 
-  // Regression: the source cluster's own box, if still virtual, used to
-  // recompute smaller the instant it lost a member — computeOwnClusterSize
-  // reacts to the live (now smaller) membership count — even though its
-  // remaining member's position was just pinned for the grid the box had
-  // *before* the move. Reported as: moving an item out of a cluster, the
-  // source cluster auto-resized smaller and left its own remaining
-  // rightmost item poking outside it.
-  it("pins the source cluster's own box too, so a remaining member never ends up outside it", () => {
+  // A clustered card always renders at its grid slot, so a virtual source
+  // cluster is free to shrink to its smaller membership the instant a
+  // member leaves — its remaining member re-grids inside it on the same
+  // read. (This used to require pinning the source box and every member
+  // first; that's gone.)
+  it('a remaining member still renders inside its (now smaller) source cluster after another leaves', () => {
     const src = makeCategory('src', { codeIds: ['a', 'b'] })
     const dst = makeCategory('dst', { codeIds: [] })
     const codes = [makeCode('a'), makeCode('b')]
@@ -1830,30 +1814,16 @@ describe('reassignRefCategoryMembership', () => {
       categories: [src, dst],
       codes
     })
-    const srcBoxBefore = getVisibleBoardClusters(DEFAULT_BOARD, [], data.categories).find(
-      (c) => c.categoryId === 'src'
-    )!
 
     const next = reassignRefCategoryMembership(data, 'board1', 'code', 'a', 'dst')
 
-    const srcBoxAfter = next.boardClusters.find((c) => c.categoryId === 'src')!
-    expect(srcBoxAfter).toBeDefined()
-    expect(srcBoxAfter.width).toBe(srcBoxBefore.width)
-    expect(srcBoxAfter.height).toBe(srcBoxBefore.height)
-
-    const bItem = next.boardItems.find((i) => i.refId === 'b')!
-    expect(
-      rectContains(srcBoxAfter, {
-        id: 'x',
-        boardId: 'board1',
-        categoryId: '',
-        x: bItem.x,
-        y: bItem.y,
-        width: 180,
-        height: 64,
-        createdAt: ''
-      })
-    ).toBe(true)
+    const clusters = getVisibleBoardClusters(DEFAULT_BOARD, next.boardClusters, next.categories)
+    const srcBox = clusters.find((c) => c.categoryId === 'src')!
+    const items = getVisibleBoardItems(DEFAULT_BOARD, next.boardItems, next.codes, next.notes, next.categories, clusters)
+    const bItem = items.find((i) => i.refId === 'b')!
+    expect(rectContains(srcBox, { ...srcBox, x: bItem.x, y: bItem.y, width: MEMBER_CARD_WIDTH, height: MEMBER_CARD_HEIGHT })).toBe(true)
+    expect(next.categories.find((c) => c.id === 'dst')!.codeIds).toEqual(['a'])
+    expect(next.categories.find((c) => c.id === 'src')!.codeIds).toEqual(['b'])
   })
 })
 
@@ -3174,22 +3144,15 @@ describe('resolveItemOverlaps', () => {
     expect(items.find((i) => i.id === 'id')).toMatchObject({ x: 20 + pitch + 30, y: 60 })
   })
 
-  it("grows a pushed card's cluster so it still contains the card", () => {
+  it('ignores clustered cards entirely — they render at grid slots, not their stored positions', () => {
     const a = makeCategory('A', { codeIds: ['a', 'b'] })
-    const aBox: BoardCluster = { id: 'realA', boardId: 'b1', categoryId: 'A', x: 0, y: 0, width: 240, height: 140, createdAt: '0' }
     const data = makeData({
       boards: [board],
       categories: [a],
       codes: [makeCode('a'), makeCode('b')],
-      boardClusters: [aBox],
       boardItems: [card('ia', 'a', 20, 48), card('ib', 'b', 30, 60)]
     })
-    const next = resolveItemOverlaps(data, 'b1', ['ia'])
-    const b = next.boardItems.find((i) => i.id === 'ib')!
-    const box = next.boardClusters.find((c) => c.categoryId === 'A')!
-    expect(overlapsCard(next.boardItems.find((i) => i.id === 'ia')!, b)).toBe(false)
-    expect(b.x + MEMBER_CARD_WIDTH).toBeLessThanOrEqual(box.x + box.width)
-    expect(b.y + MEMBER_CARD_HEIGHT).toBeLessThanOrEqual(box.y + box.height)
+    expect(resolveItemOverlaps(data, 'b1', ['ia'])).toBe(data)
   })
 
   it('is a no-op when nothing overlaps', () => {
@@ -3199,5 +3162,74 @@ describe('resolveItemOverlaps', () => {
       boardItems: [card('ia', 'a', 100, 100), card('ib', 'b', 500, 500)]
     })
     expect(resolveItemOverlaps(data, 'b1', ['ia'])).toBe(data)
+  })
+})
+
+describe('clustered cards always sit on their cluster grid', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+
+  it('renders an explicit clustered card at its grid slot, keeping its id, ignoring its stored position', () => {
+    const a = makeCategory('A', { codeIds: ['c1', 'c2'] })
+    const data = makeData({
+      boards: [board],
+      categories: [a],
+      codes: [makeCode('c1'), makeCode('c2')],
+      boardItems: [{ id: 'real1', boardId: 'b1', refType: 'code', refId: 'c1', x: 9000, y: 9000 }]
+    })
+    const clusters = getVisibleBoardClusters(board, [], data.categories)
+    const withStored = getVisibleBoardItems(board, data.boardItems, data.codes, data.notes, data.categories, clusters)
+    const allVirtual = getVisibleBoardItems(board, [], data.codes, data.notes, data.categories, clusters)
+    const c1 = withStored.find((i) => i.refId === 'c1')!
+    const c1Virtual = allVirtual.find((i) => i.refId === 'c1')!
+    expect(c1.id).toBe('real1')
+    expect({ x: c1.x, y: c1.y }).toEqual({ x: c1Virtual.x, y: c1Virtual.y })
+    expect(rectContains(clusters[0], { ...clusters[0], x: c1.x, y: c1.y, width: MEMBER_CARD_WIDTH, height: MEMBER_CARD_HEIGHT })).toBe(true)
+  })
+
+  it('gives linked members consecutive slots even when the codebook order separates them', () => {
+    const a = makeCategory('A', { codeIds: ['c1', 'c2', 'c3', 'c4'] })
+    const items: BoardItem[] = [
+      { id: 'i1', boardId: 'b1', refType: 'code', refId: 'c1', x: 0, y: 0 },
+      { id: 'i4', boardId: 'b1', refType: 'code', refId: 'c4', x: 0, y: 0 }
+    ]
+    const data = makeData({
+      boards: [board],
+      categories: [a],
+      codes: ['c1', 'c2', 'c3', 'c4'].map(makeCode),
+      boardItems: items,
+      boardLinks: [{ id: 'l', boardId: 'b1', itemAId: 'i1', itemBId: 'i4', createdAt: '0' }]
+    })
+    const clusters = getVisibleBoardClusters(board, [], data.categories)
+    const visible = getVisibleBoardItems(board, items, data.codes, data.notes, data.categories, clusters, data.boardLinks)
+    const byRef = (refId: string) => visible.find((i) => i.refId === refId)!
+    // 4 members -> 2 columns: slots 0,1 on row 0; 2,3 on row 1. c1 takes
+    // slot 0, its partner c4 slot 1 (same row, right next to it), then c2, c3.
+    expect(byRef('c4').y).toBe(byRef('c1').y)
+    expect(byRef('c4').x).toBeGreaterThan(byRef('c1').x)
+    expect(byRef('c2').y).toBeGreaterThan(byRef('c1').y)
+  })
+
+  it("shows an explicit box no smaller than its own card grid, so cards can't hang out of it", () => {
+    const a = makeCategory('A', { codeIds: Array.from({ length: 9 }, (_, i) => `c${i}`) })
+    const tiny: BoardCluster = { id: 'realA', boardId: 'b1', categoryId: 'A', x: 100, y: 100, width: 120, height: 80, createdAt: '0' }
+    const data = makeData({
+      boards: [board],
+      categories: [a],
+      codes: Array.from({ length: 9 }, (_, i) => makeCode(`c${i}`)),
+      boardClusters: [tiny]
+    })
+    const clusters = getVisibleBoardClusters(board, data.boardClusters, data.categories)
+    const shown = clusters[0]
+    expect(shown.id).toBe('realA')
+    expect({ x: shown.x, y: shown.y }).toEqual({ x: 100, y: 100 })
+    const visible = getVisibleBoardItems(board, [], data.codes, data.notes, data.categories, clusters)
+    for (const item of visible) {
+      expect(rectContains(shown, { ...shown, x: item.x, y: item.y, width: MEMBER_CARD_WIDTH, height: MEMBER_CARD_HEIGHT })).toBe(true)
+    }
+    // An empty cluster's box is left exactly as the user made it.
+    const empty = makeCategory('E')
+    const emptyBox: BoardCluster = { ...tiny, id: 'realE', categoryId: 'E' }
+    const emptyShown = getVisibleBoardClusters(board, [emptyBox], [empty])[0]
+    expect({ width: emptyShown.width, height: emptyShown.height }).toEqual({ width: 120, height: 80 })
   })
 })

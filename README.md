@@ -14,9 +14,12 @@ question) are the same data everywhere they appear: the board, the Workspace sid
 Clusters tab, and Analysis's Clusters tab are three views onto one list, not three copies to
 keep in sync. Every code and note appears on the default board automatically, and clusters
 can nest into superordinate groups (drag one into another; shift+drag to pull one back out).
-Codes and notes on the board link into rigid little groups only when you ask: hold Shift while
-dragging a card near another to snap-link them (a plain drop never links); Ctrl/Cmd+drag moves
-one card out of its group on its own.
+Drop a card into a cluster to file it there — cards inside a cluster are arranged in a grid
+automatically and the cluster sizes itself to hold them, so the picture is always exactly the
+membership; free placement is for cards outside any cluster. Codes and notes link into rigid
+little groups only when you ask: hold Shift while dragging a card near another to snap-link them
+(a plain drop never links; linked cards sit side by side in their cluster's grid); Ctrl/Cmd+drag
+moves one card out of its group on its own.
 Import/export with Word (.docx), OpenOffice (.odt), and Excel (.xlsx/.xls) rounds it out.
 
 Runs on Windows, macOS, and Linux. See `CHANGELOG.md` for a short, per-release version

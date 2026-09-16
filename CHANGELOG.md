@@ -13,7 +13,10 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   the resized cluster no longer fit inside it. Superordinate clusters now grow to keep
   containing what's nested in them.
 - Resizing or moving one cluster could shove a completely different, untouched cluster into
-  overlapping another one. Clusters now stay put unless you move or resize them directly.
+  overlapping another one — including when moving a cluster *out* of its superordinate
+  (dropping it on empty space, or un-nesting it), which could also make a stray connector
+  line appear between an unrelated, uninvolved parent/child pair. Clusters now stay put
+  unless you move or resize them directly.
 - Moving a code between clusters while snap-linking it to a code already in the destination
   could land a different code from that cluster exactly on top of another one, or leave the
   cluster it left behind auto-resized smaller with its remaining item poking outside it.

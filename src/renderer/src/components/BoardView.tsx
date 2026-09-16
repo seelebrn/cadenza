@@ -675,8 +675,9 @@ function BoardView(): JSX.Element {
           // Re-evaluate (or explicitly break, if shift) this cluster's parent.
           const category = currentData.categories.find((c) => c.id === state.categoryId)
           const currentParentId = category?.parentCategoryId ?? null
+          let newParentId: string | null = currentParentId
           if (state.shiftKey) {
-            if (currentParentId !== null) reparentCategory(state.categoryId, null)
+            newParentId = null
           } else {
             const excluded = new Set([
               state.categoryId,
@@ -686,20 +687,32 @@ function BoardView(): JSX.Element {
             const centerX = finalX + state.startWidth / 2
             const centerY = finalY + state.startHeight / 2
             const target = findClusterAtPoint(candidateClusters, centerX, centerY)
-            const newParentId = target?.categoryId ?? null
-            if (newParentId !== currentParentId) {
-              reparentCategory(state.categoryId, newParentId)
-              // Newly nested (not just re-confirming an existing parent) —
-              // pin whatever's already in the destination's own children
-              // group too (same first-touch reasoning as above, now for
-              // the group this cluster just joined), then grow the whole
-              // ancestor chain — not just the immediate new parent — to
-              // actually fit the cluster just dropped in, matching the
-              // live ghost preview shown during the drag.
-              if (target && selectedBoardId) {
-                materializeSiblingClusters(selectedBoardId, state.categoryId)
-                growAncestorClustersToFit(selectedBoardId, state.categoryId)
-              }
+            newParentId = target?.categoryId ?? null
+          }
+          if (newParentId !== currentParentId) {
+            reparentCategory(state.categoryId, newParentId)
+            // Whatever this cluster just joined — another cluster's
+            // existing children, or the board's own root-level group if
+            // un-nested (shift-drag, or dropped on empty space) — pin
+            // every still-virtual sibling already there too (same
+            // first-touch reasoning as above, now for the destination),
+            // then grow the whole ancestor chain (a no-op if it's now a
+            // root) to actually fit the cluster just dropped in, matching
+            // the live ghost preview shown during the drag. Has to run for
+            // un-nesting too, not just nesting into something — leaving a
+            // superordinate rejoins the board's root-level packing group
+            // just as much as nesting into a new parent joins that
+            // parent's own children group, and either one can reflow
+            // whatever was already there. Missing this for the un-nest
+            // case specifically is what let a plain "move this cluster out
+            // of its superordinate" reflow unrelated root clusters into
+            // each other, and made a structural nesting edge (see
+            // getStructuralNestingEdges) appear out of nowhere for some
+            // other, uninvolved parent/child pair whose spatial
+            // containment that same reflow broke.
+            if (selectedBoardId) {
+              materializeSiblingClusters(selectedBoardId, state.categoryId)
+              growAncestorClustersToFit(selectedBoardId, state.categoryId)
             }
           }
         } else {

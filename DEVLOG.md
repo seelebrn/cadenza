@@ -2458,3 +2458,37 @@ Verified: 1 new regression test (moving a member out of a 2-member cluster keeps
 box at its original size and the remaining member fully contained in it), confirmed to fail
 without the box-pinning addition before passing with it. Full suite green (388/388), typecheck
 clean, production build clean, boot-tested.
+
+### Un-nesting a cluster never stabilized the group it rejoined (2026-09-16)
+
+User attached before/after PDF exports of the Main board: "I just moved the Note Thematique
+cluster out of its superordinate cluster and what happened is a disaster. Arrows appeared
+seemingly out of nowhere and clusters jumped one on another."
+
+Root cause, in the cluster-move commit handler: the stabilization call added for the
+"resizing/moving one cluster reflows an unrelated one" fix was gated behind `if (target && …)`
+— only running when the drag landed the cluster *onto* a new parent. Dropping it on empty
+space (or shift-dragging it, the explicit un-nest gesture) sets `target`/`newParentId` to
+`null`, skipping the gate entirely — so un-nesting a cluster rejoined the board's root-level
+masonry-packed group without ever stabilizing the other, still-virtual clusters already in it.
+Every other root cluster's grid slot was free to reflow as a result — some landing on top of
+each other (the "clusters jumped one on another"), and if a reflowed cluster's own EXPLICIT
+child (frozen at its old position, from before the reflow) no longer sat inside its parent's
+NEW computed box, `getStructuralNestingEdges` started drawing a connector line for that
+completely unrelated pair — a structural nesting edge that's normally invisible (the child sits
+properly inside its parent) suddenly appearing once reflow broke that containment, read as
+"arrows out of nowhere."
+
+Consolidated the shift-key (explicit un-nest) and normal (drop-to-target) reparent branches
+into one decision, and moved the stabilization + ancestor-growth calls outside the `if
+(target)` gate so they run whenever the parent actually changes — *to* a new cluster's children
+group, or *to* the board's own root-level group when un-nested — not just the nest-into-
+something case. `growAncestorClustersToFit` already no-ops gracefully when the new parent is
+null (nothing to grow), so this required no changes to either pure function, only to when
+BoardView calls them.
+
+No new pure-function logic (the two functions this composes are already tested); verified via
+the full suite, typecheck, production build, and boot-test. Reviewed every remaining
+materializeSiblingClusters/growAncestorClustersToFit/growClusterToFitOwnMembers call site in
+BoardView.tsx afterward to confirm none of the others have the same "only gated for one
+direction of a two-way transition" shape.

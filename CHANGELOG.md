@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-09-16
+
 ### Fixed
 - A superordinate that had grown to hold a cluster (or a cluster that had grown to hold a card)
   kept that size after the cluster/card left. Containers now shrink back to the size you last

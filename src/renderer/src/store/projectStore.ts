@@ -74,6 +74,7 @@ import {
   growAncestorClustersToFit as growAncestorClustersToFitOp,
   growClusterToFitOwnMembers as growClusterToFitOwnMembersOp,
   linkItems as linkItemsOp,
+  ensureClusterShape as ensureClusterShapeOp,
   materializeChildClusters as materializeChildClustersOp,
   resolveItemOverlaps as resolveItemOverlapsOp,
   resolveSiblingOverlaps as resolveSiblingOverlapsOp,
@@ -281,6 +282,10 @@ interface ProjectState {
    * *before* a cluster joins that group, so joining can't shift anything
    * already there. See materializeChildClusters' own comment. */
   materializeChildClusters: (boardId: string, parentCategoryId: string | null) => void
+  /** Gives categoryId a stored shape where it's shown, pinning the whole
+   * top-level group first, if it has none yet — the only safe way to start
+   * storing a cluster's position. See ensureClusterShape. */
+  ensureClusterShape: (boardId: string, categoryId: string) => void
   /** Used when a resize newly encloses one or more other clusters,
    * nesting them into the resizing cluster all at once — drops each newly-
    * nested cluster's own explicit shape and re-packs the destination's
@@ -693,7 +698,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   createCategory: (name, kind, color, parentCategoryId) => {
     const { data } = get()
     if (!data) return null
-    const result = createCategoryOp(data, { name, kind, color, parentCategoryId })
+    // A new top-level cluster changes how many columns the default board's
+    // auto-packed top level uses, repacking every top-level cluster that
+    // has no stored position yet (after a reset: all of them). Pin them
+    // first; the new one then lands in genuinely free space.
+    const defaultBoardId = getDefaultBoardId(data.boards)
+    const base = !parentCategoryId && defaultBoardId ? materializeChildClustersOp(data, defaultBoardId, null) : data
+    const result = createCategoryOp(base, { name, kind, color, parentCategoryId })
     get().updateProject(() => result.data)
     return result.categoryId
   },
@@ -857,6 +868,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   materializeChildClusters: (boardId, parentCategoryId) =>
     get().updateProject((data) => materializeChildClustersOp(data, boardId, parentCategoryId)),
+
+  ensureClusterShape: (boardId, categoryId) =>
+    get().updateProject((data) => ensureClusterShapeOp(data, boardId, categoryId)),
 
   resolveSiblingOverlaps: (boardId, categoryId) =>
     get().updateProject((data) => resolveSiblingOverlapsOp(data, boardId, categoryId)),

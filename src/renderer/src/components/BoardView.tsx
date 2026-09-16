@@ -144,6 +144,7 @@ function BoardView(): JSX.Element {
   const deleteBoard = useProjectStore((s) => s.deleteBoard)
   const createClusterForCategory = useProjectStore((s) => s.createClusterForCategory)
   const createClusterWithNewCategory = useProjectStore((s) => s.createClusterWithNewCategory)
+  const createCategory = useProjectStore((s) => s.createCategory)
   const addItemToBoard = useProjectStore((s) => s.addItemToBoard)
   const addAllCodesToBoard = useProjectStore((s) => s.addAllCodesToBoard)
   const addAllNotesToBoard = useProjectStore((s) => s.addAllNotesToBoard)
@@ -153,7 +154,7 @@ function BoardView(): JSX.Element {
   const moveItem = useProjectStore((s) => s.moveItem)
   const moveCluster = useProjectStore((s) => s.moveCluster)
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
-  const materializeSiblingClusters = useProjectStore((s) => s.materializeSiblingClusters)
+  const ensureClusterShape = useProjectStore((s) => s.ensureClusterShape)
   const materializeChildClusters = useProjectStore((s) => s.materializeChildClusters)
   const renestClustersCleanly = useProjectStore((s) => s.renestClustersCleanly)
   const resolveSiblingOverlaps = useProjectStore((s) => s.resolveSiblingOverlaps)
@@ -316,23 +317,20 @@ function BoardView(): JSX.Element {
     return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes, data.categories, clusters, links)
   }, [data, currentBoard, explicitItems, clusters, links])
 
-  /** Turns a possibly-virtual cluster into a real, persisted BoardCluster
-   * (a no-op returning the same id if it already is one) — needed before
-   * any operation that looks a cluster up by id in data.boardClusters
-   * (moveCluster, resizeCluster, assign/unassignItemToCluster), since a
-   * virtual id like "virtual:cluster:<categoryId>" only exists in this
-   * computed `clusters` array, never in the stored data. */
-  function materializeCluster(cluster: BoardCluster): string {
-    if (!cluster.id.startsWith('virtual:')) return cluster.id
-    const realId = createClusterForCategory(
-      cluster.boardId,
-      cluster.categoryId,
-      cluster.x,
-      cluster.y,
-      cluster.width,
-      cluster.height
+  /** The stored shape for a category on this board, created (at exactly
+   * where it's shown, top-level group pinned first — see
+   * ensureClusterShape) if it doesn't exist yet. Only ever called when a
+   * drag actually commits: creating a shape on mousedown used to reflow the
+   * auto-packed top level on a mere click. Reads the store directly since
+   * the shape was just written in this same synchronous commit. */
+  function storedClusterIdFor(categoryId: string): string | null {
+    if (!selectedBoardId) return null
+    ensureClusterShape(selectedBoardId, categoryId)
+    return (
+      useProjectStore
+        .getState()
+        .data?.boardClusters.find((c) => c.boardId === selectedBoardId && c.categoryId === categoryId)?.id ?? null
     )
-    return realId ?? cluster.id
   }
 
   // Wheel-to-zoom (Ctrl/Cmd+wheel only — plain wheel keeps scrolling/panning
@@ -721,23 +719,13 @@ function BoardView(): JSX.Element {
           // Never past the canvas's top/left edge (unreachable there).
           const finalX = Math.max(0, state.startX + snap.dx)
           const finalY = Math.max(0, state.startY + snap.dy)
-          // Moving this cluster is what's about to materialize it (if it
-          // wasn't already) — the first-touch moment every other still-
-          // virtual sibling in its current packing group needs to be
-          // pinned too, or a later resize/move of any one of them could
-          // still reflow the others. See materializeSiblingClusters' own
-          // comment.
-          if (selectedBoardId) materializeSiblingClusters(selectedBoardId, state.categoryId)
-          moveCluster(state.id, finalX, finalY)
-          for (const clusterId of state.groupClusterIds) {
-            if (clusterId === state.id) continue
-            const start = state.clusterStartPositions[clusterId]
-            if (start) moveCluster(clusterId, start.x + snap.dx, start.y + snap.dy)
-          }
-          for (const itemId of state.memberItemIds) {
-            const start = state.memberStartPositions[itemId]
-            if (start) moveItem(itemId, start.x + snap.dx, start.y + snap.dy)
-          }
+          // Only the dragged cluster's own position is stored: its nested
+          // sub-clusters and its cards all sit on its grid and follow it on
+          // their own. Its shape is created here, at commit, with the
+          // top-level group pinned first (storedClusterIdFor), never on
+          // mousedown.
+          const movedClusterId = storedClusterIdFor(state.categoryId)
+          if (movedClusterId) moveCluster(movedClusterId, finalX, finalY)
 
           // Re-evaluate (or explicitly break, if shift) this cluster's parent.
           const category = currentData.categories.find((c) => c.id === state.categoryId)
@@ -799,15 +787,11 @@ function BoardView(): JSX.Element {
         } else {
           const width = Math.max(MIN_CLUSTER_WIDTH, state.startWidth + dx)
           const height = Math.max(MIN_CLUSTER_HEIGHT, state.startHeight + dy)
-          // Resizing is what's about to materialize this cluster (if it
-          // wasn't already) — pin every still-virtual sibling in its
-          // packing group first, so this resize (or any later one) can
-          // never reflow them. See materializeSiblingClusters' own
-          // comment — this is exactly the bug behind "resizing one
-          // cluster moved a different, unrelated cluster on top of a
-          // third one."
-          if (selectedBoardId) materializeSiblingClusters(selectedBoardId, state.categoryId)
-          resizeCluster(state.id, width, height)
+          // Shape created here, at commit, top-level group pinned first
+          // (see storedClusterIdFor) — so this resize can't reflow any
+          // other top-level cluster.
+          const resizedClusterId = storedClusterIdFor(state.categoryId)
+          if (resizedClusterId) resizeCluster(resizedClusterId, width, height)
 
           // Resizing to enclose other existing clusters "draws a box
           // around" them — nest whichever ones ended up entirely inside
@@ -1264,8 +1248,17 @@ function BoardView(): JSX.Element {
   }
 
   function handleNewCluster(): void {
-    if (!selectedBoardId) return
+    if (!selectedBoardId || !currentBoard) return
     const name = newClusterName.trim() || 'New cluster'
+    // On the default board every category is shown automatically, packed
+    // into free space around what's already placed — a fixed diagonal
+    // position here could land on top of an existing cluster (or, with a
+    // stored shape, repack the unplaced ones around it).
+    if (currentBoard.isDefault) {
+      createCategory(name, newClusterKind, nextColor(clusters.length))
+      setNewClusterName('')
+      return
+    }
     createClusterWithNewCategory(
       selectedBoardId,
       name,
@@ -1846,54 +1839,36 @@ function BoardView(): JSX.Element {
                     const groupCategoryIds = [category.id, ...descendantCategoryIds]
                     const groupCategories = data.categories.filter((c) => groupCategoryIds.includes(c.id))
                     const groupClusters = clusters.filter((c) => groupCategoryIds.includes(c.categoryId))
-                    // A cluster shown only as a "virtual" grid-fallback frame
-                    // (a category with no BoardCluster shape on this board
-                    // yet) has nothing for moveCluster to find by id.
-                    // Materialize every cluster in the moving group now, up
-                    // front, the same reasoning as member items just below.
-                    const clusterIdByCategoryId = new Map<string, string>()
+                    // Nothing is written to the project on mousedown — the
+                    // ids below are whatever is currently shown (virtual ones
+                    // included), used only to draw the live drag. Creating a
+                    // shape here used to take a just-clicked top-level
+                    // cluster out of the auto-packing, so a plain click made
+                    // its neighbors jump; the commit creates what it needs.
                     const clusterStartPositions: Record<string, Position> = {}
-                    for (const c of groupClusters) {
-                      const realId = materializeCluster(c)
-                      clusterIdByCategoryId.set(c.categoryId, realId)
-                      clusterStartPositions[realId] = { x: c.x, y: c.y }
-                    }
-                    const primaryClusterId = clusterIdByCategoryId.get(category.id) ?? cluster.id
+                    for (const c of groupClusters) clusterStartPositions[c.id] = { x: c.x, y: c.y }
 
-                    const memberItemsMap = new Map<string, BoardItem>()
-                    for (const cat of groupCategories) {
-                      for (const item of getClusterMemberItems(items, cat)) memberItemsMap.set(item.id, item)
-                    }
-                    // A member that's only ever been shown as a "virtual"
-                    // fallback card (never individually dragged) has no real
-                    // BoardItem yet — moveItem has nothing to find and
-                    // silently no-ops for it. Materialize every member now,
-                    // right as the cluster-drag starts, same as a lone card
-                    // materializes on its own mousedown (see BoardItemCard),
-                    // so it actually moves with the cluster instead of
-                    // snapping back to its grid fallback position afterward.
                     const memberItemIds: string[] = []
                     const memberStartPositions: Record<string, Position> = {}
-                    for (const item of memberItemsMap.values()) {
-                      const realId = item.id.startsWith('virtual:')
-                        ? addItemToBoard(cluster.boardId, item.refType, item.refId, item.x, item.y)
-                        : item.id
-                      const id = realId ?? item.id
-                      memberItemIds.push(id)
-                      memberStartPositions[id] = { x: item.x, y: item.y }
+                    for (const cat of groupCategories) {
+                      for (const item of getClusterMemberItems(items, cat)) {
+                        if (memberStartPositions[item.id]) continue
+                        memberItemIds.push(item.id)
+                        memberStartPositions[item.id] = { x: item.x, y: item.y }
+                      }
                     }
 
                     const grabRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                     setDragState({
                       kind: 'cluster-move',
-                      id: primaryClusterId,
+                      id: cluster.id,
                       categoryId: category.id,
                       grabOffsetX: (e.clientX - grabRect.left) / zoom,
                       grabOffsetY: (e.clientY - grabRect.top) / zoom,
                       shiftKey: e.shiftKey,
                       startWidth: cluster.width,
                       startHeight: cluster.height,
-                      groupClusterIds: Array.from(clusterIdByCategoryId.values()),
+                      groupClusterIds: groupClusters.map((c) => c.id),
                       clusterStartPositions,
                       memberItemIds,
                       memberStartPositions,
@@ -1906,7 +1881,7 @@ function BoardView(): JSX.Element {
                   onStartResize={(e) =>
                     setDragState({
                       kind: 'cluster-resize',
-                      id: materializeCluster(cluster),
+                      id: cluster.id,
                       categoryId: category.id,
                       startMouseX: e.clientX,
                       startMouseY: e.clientY,

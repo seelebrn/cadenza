@@ -19,6 +19,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   it landed on one of the sub-clusters and nested *there* instead. Dropping a cluster with the
   pointer on another cluster's header now always puts it directly in that cluster (which grows
   to hold it), and the preview outline shows the size it will really grow to.
+- After "Reset placement", simply clicking a cluster (or double-clicking it, or grabbing its
+  resize handle without dragging) could make neighboring clusters jump elsewhere. Clicking now
+  changes nothing, and a real move or resize leaves the other clusters where they are.
+- Creating a new top-level cluster (from the board or the Workspace) could rearrange the
+  auto-placed clusters, and "+ New cluster" on the Main board could land on top of an existing
+  one. The new cluster now goes into free space and nothing else moves.
 
 ## [0.4.5] - 2026-09-16
 

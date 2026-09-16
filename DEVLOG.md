@@ -3193,4 +3193,51 @@ targeting lands on a child; the same center with the pointer on the superordinat
 targets the superordinate; after nesting it, all five children are inside and non-overlapping), a
 nested cluster's header targets the nested cluster, center fallback and empty space, and the
 header band widening with `headerReach`. Three confirmed to fail with the header rule toggled off.
+
+### A click after "Reset placement" made neighbors jump (2026-09-16)
+
+"Sometimes, after resetting the default placement, a click on a cluster will make neighboring
+clusters jump to other locations. What could cause this? Is the default placement not snapping
+to the grid well? Or is it an unintended interaction?"
+
+An unintended interaction — the reset's placement itself is fine. After a reset, no top-level
+cluster has a stored position: they're all auto-packed together, masonry-style, so each one's
+spot depends on every cluster packed before it. The cluster-move and resize handlers created a
+stored shape for the grabbed cluster **on mousedown** (so that a later `moveCluster`/
+`resizeCluster` had a real id to find). That one stored shape takes the cluster out of the
+packing — its footprint is reserved first — and every auto-placed cluster that used to be packed
+in its column repacks around it. The click guard added earlier only stops the *mouseup* from
+committing; the damage was done on press. Double-click (two mousedowns) and grabbing the resize
+handle did it too. The cluster-move handler also materialized every card of the grabbed cluster
+on mousedown, a leftover from before cards sat on the grid.
+
+Two new tests pin down the mechanism before changing anything: on a reset board with varied
+cluster sizes, giving any one top-level cluster a stored shape at its own shown position moves
+at least one neighbor; pinning the whole top level first moves nothing, whichever cluster is
+touched.
+
+Fix: mousedown writes nothing. The drag state records the ids currently shown (virtual ones
+included) purely to draw the live drag. At commit — past the click guard — new
+`ensureClusterShape` creates the dragged cluster's shape, pinning the whole top-level group at
+its current positions first if the cluster has no shape yet (a no-op otherwise), and the move or
+resize applies to that. The commit now only moves the dragged cluster itself: its sub-clusters
+and cards are on its grid and follow on their own, so the old loops moving each descendant and
+card were dead weight. `materializeCluster` is gone.
+
+Same root cause, found while checking every other place a top-level cluster can gain a stored
+shape or the top level can change size:
+
+- **Creating a top-level cluster** changes how many columns the top level packs into
+  (`ceil(sqrt(n))`: 9 clusters → 3 columns, 10 → 4), repacking every auto-placed one. Test
+  confirms it. The `createCategory` store action (Workspace and board alike) now pins the top
+  level on the default board first when the new category is top-level; the new one then lands in
+  free space. Test: after a reset with nine clusters, adding a tenth leaves all nine in place and
+  the new one overlaps none of them.
+- **"+ New cluster" on the Main board** placed the new cluster at a fixed diagonal spot
+  `(60 + 30n, 60 + 30n)` with a stored shape — on a full board, typically on top of an existing
+  cluster. On the default board it now just creates the category (through the same pinning
+  store action), which the board shows in free space. Curated boards keep the old behavior,
+  where nothing is auto-placed.
+
+Full suite green (446/446), typecheck clean, production build clean, boot-tested.
 Full suite green (441/441), typecheck clean, production build clean, boot-tested.

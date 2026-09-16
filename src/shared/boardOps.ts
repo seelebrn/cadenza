@@ -1619,6 +1619,23 @@ export function pinClustersAtShownPositions(data: ProjectData, boardId: string, 
   return next
 }
 
+/**
+ * Gives a cluster a stored shape at exactly where it's shown, if it
+ * doesn't have one yet — pinning the whole top-level group at its current
+ * positions first. The top-level group is auto-packed together (masonry:
+ * each cluster's spot depends on every one packed before it), so giving
+ * just one of them a stored shape takes it out of the packing and the
+ * others repack around it — visibly jumping. Every "this cluster is being
+ * touched" path has to go through here rather than creating a shape
+ * directly. Reported as: after a reset, a mere click on a cluster made its
+ * neighbors jump.
+ */
+export function ensureClusterShape(data: ProjectData, boardId: string, categoryId: string): ProjectData {
+  if (data.boardClusters.some((c) => c.boardId === boardId && c.categoryId === categoryId)) return data
+  const next = materializeChildClusters(data, boardId, null)
+  return pinClustersAtShownPositions(next, boardId, [categoryId])
+}
+
 function rootAncestorId(categories: CategoryRecord[], categoryId: string): string {
   const byId = new Map(categories.map((c) => [c.id, c]))
   let current = byId.get(categoryId)

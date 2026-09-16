@@ -23,6 +23,7 @@ import {
   deleteCategoryOnBoard,
   deleteCluster,
   detachClustersFrom,
+  ensureClusterShape,
   describeBoardItem,
   findAlignmentSnap,
   findClusterAtPoint,
@@ -66,7 +67,7 @@ import {
   unassignItemFromCluster,
   unlinkItems
 } from './boardOps'
-import { addCodeToCategory, reparentCategory } from './categoryOps'
+import { addCodeToCategory, createCategory, reparentCategory } from './categoryOps'
 import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ClusterLink, CodeNode, ProjectData } from './types'
 
 // --- test fixtures -----------------------------------------------------
@@ -3621,5 +3622,95 @@ describe('findNestTarget', () => {
     const far = { x: 2000, y: 2000 }
     expect(findNestTarget([so], far, justAbove)).toBeNull()
     expect(findNestTarget([so], far, justAbove, 98)!.categoryId).toBe('SO')
+  })
+})
+
+describe('first touch of a cluster after a reset', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+
+  function resetBoard(): ProjectData {
+    // Top-level clusters of varied sizes, so the masonry packing stacks
+    // several into the same column.
+    const sizes = [1, 9, 2, 12, 4, 1, 7, 3, 16, 2]
+    let codeIndex = 0
+    const categories = sizes.map((n, i) => {
+      const codeIds = Array.from({ length: n }, () => `k${codeIndex++}`)
+      return makeCategory(`R${i}`, { codeIds })
+    })
+    const codes = Array.from({ length: codeIndex }, (_, i) => makeCode(`k${i}`))
+    return resetDefaultBoardClusterLayout(makeData({ boards: [board], categories, codes }), 'b1')
+  }
+  function shown(d: ProjectData): Map<string, BoardCluster> {
+    return new Map(getVisibleBoardClusters(board, d.boardClusters, d.categories).map((c) => [c.categoryId, c]))
+  }
+
+  // Reported: "after resetting the default placement, a click on a cluster
+  // will make neighboring clusters jump to other locations." Pressing the
+  // mouse on a cluster used to give it — alone — a stored shape, taking it
+  // out of the auto-packing its neighbors are laid out around.
+  it('giving one auto-placed top-level cluster a stored shape, alone, moves its neighbors', () => {
+    const data = resetBoard()
+    const before = shown(data)
+    const moved = [...before.keys()].some((id) => {
+      const b = before.get(id)!
+      const pinned = createClusterForCategory(data, { boardId: 'b1', categoryId: id, x: b.x, y: b.y, width: b.width, height: b.height }).data
+      const after = shown(pinned)
+      return [...before.keys()].some((other) => other !== id && (after.get(other)!.x !== before.get(other)!.x || after.get(other)!.y !== before.get(other)!.y))
+    })
+    expect(moved).toBe(true)
+  })
+
+  it('ensureClusterShape pins the top-level group first, so nothing moves, for any cluster touched', () => {
+    const data = resetBoard()
+    const before = shown(data)
+    for (const id of before.keys()) {
+      const next = ensureClusterShape(data, 'b1', id)
+      expect(next.boardClusters.some((c) => c.categoryId === id)).toBe(true)
+      const after = shown(next)
+      for (const [other, b] of before) {
+        expect({ x: after.get(other)!.x, y: after.get(other)!.y }, `touching ${id} moved ${other}`).toEqual({ x: b.x, y: b.y })
+      }
+    }
+  })
+
+  it('ensureClusterShape is a no-op for a cluster that already has a shape', () => {
+    let data = resetBoard()
+    data = ensureClusterShape(data, 'b1', 'R0')
+    expect(ensureClusterShape(data, 'b1', 'R0')).toBe(data)
+  })
+})
+
+describe('adding a top-level cluster after a reset', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  function shown(d: ProjectData): Map<string, BoardCluster> {
+    return new Map(getVisibleBoardClusters(board, d.boardClusters, d.categories).map((c) => [c.categoryId, c]))
+  }
+  function resetBoardWith(count: number): ProjectData {
+    const categories = Array.from({ length: count }, (_, i) =>
+      makeCategory(`R${i}`, { codeIds: Array.from({ length: (i * 5) % 7 }, (_, k) => `k${i}_${k}`) })
+    )
+    const codes = categories.flatMap((c) => c.codeIds.map(makeCode))
+    return resetDefaultBoardClusterLayout(makeData({ boards: [board], categories, codes }), 'b1')
+  }
+
+  // 9 top-level clusters pack into 3 columns, 10 into 4: the new one
+  // changes the column count and repacks every unplaced one.
+  it('without pinning, a 10th top-level cluster repacks the other nine', () => {
+    const data = resetBoardWith(9)
+    const before = shown(data)
+    const next = createCategory(data, { name: 'New', kind: 'theme', color: '#000' }).data
+    const after = shown(next)
+    const moved = [...before.keys()].some((id) => after.get(id)!.x !== before.get(id)!.x || after.get(id)!.y !== before.get(id)!.y)
+    expect(moved).toBe(true)
+  })
+
+  it('pinning the top level first keeps all nine in place and puts the new one in free space', () => {
+    const data = resetBoardWith(9)
+    const before = shown(data)
+    const next = createCategory(materializeChildClusters(data, 'b1', null), { name: 'New', kind: 'theme', color: '#000' })
+    const after = shown(next.data)
+    for (const [id, b] of before) expect({ x: after.get(id)!.x, y: after.get(id)!.y }).toEqual({ x: b.x, y: b.y })
+    const fresh = after.get(next.categoryId)!
+    for (const id of before.keys()) expect(rectsOverlap(fresh, after.get(id)!)).toBe(false)
   })
 })

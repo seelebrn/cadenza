@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-09-16
+
 ### Fixed
 - Snapping a code onto a code in another cluster from *below* it left the dragged code a member
   of the cluster it came from, even though it now sat inside the other one (snapping from above

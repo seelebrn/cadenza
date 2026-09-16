@@ -3119,3 +3119,41 @@ top-level cluster, and leaves no structural edge; tree nesting puts the cluster 
 and moves no other top-level cluster; a refused reparent is a strict no-op; the forget-position
 helper only acts once the card is in no cluster. The fuzz still passes. Full suite green (437/437),
 typecheck clean, production build clean, boot-tested.
+
+### Working zoomed out: readable cluster headers, zoom-to-cluster (2026-09-16)
+
+"For a large project with 200+ items, I find myself working mainly at 30% zoom, which isn't easy
+since the cluster labels become illegible at that size. Can you think of something or is it just
+an 'it is what it is' situation?"
+
+Not "it is what it is" — this is what map labels do. Two small things, both agreed:
+
+- **Zoom-compensated cluster headers.** `ClusterFrame` gets the board's `zoom` and counter-scales
+  the header's contents (name, kind badge, color swatch, ×) by `min(3.5, 1/zoom)`, so on screen
+  the name stays its normal size where at 30% it was an 8px smudge — and the buttons stay
+  clickable. Deliberately done *inside* the existing 28px header bar rather than by making the
+  bar taller: the layout below it is computed from `CLUSTER_HEADER_HEIGHT`, so a zoom-dependent
+  header height would make layout depend on zoom. The bar keeps its layout height (`h-7`); the
+  scaled contents sit in an absolutely-positioned wrapper centered on it and overhang it a little
+  (at 30%: ~6 canvas px above and below), still well clear of the first row of cards at 48. The
+  wrapper's width is the frame width divided by the scale, so a long name truncates at the frame's
+  edge rather than spilling across a neighbor (full name in the tooltip). The one catch was PDF
+  export, which clones the live DOM: a PDF taken while zoomed out would have had giant headers.
+  The wrapper carries a `data-board-zoom-label` marker and its frame width; the export undoes the
+  scale on the clone.
+- **Double-click a cluster's empty area to zoom to it.** "Fit view"'s math was extracted into
+  `fitViewToBounds(minX, minY, maxX, maxY)` (same zoom-anchor mechanism as wheel zoom), called with
+  a cluster's bounds from a double-click on the frame's own background — `e.target ===
+  e.currentTarget`, so a double-click on a card, on the header (where double-clicking the name
+  renames, as before), or on a nested frame (which zooms to *itself*) doesn't also fire it. A
+  double-click is two mousedowns, i.e. two zero-distance drags; the click guard from earlier today
+  makes those no-ops, so nothing is committed by it.
+
+Cards themselves can't be helped the same way (54×19 screen px at 30%; nothing legible fits), so
+zoomed-out work is cluster-level navigation — which is the point of the second change.
+
+Verified: typecheck clean, production build clean, boot-tested; not visually verified in a running
+board from this session (no interactive Electron here) — what to look for: at 30% the header text
+should read at normal size and truncate at the frame edge; at 100% nothing should look different;
+a PDF exported while zoomed out should have normal headers; double-clicking empty cluster space
+should zoom to that cluster and "Fit view" should bring the board back.

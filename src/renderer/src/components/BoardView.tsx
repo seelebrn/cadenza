@@ -388,18 +388,26 @@ function BoardView(): JSX.Element {
   // level actually needs to change; when it doesn't, corrects scroll
   // immediately since there's no re-render to wait on.
   function handleFitToView(): void {
-    const container = scrollContainerRef.current
-    if (!container) return
     const boxes = [
       ...clusters.map((c) => ({ x: c.x, y: c.y, width: c.width, height: c.height })),
       ...items.map((i) => ({ x: i.x, y: i.y, width: CARD_WIDTH, height: CARD_HEIGHT }))
     ]
     if (boxes.length === 0) return
+    fitViewToBounds(
+      Math.min(...boxes.map((b) => b.x)),
+      Math.min(...boxes.map((b) => b.y)),
+      Math.max(...boxes.map((b) => b.x + b.width)),
+      Math.max(...boxes.map((b) => b.y + b.height))
+    )
+  }
 
-    const minX = Math.min(...boxes.map((b) => b.x))
-    const minY = Math.min(...boxes.map((b) => b.y))
-    const maxX = Math.max(...boxes.map((b) => b.x + b.width))
-    const maxY = Math.max(...boxes.map((b) => b.y + b.height))
+  // Zooms and scrolls so the given canvas rectangle fills the viewport
+  // (with FIT_VIEW_PADDING around it) — the whole board for "Fit view",
+  // one cluster for a double-click on it, so a zoomed-out overview of a
+  // large board is something to navigate *from* rather than work *at*.
+  function fitViewToBounds(minX: number, minY: number, maxX: number, maxY: number): void {
+    const container = scrollContainerRef.current
+    if (!container) return
     const boxWidth = maxX - minX
     const boxHeight = maxY - minY
     const viewportWidth = container.clientWidth
@@ -466,6 +474,14 @@ function BoardView(): JSX.Element {
       snapshot.style.transform = 'none'
       snapshot.style.width = `${pageWidth}px`
       snapshot.style.height = `${pageHeight}px`
+      // Cluster headers are counter-scaled against the live zoom so they
+      // stay readable zoomed out (see ClusterFrame's labelScale); the
+      // export is always at 100%, so undo that here or a PDF taken while
+      // zoomed out would have giant headers.
+      for (const label of Array.from(snapshot.querySelectorAll<HTMLElement>('[data-board-zoom-label]'))) {
+        label.style.transform = 'translateY(-50%)'
+        label.style.width = `${label.dataset.frameWidth}px`
+      }
 
       // The live canvas is cloned as-is, interactive chrome included — a
       // delete "×", a color-swatch input, a resize handle read as noise on
@@ -1615,7 +1631,8 @@ function BoardView(): JSX.Element {
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
           {currentBoard.isDefault &&
             'Every code, note, and cluster is shown automatically on this default board. '}
-          Ctrl/Cmd+scroll to zoom · drop a card into a cluster to file it there (cards inside a cluster are
+          Ctrl/Cmd+scroll to zoom, double-click a cluster's empty space to zoom to it (cluster names stay readable
+          zoomed out) · drop a card into a cluster to file it there (cards inside a cluster are
           arranged automatically; drop it on empty space to take it out) · hold Shift while dragging a card near
           another to link them (a plain drop never links); linked cards move together (Ctrl/Cmd+drag to move just
           one) · drag a cluster into another to nest it there (clusters inside a superordinate are arranged
@@ -1775,6 +1792,10 @@ function BoardView(): JSX.Element {
                   isNestTarget={dragNestTarget?.targetClusterId === cluster.id}
                   isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}
                   isExcludedByResize={resizeExcludedCategoryIds.has(cluster.categoryId)}
+                  zoom={zoom}
+                  onZoomTo={() =>
+                    fitViewToBounds(cluster.x, cluster.y, cluster.x + cluster.width, cluster.y + cluster.height)
+                  }
                   isLinkMode={linkMode}
                   isLinkPicked={linkFromCategoryId === category.id}
                   isDimmed={focusConnectedCategoryIds !== null && !focusConnectedCategoryIds.has(category.id)}

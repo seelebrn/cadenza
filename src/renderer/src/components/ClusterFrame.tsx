@@ -77,6 +77,13 @@ interface ClusterFrameProps {
    * of the map's layout stays legible as context while attention narrows
    * to one cluster and its own relationships. */
   isDimmed: boolean
+  /** The board's current zoom — the header (name + buttons) is counter-
+   * scaled by it so it stays readable and clickable when zoomed far out,
+   * where a 200-item board is actually worked on. */
+  zoom: number
+  /** Double-clicking the frame's own empty area: zoom the board to fit
+   * this cluster. */
+  onZoomTo: () => void
   onStartMove: (e: React.MouseEvent) => void
   onStartResize: (e: React.MouseEvent) => void
   onPick: () => void
@@ -99,11 +106,22 @@ function ClusterFrame({
   isLinkPicked,
   isDefaultBoard,
   isDimmed,
+  zoom,
+  onZoomTo,
   onStartMove,
   onStartResize,
   onPick,
   onHoverChange
 }: ClusterFrameProps): JSX.Element {
+  // Map-style label: below 100% zoom the header's contents are scaled up
+  // by the inverse of the zoom (capped), so on screen the name stays its
+  // normal size — at 30% the bar itself is 8px tall and its text would be
+  // a smudge otherwise. The bar keeps its layout height (the grid below
+  // it is computed from CLUSTER_HEADER_HEIGHT); the scaled contents just
+  // overhang it a little, still well above the first row of cards. Width
+  // is clipped to the frame, so a long name truncates rather than spilling
+  // over a neighbor (the full name is in the tooltip).
+  const labelScale = Math.min(3.5, Math.max(1, 1 / zoom))
   const renameCategory = useProjectStore((s) => s.renameCategory)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCluster = useProjectStore((s) => s.deleteCluster)
@@ -175,6 +193,13 @@ function ClusterFrame({
         }}
         onMouseEnter={() => onHoverChange(true)}
         onMouseLeave={() => onHoverChange(false)}
+        // Only the frame's own background — a double-click on a card, on
+        // the header (which renames on the name), or on a nested frame
+        // (which handles its own) must not also zoom to this one.
+        onDoubleClick={(e) => {
+          if (e.target === e.currentTarget) onZoomTo()
+        }}
+        title="Double-click empty space in this cluster to zoom to it"
       >
         {isLinkPicked && (
           <span className="pointer-events-none absolute -top-2.5 left-1 whitespace-nowrap rounded bg-sky-500 px-1.5 py-0.5 text-[9px] font-medium text-white shadow">
@@ -206,7 +231,7 @@ function ClusterFrame({
           </span>
         )}
       <div
-        className="flex cursor-move select-none items-center gap-1 rounded-t-md px-2 py-1 text-xs text-white"
+        className="relative h-7 cursor-move select-none rounded-t-md text-xs text-white"
         style={{ backgroundColor: category.color }}
         onMouseDown={(e) => {
           // Left button only — a right-click here shouldn't also start a
@@ -238,6 +263,16 @@ function ClusterFrame({
         // already existed before the mousedown.
         onDragStart={(e) => e.preventDefault()}
       >
+        <div
+          className="absolute left-0 top-1/2 flex items-center gap-1 px-2"
+          data-board-zoom-label=""
+          data-frame-width={width}
+          style={{
+            width: width / labelScale,
+            transform: `translateY(-50%) scale(${labelScale})`,
+            transformOrigin: 'left center'
+          }}
+        >
         <input
           type="color"
           className="board-export-hide h-3 w-3 flex-shrink-0 cursor-pointer border-0 bg-transparent p-0"
@@ -266,7 +301,7 @@ function ClusterFrame({
               setNameDraft(category.name)
               setIsEditingName(true)
             }}
-            title={category.parentCategoryId ? 'Nested under a superordinate cluster' : undefined}
+            title={`${category.name}${category.parentCategoryId ? ' — nested under a superordinate cluster' : ''} (double-click to rename)`}
           >
             {category.name}
             {category.parentCategoryId ? ' ↰' : ''}
@@ -284,6 +319,7 @@ function ClusterFrame({
         >
           ×
         </button>
+        </div>
       </div>
 
       {isConfirmingRemove && (

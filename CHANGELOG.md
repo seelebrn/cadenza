@@ -6,6 +6,14 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Added
+- Cluster names (and the header's buttons) stay readable and clickable when the board is
+  zoomed far out — the header counter-scales with the zoom, so a large board can actually be
+  worked at 30%. Long names truncate to the frame's width at low zoom (full name on hover).
+  PDF export is unaffected.
+- Double-click a cluster's empty space to zoom the board to fit it; "Fit view" brings the whole
+  board back. Double-clicking the name still renames it.
+
 ## [0.4.5] - 2026-09-16
 
 ### Fixed

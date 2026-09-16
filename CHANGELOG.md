@@ -25,6 +25,10 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   line appear between one of them and the cluster it just joined.
 - Shrinking a cluster below a child it already contained left that child still marked as
   nested (with a stray connector line to show for it) instead of being detached.
+- Resizing a cluster to enclose several others at once could leave one of them looking like it
+  vanished — its items sitting in place with no frame around them, and its (correctly
+  repositioned) empty frame showing up elsewhere — if that cluster had any individually-dragged
+  member cards. Members now relocate together with their cluster when it's newly nested.
 
 ## [0.4.2] - 2026-09-15
 

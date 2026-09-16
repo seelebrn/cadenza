@@ -2564,3 +2564,44 @@ Verified: 4 new unit tests (detaches a child that no longer fits without moving 
 that still fits nested, a true no-op by reference equality; detaches every orphaned child in
 one resize, not just one; no-ops for an unknown board/category). Full suite green (395/395),
 typecheck clean, production build clean, boot-tested.
+
+### Enclosing several clusters at once could still leave one looking vanished (2026-09-16)
+
+Next report, same PDF-pair pattern, on the very fix from the previous two entries: "Now, when
+I expand the supercluster to enclose the four clusters to the right, look what happens. One
+cluster totally just vanishes along with its items. One behaves fine. Two have the items stay
+in place, but the cluster disappears."
+
+Root-caused by re-deriving `renestClustersCleanly`'s exact sequence for a category with
+already-individually-dragged member items. It correctly drops each newly-enclosed category's
+own *frame* and repacks it fresh into the parent's children grid — but a member card that was
+already explicit (dragged individually at some earlier point, independent of ever touching the
+cluster's own frame) has its position computed once, at pin time, directly from its cluster's
+box coordinates (`positionForSlot` in `getVisibleBoardItems`) — it never moves again on its
+own. Re-nesting relocates the frame (from wherever it rendered before — usually a root-level
+position, packed among unrelated siblings — to a fresh spot inside the parent) without
+touching `boardItems` at all, so any already-pinned member is left stranded at its old,
+now-unrelated coordinates: the frame reappears (correctly) inside the supercluster, empty,
+while its item sits alone somewhere else with no frame around it — exactly "items stay in
+place, cluster disappears." A category with *no* individually-dragged members (still fully
+virtual) doesn't hit this at all, since virtual items recompute their position from their
+cluster's *current* box on every read — matching "one behaves fine."
+
+Fix: `renestClustersCleanly` now also drops the `boardItems` entries for every
+newly-nested category's own codes/notes, alongside dropping the cluster frames themselves, so
+they fall back to virtual and recompute fresh against the frame's new position — the same
+"reset so it recomputes consistently" pattern `resetDefaultBoardClusterLayout` already used for
+a full-board reset, just scoped to only the categories actually being relocated by this resize.
+
+Verified: new regression test pins a code explicitly at an arbitrary far-away position, nests
+its (virtual-frame) category under a resized supercluster via `renestClustersCleanly`, and
+confirms the item ends up positioned inside the category's new frame instead of stranded at the
+old coordinates — confirmed to fail (item still at the stale position) with the fix reverted,
+passes with it restored. Full suite green (396/396), typecheck clean, production build clean,
+boot-tested.
+
+The reported "one cluster totally vanishes along with its items" (as opposed to just the frame)
+wasn't independently reproduced — it's most likely the same mechanism, just for a category
+whose *frame* also happened to be explicit and far away (rather than virtual), which the fix
+above covers identically since the frame-drop already existed; kept in mind as the first thing
+to re-check if a variant of this is reported again after this fix.

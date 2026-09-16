@@ -56,7 +56,7 @@ import {
   unassignItemFromCluster,
   unlinkItems
 } from './boardOps'
-import { addCodeToCategory } from './categoryOps'
+import { addCodeToCategory, reparentCategory } from './categoryOps'
 import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ClusterLink, CodeNode, ProjectData } from './types'
 
 // --- test fixtures -----------------------------------------------------
@@ -1004,6 +1004,65 @@ describe('renestClustersCleanly', () => {
 
     const alreadyAfter = next.boardClusters.find((cl) => cl.categoryId === 'already')!
     expect(alreadyAfter).toEqual(alreadyExplicit)
+  })
+
+  // Regression: a category being newly nested gets its own frame relocated
+  // from wherever it rendered before (here: a root-level virtual position,
+  // far from "super") to a fresh spot inside the parent's children grid —
+  // but an already-individually-dragged member card of that category keeps
+  // whatever absolute position it was pinned at, which has nothing to do
+  // with the frame's new location. Reported as: enclosing several clusters
+  // in one resize left one with its items sitting in place but no frame
+  // around them, and the frame reappearing elsewhere with nothing in it.
+  it("relocates a newly-nested category's own already-pinned member items along with its frame", () => {
+    const parent = makeCategory('super')
+    const a = makeCategory('a', { codeIds: ['codeA'] })
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, a],
+      codes: [makeCode('codeA')],
+      boardItems: [{ id: 'itemA', boardId: 'board1', refType: 'code', refId: 'codeA', x: 9000, y: 9000 }]
+    })
+    const superBox: BoardCluster = {
+      id: 'realSuper',
+      boardId: 'board1',
+      categoryId: 'super',
+      x: 0,
+      y: 0,
+      width: 2000,
+      height: 2000,
+      createdAt: '0'
+    }
+    const withParentAndReparent = {
+      ...data,
+      boardClusters: [superBox],
+      categories: [parent, { ...a, parentCategoryId: 'super' }]
+    }
+
+    const next = renestClustersCleanly(withParentAndReparent, 'board1', 'super', ['a'])
+
+    const itemAAfter = next.boardItems.find((i) => i.refId === 'codeA')
+    // Either it's still explicit but relocated, or it fell back to virtual
+    // (recomputed fresh relative to the frame's new position) — either way
+    // it must no longer be stranded at its old, unrelated coordinates.
+    if (itemAAfter) {
+      expect(itemAAfter.x === 9000 && itemAAfter.y === 9000).toBe(false)
+    }
+    const board = next.boards[0]
+    const visibleClusters = getVisibleBoardClusters(board, next.boardClusters, next.categories)
+    const visibleItems = getVisibleBoardItems(
+      board,
+      next.boardItems,
+      next.codes,
+      next.notes,
+      next.categories,
+      visibleClusters
+    )
+    const aBox = visibleClusters.find((c) => c.categoryId === 'a')!
+    const codeAItem = visibleItems.find((i) => i.refType === 'code' && i.refId === 'codeA')!
+    expect(
+      rectContains(aBox, { ...aBox, x: codeAItem.x, y: codeAItem.y, width: 1, height: 1 })
+    ).toBe(true)
   })
 })
 

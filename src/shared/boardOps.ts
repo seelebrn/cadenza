@@ -1234,6 +1234,19 @@ export function growAncestorClustersToFit(data: ProjectData, boardId: string, ca
  * set at those fresh positions, so the clean layout is also immediately
  * stable against future reflow. Finally grows the parent (and its own
  * ancestors, transitively) to actually fit what it now contains.
+ *
+ * Also drops each newly-nested category's own explicit member items
+ * (codes/notes already individually dragged before). An explicit member's
+ * position is computed once, relative to its cluster's box *at the time it
+ * was pinned* (see positionForSlot in getVisibleBoardItems) — it never
+ * moves again on its own. Re-nesting nearly always relocates the cluster's
+ * frame (from wherever it rendered before — often as a root, packed among
+ * unrelated siblings — to a fresh position inside the parent's children
+ * grid), so any already-pinned member gets left stranded at its old,
+ * now-unrelated coordinates instead of following its cluster. Reported as:
+ * enclosing several clusters in one resize left one of them with its items
+ * sitting in place but no frame around them, elsewhere the frame reappeared
+ * empty.
  */
 export function renestClustersCleanly(
   data: ProjectData,
@@ -1244,10 +1257,21 @@ export function renestClustersCleanly(
   const board = data.boards.find((b) => b.id === boardId)
   if (!board) return data
 
+  const relocatingRefs = new Set<string>()
+  for (const categoryId of newChildCategoryIds) {
+    const category = data.categories.find((c) => c.id === categoryId)
+    if (!category) continue
+    for (const codeId of category.codeIds) relocatingRefs.add(`code:${codeId}`)
+    for (const noteId of category.noteIds) relocatingRefs.add(`note:${noteId}`)
+  }
+
   let next: ProjectData = {
     ...data,
     boardClusters: data.boardClusters.filter(
       (c) => !(c.boardId === boardId && newChildCategoryIds.includes(c.categoryId))
+    ),
+    boardItems: data.boardItems.filter(
+      (i) => i.boardId !== boardId || !relocatingRefs.has(`${i.refType}:${i.refId}`)
     )
   }
 

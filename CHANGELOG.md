@@ -23,6 +23,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 - Resizing a cluster to enclose several others at once left them overlapping or pushed
   outside its bounds instead of packed into a clean grid, and could make a stray connector
   line appear between one of them and the cluster it just joined.
+- Shrinking a cluster below a child it already contained left that child still marked as
+  nested (with a stray connector line to show for it) instead of being detached.
 
 ## [0.4.2] - 2026-09-15
 

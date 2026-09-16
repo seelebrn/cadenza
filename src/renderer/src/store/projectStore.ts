@@ -66,6 +66,7 @@ import {
   createClusterWithNewCategory as createClusterWithNewCategoryOp,
   deleteBoard as deleteBoardOp,
   deleteCluster as deleteClusterOp,
+  detachOrphanedChildren as detachOrphanedChildrenOp,
   getDefaultBoardId,
   growAncestorClustersToFit as growAncestorClustersToFitOp,
   growClusterToFitOwnMembers as growClusterToFitOwnMembersOp,
@@ -278,6 +279,13 @@ interface ProjectState {
    * then pins the result and grows the parent to fit it. See
    * renestClustersCleanly's own comment. */
   renestClustersCleanly: (boardId: string, parentCategoryId: string, newChildCategoryIds: string[]) => void
+  /** Un-nests any direct child of categoryId that no longer fits inside
+   * its current (just-resized) box — call after resizing a cluster
+   * smaller, so a child it used to fully enclose but doesn't anymore
+   * gets detached instead of staying nested-in-data-only, which is what
+   * makes a stray structural connector line appear. See
+   * detachOrphanedChildren's own comment. */
+  detachOrphanedChildren: (boardId: string, categoryId: string) => void
   /** Grows (materializing, if still virtual) categoryId's own box to fit
    * its current membership, if it isn't already big enough — call after a
    * board drag adds a new member to an already-placed cluster. */
@@ -855,6 +863,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   renestClustersCleanly: (boardId, parentCategoryId, newChildCategoryIds) =>
     get().updateProject((data) => renestClustersCleanlyOp(data, boardId, parentCategoryId, newChildCategoryIds)),
+
+  detachOrphanedChildren: (boardId, categoryId) =>
+    get().updateProject((data) => detachOrphanedChildrenOp(data, boardId, categoryId)),
 
   growClusterToFitOwnMembers: (boardId, categoryId) =>
     get().updateProject((data) => growClusterToFitOwnMembersOp(data, boardId, categoryId)),

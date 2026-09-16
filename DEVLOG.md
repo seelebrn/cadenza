@@ -2533,3 +2533,34 @@ first scenario really would have escaped the parent's bounds under the old bare-
 approach before writing the fix (no inter-sibling overlap in that particular synthetic case,
 but a clear containment failure, matching "forced out of the supercluster"). Full suite green
 (391/391), typecheck clean, production build clean, boot-tested.
+
+### The reverse of enclosing: shrinking a cluster below an existing child (2026-09-16)
+
+Same PDF-attached repro pattern, immediate follow-up: "I just resized the superordinate to
+exclude the rightmost cluster it previously enclosed... A stray arrow appeared, although I
+would have expected the cluster to just be detached from its enclosing supercluster."
+
+The mirror image of the previous fix, and just as unhandled: the resize-commit handler had
+logic for a cluster *growing* to newly enclose others (`findClustersEnclosedBy` +
+`renestClustersCleanly`), but nothing for the reverse — a cluster *shrinking* below an
+*existing* child it already contained. That child's `parentCategoryId` stayed exactly as it
+was; only the spatial containment broke. Since `getStructuralNestingEdges` draws a connector
+line specifically whenever a child isn't spatially contained in its parent (originally added
+so Tree layout could show a nesting relationship without literal containment), the previously-
+invisible edge for this pair suddenly appeared the moment the resize broke containment — the
+"stray arrow."
+
+New `detachOrphanedChildren` (boardOps.ts): after any resize, checks every *existing* direct
+child of the resized cluster against its new box; any that's no longer contained gets
+un-nested (`reparentCategory` to null) — not moved at all, since it's already sitting exactly
+where it visually is, only the data-model relationship changes to match. Reuses
+`materializeSiblingClusters` to stabilize whatever group (another cluster's children, or the
+board's own root level) each detached child rejoins, same as any other parent change this
+session. Wired in as an unconditional call right after the existing "enclose new children"
+handling in the resize commit — a safe no-op when a resize only grew the box and nothing was
+orphaned.
+
+Verified: 4 new unit tests (detaches a child that no longer fits without moving it; leaves one
+that still fits nested, a true no-op by reference equality; detaches every orphaned child in
+one resize, not just one; no-ops for an unknown board/category). Full suite green (395/395),
+typecheck clean, production build clean, boot-tested.

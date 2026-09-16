@@ -16,7 +16,8 @@ import {
   createCategory,
   isCategoryMember,
   reconcileSoleCategoryMembership,
-  removeMemberByRefType
+  removeMemberByRefType,
+  reparentCategory
 } from './categoryOps'
 import type { BoardCluster, BoardItem, BoardRecord, CategoryKind, CategoryRecord, ClusterLink, ProjectData } from './types'
 
@@ -1275,6 +1276,51 @@ export function renestClustersCleanly(
     next = growAncestorClustersToFit(next, boardId, childId)
   }
 
+  return next
+}
+
+/**
+ * Detaches (un-nests) any direct child of `categoryId` that no longer
+ * fits inside its own box — call after resizing a cluster *smaller*, so a
+ * child it used to fully enclose but doesn't anymore gets its
+ * relationship updated to match, rather than staying nested-in-data-only.
+ *
+ * Shrinking a cluster so an existing child now pokes outside it is a
+ * deliberate "this doesn't belong in here anymore" gesture — same intent
+ * as dragging that child out by hand. Leaving the stale parentCategoryId
+ * standing doesn't just misrepresent the relationship: it's also exactly
+ * when getStructuralNestingEdges starts drawing a connector line in place
+ * of the spatial containment that's no longer true, appearing as a "stray
+ * arrow" out of nowhere for a resize the user never touched that cluster
+ * *directly* for. Doesn't move the detached child at all (it's already
+ * sitting right where it visually is, outside the shrunk box now) — only
+ * the parent relationship changes. Stabilizes whatever group each
+ * detached child rejoins (another cluster's children, or the board's own
+ * root level), same as any other parent change.
+ */
+export function detachOrphanedChildren(data: ProjectData, boardId: string, categoryId: string): ProjectData {
+  const board = data.boards.find((b) => b.id === boardId)
+  if (!board) return data
+
+  const explicitClusters = data.boardClusters.filter((c) => c.boardId === boardId)
+  const visibleByCategoryId = new Map(
+    getVisibleBoardClusters(board, explicitClusters, data.categories).map((c) => [c.categoryId, c])
+  )
+  const parentBox = visibleByCategoryId.get(categoryId)
+  if (!parentBox) return data
+
+  const orphaned = data.categories.filter((c) => {
+    if (c.parentCategoryId !== categoryId) return false
+    const childBox = visibleByCategoryId.get(c.id)
+    return childBox ? !clusterRectContains(parentBox, childBox) : false
+  })
+  if (orphaned.length === 0) return data
+
+  let next = data
+  for (const child of orphaned) {
+    next = reparentCategory(next, child.id, null)
+    next = materializeSiblingClusters(next, boardId, child.id)
+  }
   return next
 }
 

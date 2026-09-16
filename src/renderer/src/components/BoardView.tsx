@@ -145,6 +145,7 @@ function BoardView(): JSX.Element {
   const resizeCluster = useProjectStore((s) => s.resizeCluster)
   const materializeSiblingClusters = useProjectStore((s) => s.materializeSiblingClusters)
   const renestClustersCleanly = useProjectStore((s) => s.renestClustersCleanly)
+  const detachOrphanedChildren = useProjectStore((s) => s.detachOrphanedChildren)
   const growClusterToFitOwnMembers = useProjectStore((s) => s.growClusterToFitOwnMembers)
   const growAncestorClustersToFit = useProjectStore((s) => s.growAncestorClustersToFit)
   const reassignRefCategoryMembership = useProjectStore((s) => s.reassignRefCategoryMembership)
@@ -763,6 +764,15 @@ function BoardView(): JSX.Element {
                 newlyEnclosed.map((c) => c.categoryId)
               )
             }
+            // The reverse of the above: shrinking this cluster can leave
+            // one of its EXISTING children no longer fitting inside it.
+            // Leaving the stale parent link standing is exactly when
+            // getStructuralNestingEdges draws a connector line in place of
+            // the spatial containment that's no longer true — reported as
+            // a "stray arrow" appearing from a resize that only touched
+            // one cluster directly. A no-op when nothing's actually
+            // orphaned (e.g. this resize only grew the box).
+            if (selectedBoardId) detachOrphanedChildren(selectedBoardId, state.categoryId)
           }
 
           // A superordinate cluster used to stay frozen at whatever size

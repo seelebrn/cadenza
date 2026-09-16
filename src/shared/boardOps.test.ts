@@ -22,6 +22,7 @@ import {
   deleteBoard,
   deleteCluster,
   describeBoardItem,
+  detachOrphanedChildren,
   findAlignmentSnap,
   findClusterAtPoint,
   findClusterForCategoryOnBoard,
@@ -1003,6 +1004,155 @@ describe('renestClustersCleanly', () => {
 
     const alreadyAfter = next.boardClusters.find((cl) => cl.categoryId === 'already')!
     expect(alreadyAfter).toEqual(alreadyExplicit)
+  })
+})
+
+describe('detachOrphanedChildren', () => {
+  // Regression: shrinking a cluster used to leave a child it no longer
+  // encloses still nested in the data model (parentCategoryId untouched)
+  // — the exact condition getStructuralNestingEdges draws a connector
+  // line for, appearing as a "stray arrow" for a resize the user only
+  // did to one cluster directly.
+  it('un-nests a child that no longer fits after its parent shrinks', () => {
+    const parent = makeCategory('super')
+    const child = makeCategory('child', { parentCategoryId: 'super' })
+    const shrunkParent: BoardCluster = {
+      id: 'realSuper',
+      boardId: 'board1',
+      categoryId: 'super',
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 250,
+      createdAt: '0'
+    }
+    // The child sits well outside the parent's new, shrunk box.
+    const childOutside: BoardCluster = {
+      id: 'realChild',
+      boardId: 'board1',
+      categoryId: 'child',
+      x: 900,
+      y: 900,
+      width: 280,
+      height: 200,
+      createdAt: '0'
+    }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, child],
+      boardClusters: [shrunkParent, childOutside]
+    })
+
+    const next = detachOrphanedChildren(data, 'board1', 'super')
+
+    expect(next.categories.find((c) => c.id === 'child')!.parentCategoryId).toBeNull()
+    // Not moved — still sitting exactly where it visually was.
+    const childAfter = next.boardClusters.find((c) => c.categoryId === 'child')!
+    expect(childAfter.x).toBe(900)
+    expect(childAfter.y).toBe(900)
+  })
+
+  it('leaves a child that still fits nested', () => {
+    const parent = makeCategory('super')
+    const child = makeCategory('child', { parentCategoryId: 'super' })
+    const bigParent: BoardCluster = {
+      id: 'realSuper',
+      boardId: 'board1',
+      categoryId: 'super',
+      x: 0,
+      y: 0,
+      width: 2000,
+      height: 2000,
+      createdAt: '0'
+    }
+    const childInside: BoardCluster = {
+      id: 'realChild',
+      boardId: 'board1',
+      categoryId: 'child',
+      x: 50,
+      y: 50,
+      width: 280,
+      height: 200,
+      createdAt: '0'
+    }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, child],
+      boardClusters: [bigParent, childInside]
+    })
+
+    const next = detachOrphanedChildren(data, 'board1', 'super')
+
+    expect(next.categories.find((c) => c.id === 'child')!.parentCategoryId).toBe('super')
+    expect(next).toBe(data) // true no-op — same reference
+  })
+
+  it('detaches every orphaned child, not just one', () => {
+    const parent = makeCategory('super')
+    const staying = makeCategory('staying', { parentCategoryId: 'super' })
+    const orphan1 = makeCategory('orphan1', { parentCategoryId: 'super' })
+    const orphan2 = makeCategory('orphan2', { parentCategoryId: 'super' })
+    const shrunkParent: BoardCluster = {
+      id: 'realSuper',
+      boardId: 'board1',
+      categoryId: 'super',
+      x: 0,
+      y: 0,
+      width: 320,
+      height: 260,
+      createdAt: '0'
+    }
+    const stayingInside: BoardCluster = {
+      id: 'realStaying',
+      boardId: 'board1',
+      categoryId: 'staying',
+      x: 20,
+      y: 40,
+      width: 280,
+      height: 200,
+      createdAt: '0'
+    }
+    const orphan1Box: BoardCluster = {
+      id: 'realOrphan1',
+      boardId: 'board1',
+      categoryId: 'orphan1',
+      x: 900,
+      y: 900,
+      width: 280,
+      height: 200,
+      createdAt: '0'
+    }
+    const orphan2Box: BoardCluster = {
+      id: 'realOrphan2',
+      boardId: 'board1',
+      categoryId: 'orphan2',
+      x: -900,
+      y: -900,
+      width: 280,
+      height: 200,
+      createdAt: '0'
+    }
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent, staying, orphan1, orphan2],
+      boardClusters: [shrunkParent, stayingInside, orphan1Box, orphan2Box]
+    })
+
+    const next = detachOrphanedChildren(data, 'board1', 'super')
+
+    expect(next.categories.find((c) => c.id === 'staying')!.parentCategoryId).toBe('super')
+    expect(next.categories.find((c) => c.id === 'orphan1')!.parentCategoryId).toBeNull()
+    expect(next.categories.find((c) => c.id === 'orphan2')!.parentCategoryId).toBeNull()
+  })
+
+  it('is a no-op for an unknown board or category', () => {
+    const parent = makeCategory('super')
+    const data = makeData({
+      boards: [{ id: 'board1', name: 'Main', isDefault: true }],
+      categories: [parent]
+    })
+    expect(detachOrphanedChildren(data, 'nope', 'super')).toBe(data)
+    expect(detachOrphanedChildren(data, 'board1', 'nope')).toBe(data)
   })
 })
 

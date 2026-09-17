@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { getVisibleBoardClusters } from './boardOps'
 import { normalizeProjectData } from './normalizeProject'
 import type { ProjectData } from './types'
 
@@ -134,7 +135,7 @@ describe('normalizeProjectData', () => {
           boardItems: []
         })
       )
-      expect(next.boardClusters).toEqual([{ id: 'bc1', boardId: 'b1', categoryId: 'cat1', x: 1, y: 2, width: 3, height: 4, createdAt: '0' }])
+      expect(next.boardClusters.filter((c) => c.boardId === 'b1')).toEqual([{ id: 'bc1', boardId: 'b1', categoryId: 'cat1', x: 1, y: 2, width: 3, height: 4, createdAt: '0' }])
       expect(next.categories).toHaveLength(1) // no extra migrated category created
     })
 
@@ -157,9 +158,10 @@ describe('normalizeProjectData', () => {
       expect(migrated.noteIds).toEqual(['note1'])
 
       // The board cluster shape survives too, now pointing at the derived category.
-      expect(next.boardClusters).toHaveLength(1)
-      expect(next.boardClusters[0]).toMatchObject({ id: 'legacyCluster1', x: 10, y: 20, width: 280, height: 200 })
-      expect(next.boardClusters[0].categoryId).toBe(migrated.id)
+      const onB1 = next.boardClusters.filter((c) => c.boardId === 'b1')
+      expect(onB1).toHaveLength(1)
+      expect(onB1[0]).toMatchObject({ id: 'legacyCluster1', x: 10, y: 20, width: 280, height: 200 })
+      expect(onB1[0].categoryId).toBe(migrated.id)
 
       // clusterId is stripped from board items (no longer part of the
       // current BoardItem shape) without losing anything else about them.
@@ -202,7 +204,7 @@ describe('normalizeProjectData', () => {
           boardItems: []
         })
       )
-      expect(next.boardClusters).toHaveLength(2)
+      expect(next.boardClusters.filter((c) => c.boardId === 'b1')).toHaveLength(2)
       expect(next.categories).toHaveLength(2) // the existing one + the newly-migrated one
       expect(next.categories.map((c) => c.name).sort()).toEqual(['Existing', 'Legacy'])
     })
@@ -213,5 +215,59 @@ describe('normalizeProjectData', () => {
       expect(next.boardClusters).toEqual([])
       expect(next.boardItems).toEqual([])
     })
+  })
+})
+
+describe('normalizeProjectData — board robustness on load', () => {
+  const board = { id: 'main', name: 'Main', isDefault: true }
+  function category(id: string, parentCategoryId: string | null = null, codeIds: string[] = []): unknown {
+    return { id, kind: 'theme', name: id, color: '#fff', definition: '', codeIds, noteIds: [], segmentIds: [], parentCategoryId, createdAt: '0' }
+  }
+
+  // Only a damaged file can nest a cluster inside itself; it used to make
+  // those clusters silently disappear from the board.
+  it('breaks nesting cycles so every cluster is drawn', () => {
+    const next = normalizeProjectData(
+      rawData({ boards: [board], categories: [category('A', 'B'), category('B', 'A'), category('S', 'S'), category('OK')] })
+    )
+    const drawn = getVisibleBoardClusters(board, next.boardClusters, next.categories).map((c) => c.categoryId).sort()
+    expect(drawn).toEqual(['A', 'B', 'OK', 'S'])
+    // Only the cycle is cut: one of A/B stays nested under the other.
+    expect(next.categories.filter((c) => c.parentCategoryId).length).toBe(1)
+  })
+
+  // Duplicates made a drag move one copy while the board drew the other.
+  it('keeps one stored shape per cluster per board (the one that was drawn)', () => {
+    const next = normalizeProjectData(
+      rawData({
+        boards: [board],
+        categories: [category('A')],
+        boardClusters: [
+          { id: 'first', boardId: 'main', categoryId: 'A', x: 100, y: 100, width: 300, height: 200, createdAt: '0' },
+          { id: 'second', boardId: 'main', categoryId: 'A', x: 900, y: 900, width: 300, height: 200, createdAt: '0' }
+        ],
+        boardItems: [
+          { id: 'i1', boardId: 'main', refType: 'code', refId: 'c', x: 0, y: 0 },
+          { id: 'i2', boardId: 'main', refType: 'code', refId: 'c', x: 50, y: 50 }
+        ]
+      })
+    )
+    expect(next.boardClusters.map((c) => c.id)).toEqual(['second'])
+    expect(next.boardItems.map((i) => i.id)).toEqual(['i2'])
+  })
+
+  // Never-touched top-level clusters used to be packed together live, so the
+  // first one to grow or be touched made the rest jump.
+  it('pins never-touched top-level clusters on the default board, without moving anything', () => {
+    const categories = [category('A', null, ['a', 'b', 'c', 'd', 'e']), category('B'), category('C', null, ['f']), category('D', 'A')]
+    const raw = rawData({ boards: [board], categories })
+    const shownBefore = getVisibleBoardClusters(board, [], raw.categories)
+    const next = normalizeProjectData(raw)
+    expect(next.boardClusters.map((c) => c.categoryId).sort()).toEqual(['A', 'B', 'C'])
+    const shownAfter = getVisibleBoardClusters(board, next.boardClusters, next.categories)
+    for (const b of shownBefore) {
+      const a = shownAfter.find((c) => c.categoryId === b.categoryId)!
+      expect({ x: a.x, y: a.y, width: a.width, height: a.height }).toEqual({ x: b.x, y: b.y, width: b.width, height: b.height })
+    }
   })
 })

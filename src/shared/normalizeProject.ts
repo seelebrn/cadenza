@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { getDefaultBoardId, materializeChildClusters } from './boardOps'
 import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ProjectData } from './types'
 
 /**
@@ -130,19 +131,63 @@ export function normalizeProjectData(raw: ProjectData): ProjectData {
   // from the roots, so it would simply never be drawn, with no error.
   // Treat it as top-level instead.
   const categoryIds = new Set(categories.map((c) => c.id))
-  const withResolvedParents = categories.map((c) =>
-    c.parentCategoryId && !categoryIds.has(c.parentCategoryId) ? { ...c, parentCategoryId: null } : c
+  const withResolvedParents = breakParentCycles(
+    categories.map((c) =>
+      c.parentCategoryId && !categoryIds.has(c.parentCategoryId) ? { ...c, parentCategoryId: null } : c
+    )
   )
 
-  return {
+  const boards = ensureDefaultBoard(raw.boards ?? [])
+  const normalized: ProjectData = {
     ...raw,
     noteCategories: raw.noteCategories ?? [],
     notes: raw.notes.map((n) => (n.noteCategoryId === undefined ? { ...n, noteCategoryId: null } : n)),
     categories: withResolvedParents,
-    boards: ensureDefaultBoard(raw.boards ?? []),
-    boardItems,
-    boardClusters,
+    boards,
+    boardItems: keepLastPer(boardItems, (i) => `${i.boardId}|${i.refType}|${i.refId}`),
+    boardClusters: keepLastPer(boardClusters, (c) => `${c.boardId}|${c.categoryId}`),
     boardLinks: raw.boardLinks ?? [],
     clusterLinks: raw.clusterLinks ?? []
   }
+
+  // Top-level clusters with no stored position are auto-packed together,
+  // each one's spot depending on every other's size — so the first time
+  // one of them changes size or gets touched, the rest repack and jump.
+  // Pinning them where they're shown right now changes nothing on screen
+  // and makes any later change local: only a cluster something actually
+  // runs into moves.
+  const defaultBoardId = getDefaultBoardId(boards)
+  return defaultBoardId ? materializeChildClusters(normalized, defaultBoardId, null) : normalized
+}
+
+/** A category that is its own ancestor (a cycle, possibly of length one)
+ * is reachable from no top-level category, and the board's layout walks
+ * down from those — it would silently never be drawn. Only a damaged
+ * file can contain one; cut each cycle at the first category found on it,
+ * making that one top-level. */
+function breakParentCycles(categories: CategoryRecord[]): CategoryRecord[] {
+  const byId = new Map(categories.map((c) => [c.id, c]))
+  for (const start of categories) {
+    const seen = new Set<string>()
+    let current = byId.get(start.id)
+    while (current?.parentCategoryId) {
+      if (seen.has(current.id)) {
+        byId.set(current.id, { ...current, parentCategoryId: null })
+        break
+      }
+      seen.add(current.id)
+      current = byId.get(current.parentCategoryId)
+    }
+  }
+  return categories.map((c) => byId.get(c.id)!)
+}
+
+/** Only one stored shape per cluster per board (and one stored card per
+ * ref per board) can be meaningful — duplicates, possible in older files,
+ * made a drag act on one copy while the board drew the other, so the drag
+ * appeared to do nothing. Keeps the last, which is the one drawn. */
+function keepLastPer<T>(list: T[], key: (item: T) => string): T[] {
+  const lastIndex = new Map<string, number>()
+  list.forEach((item, index) => lastIndex.set(key(item), index))
+  return list.filter((item, index) => lastIndex.get(key(item)) === index)
 }

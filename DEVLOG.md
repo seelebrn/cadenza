@@ -3193,6 +3193,7 @@ targeting lands on a child; the same center with the pointer on the superordinat
 targets the superordinate; after nesting it, all five children are inside and non-overlapping), a
 nested cluster's header targets the nested cluster, center fallback and empty space, and the
 header band widening with `headerReach`. Three confirmed to fail with the header rule toggled off.
+Full suite green (441/441), typecheck clean, production build clean, boot-tested.
 
 ### A click after "Reset placement" made neighbors jump (2026-09-16)
 
@@ -3240,4 +3241,53 @@ shape or the top level can change size:
   where nothing is auto-placed.
 
 Full suite green (446/446), typecheck clean, production build clean, boot-tested.
-Full suite green (441/441), typecheck clean, production build clean, boot-tested.
+
+### Creative stress pass: probes for stability, locality, damaged data and scale (2026-09-17)
+
+"I can't find any more issues with the board logic. Could you run a few tests on your side, be
+creative, to make sure it's ok?"
+
+Wrote a throwaway probe suite aimed at what the existing tests and fuzz don't check — not "is the
+picture valid" but "does the picture stay put when it should," plus inputs no UI path produces:
+
+- **P2 — changes that must change nothing on screen**, on 15 scrambled boards (random moves and
+  resizes after a reset): pinning the top level; `ensureClusterShape` for every single cluster;
+  a save/reload round-trip (JSON + `normalizeProjectData`); resetting twice vs once. All clean.
+- **P5 — merging two codes filed in different clusters.** The merged code ends up in both (by
+  design: membership is many-to-many in the Workspace; the board homes it in the first); drawn
+  once, nothing overlaps, no stray edge. Fine.
+- **P6 — scale**: 415 clusters (300 top-level, nested sub-clusters), 2026 codes. A full render
+  (clusters + cards) and a move commit (pin, move, overlap push) both run in tens of
+  milliseconds. Fine for the 200-item projects in actual use, with a wide margin.
+
+Three real findings:
+
+- **P1 — growth after a reset repacked the whole top level.** After "Reset placement", no
+  top-level cluster has a stored position; they're packed together live, each spot depending on
+  every other cluster's size. Dropping cards into one made it grow, and everything packed after it
+  repacked: across 20 random reset boards, dropping six cards into one cluster moved up to 14 of
+  the other 15, with 184 sideways column jumps in total. The previous entry fixed the *click*
+  version of this at the one place it happened; this is the same cause reached through a size
+  change instead, which can come from many places (a board drop, the Workspace tree, deleting or
+  merging a code). So it's fixed at the source rather than at each path: the top level simply
+  never stays auto-placed. The store's `resetBoardLayout` pins it immediately after the reset
+  (which, as P2 shows, moves nothing), and `normalizeProjectData` pins it when a project is
+  opened, covering projects whose clusters were never touched. With that, the same measurement:
+  at most 8 others moved, and **every** one had been run into by the grown cluster or by a cluster
+  it pushed (largest shift 188px). Kept as two permanent tests: the unpinned repacking (so the
+  mechanism stays documented) and the pinned locality property over 20 seeds.
+- **P3 — a cluster nested inside itself vanished.** A cycle (A in B in A) or a self-parent is
+  reachable from no top-level cluster, and layout walks down from those, so the clusters were just
+  never drawn. The UI can't create one (`reparentCategory` refuses), but a damaged file can, and
+  silently vanishing is the worst way for that to fail. `normalizeProjectData` now cuts each cycle
+  at one point (that cluster becomes top-level; the rest of the chain keeps its nesting).
+- **P4 — duplicate stored shapes made a drag do nothing.** With two stored shapes for one cluster
+  (possible in older files), the board drew the last one but a drag moved the first. Load now
+  keeps one stored shape per cluster per board — and one stored card per ref per board, for the
+  same reason — keeping the one that was drawn.
+
+Tests: the three normalize migration tests counted stored shapes across every board; with no
+boards in their fixtures, load creates a default board and now pins there, so they're scoped to
+the fixture's own board (what they were actually checking). New: cycle breaking, duplicate
+removal, load-time pinning moves nothing, and the two locality tests. The probe file itself is
+deleted. Full suite green (451/451), typecheck clean, production build clean, boot-tested.

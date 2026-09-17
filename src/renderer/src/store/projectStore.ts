@@ -919,7 +919,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const board = data?.boards.find((b) => b.id === boardId)
     if (!data || !board) return
     if (board.isDefault) {
-      get().updateProject((current) => resetDefaultBoardClusterLayoutOp(current, boardId))
+      // Auto-place everything, then immediately pin the top level where it
+      // landed: left unpinned, the first cluster that grows, shrinks or is
+      // touched makes every auto-placed one repack around it.
+      get().updateProject((current) =>
+        materializeChildClustersOp(resetDefaultBoardClusterLayoutOp(current, boardId), boardId, null)
+      )
       return
     }
     const clusters = data.boardClusters.filter((c) => c.boardId === boardId)

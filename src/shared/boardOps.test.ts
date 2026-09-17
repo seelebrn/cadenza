@@ -3714,3 +3714,71 @@ describe('adding a top-level cluster after a reset', () => {
     for (const id of before.keys()) expect(rectsOverlap(fresh, after.get(id)!)).toBe(false)
   })
 })
+
+describe('growth after a reset stays local once the top level is pinned', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  function rng(seed: number): () => number {
+    let s = seed >>> 0
+    return () => ((s = (Math.imul(s ^ (s >>> 15), 1 | s) + 0x6d2b79f5) >>> 0) / 4294967296)
+  }
+  function resetBoard(seed: number): ProjectData {
+    const r = rng(seed)
+    const categories: CategoryRecord[] = []
+    const codes: CodeNode[] = []
+    let k = 0
+    for (let i = 0; i < 16; i++) {
+      const ids = Array.from({ length: Math.floor(r() * 8) }, () => `k${k++}`)
+      ids.forEach((id) => codes.push(makeCode(id)))
+      categories.push(makeCategory(`R${i}`, { codeIds: ids }))
+    }
+    return resetDefaultBoardClusterLayout(makeData({ boards: [board], categories, codes }), 'b1')
+  }
+  function shown(d: ProjectData): Map<string, BoardCluster> {
+    return new Map(getVisibleBoardClusters(board, d.boardClusters, d.categories).map((c) => [c.categoryId, c]))
+  }
+  function dropSixCards(d: ProjectData, target: string): ProjectData {
+    let next = d
+    for (const c of d.codes.slice(-6)) next = reassignRefCategoryMembership(next, 'b1', 'code', c.id, target)
+    return growClusterToFitOwnMembers(next, 'b1', target)
+  }
+
+  // Measured when this was found: across 20 reset boards, dropping six
+  // cards into one top-level cluster moved up to 14 of the 15 others, with
+  // 184 sideways column jumps in total — the whole top level repacking.
+  it('left auto-placed, a cluster growing repacks the rest of the top level', () => {
+    let sideways = 0
+    for (let seed = 1; seed <= 20; seed++) {
+      const d = resetBoard(seed)
+      const before = shown(d)
+      const after = shown(dropSixCards(d, 'R5'))
+      for (const [id, b] of before) if (id !== 'R5' && after.get(id)!.x !== b.x) sideways++
+    }
+    expect(sideways).toBeGreaterThan(0)
+  })
+
+  // What "Reset placement" now does (the store pins right after resetting,
+  // and loading a project pins too): the only clusters that move are ones
+  // the grown cluster — or a cluster it pushed — actually ran into.
+  it('pinned, only clusters actually run into move', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const d = materializeChildClusters(resetBoard(seed), 'b1', null)
+      const before = shown(d)
+      const after = shown(dropSixCards(d, 'R5'))
+      const moved = [...before.keys()].filter(
+        (id) => id !== 'R5' && (after.get(id)!.x !== before.get(id)!.x || after.get(id)!.y !== before.get(id)!.y)
+      )
+      const pushers = [after.get('R5')!, ...moved.map((id) => after.get(id)!)]
+      for (const id of moved) {
+        const old = before.get(id)!
+        expect(
+          pushers.some((p) => p.categoryId !== id && rectsOverlap(old, p)),
+          `seed ${seed}: ${id} moved without having been run into`
+        ).toBe(true)
+      }
+      const roots = [...after.values()]
+      for (let i = 0; i < roots.length; i++) {
+        for (let j = i + 1; j < roots.length; j++) expect(rectsOverlap(roots[i], roots[j])).toBe(false)
+      }
+    }
+  })
+})

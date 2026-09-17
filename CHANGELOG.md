@@ -6,6 +6,16 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Fixed
+- After "Reset placement" (or in a project whose clusters had never been moved), a cluster growing
+  or shrinking — a card dropped in or taken out — rearranged the whole top level, sometimes
+  sending clusters into other columns. Now only a cluster it actually runs into moves, and just
+  far enough to make room.
+- A cluster nested inside itself (only possible in a damaged project file) silently vanished from
+  the board. It's now shown, with the loop cut.
+- In some older project files, dragging a cluster did nothing visible (the project held two stored
+  positions for it). Duplicates are cleaned up when the project is opened.
+
 ## [0.4.6] - 2026-09-16
 
 ### Added

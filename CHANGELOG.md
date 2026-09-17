@@ -6,6 +6,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Fixed
+- Shift-dragging a code onto another to link them could make a *third* code appear in the spot
+  you dropped onto, looking like the one that got linked. Linked codes are now placed around the
+  code you aimed at: it keeps its place and the dragged code sits right next to it. While
+  Shift-dragging, the code the drop will link to is now highlighted too.
+
 ### Added
 - **Full-text search** (Analysis → Search): find every occurrence of a word or phrase across all
   documents, shown in context and grouped by document, with the codes already on each passage.

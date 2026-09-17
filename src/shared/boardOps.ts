@@ -836,33 +836,62 @@ export function getVisibleBoardItems(
   }
 
   // Each member's slot within its home cluster's grid: codebook order
-  // (project-wide code order, then note order), except that a member's
-  // linked partners in the same cluster take the slots right after it, so
-  // a linked pair still reads as a pair inside the grid. Assigned once up
-  // front for every member (explicit ones included — on the default board
-  // a clustered card always sits at its slot; see placeRef), so a member's
-  // slot never depends on which of its siblings happen to have been
-  // touched.
+  // (project-wide code order, then note order), except that cards linked
+  // together in the same cluster take consecutive slots, so a linked pair
+  // still reads as a pair inside the grid. Assigned once up front for every
+  // member (explicit ones included — on the default board a clustered card
+  // always sits at its slot; see placeRef), so a member's slot never
+  // depends on which of its siblings happen to have been touched.
+  //
+  // A linked group sits where its *anchor* would: the card that was aimed
+  // at. A link records the dragged card as itemA and the card it was
+  // dropped on as itemB, so the anchor is a member that's only ever a
+  // target within the group (earliest in codebook order if several, or if
+  // a cycle leaves none). The rest follow it, breadth-first. Anchoring on
+  // the codebook-earliest member instead pulled the target back to wherever
+  // the dragged card used to be, whenever the dragged card came first —
+  // shifting every card in between, so a third card slid into the very
+  // spot the user had dropped onto and looked like the one linked.
   const refByItemId = new Map(explicitItems.map((i) => [i.id, `${i.refType}:${i.refId}`]))
   const linkedRefsByRef = new Map<string, string[]>()
+  const sourceRefs = new Set<string>()
   for (const link of links) {
     const a = refByItemId.get(link.itemAId)
     const b = refByItemId.get(link.itemBId)
-    if (!a || !b) continue
+    if (!a || !b || a === b) continue
     linkedRefsByRef.set(a, [...(linkedRefsByRef.get(a) ?? []), b])
     linkedRefsByRef.set(b, [...(linkedRefsByRef.get(b) ?? []), a])
+    if (homeClusterByRef.get(a) === homeClusterByRef.get(b)) sourceRefs.add(a)
   }
   const orderedRefs = [...codes.map((c) => `code:${c.id}`), ...notes.map((n) => `note:${n.id}`)]
   const rankByRef = new Map(orderedRefs.map((key, index) => [key, index]))
+  const byRank = (a: string, b: string): number => (rankByRef.get(a) ?? 0) - (rankByRef.get(b) ?? 0)
+
+  // Linked groups within one cluster, each with its anchor.
+  const anchorByRef = new Map<string, string>()
+  for (const key of orderedRefs) {
+    const cluster = homeClusterByRef.get(key)
+    if (!cluster || anchorByRef.has(key)) continue
+    const group = [key]
+    const inGroup = new Set(group)
+    for (let i = 0; i < group.length; i++) {
+      for (const partner of linkedRefsByRef.get(group[i]) ?? []) {
+        if (homeClusterByRef.get(partner) !== cluster || inGroup.has(partner)) continue
+        inGroup.add(partner)
+        group.push(partner)
+      }
+    }
+    group.sort(byRank)
+    const anchor = group.find((ref) => !sourceRefs.has(ref)) ?? group[0]
+    for (const ref of group) anchorByRef.set(ref, anchor)
+  }
 
   const memberSlotByRef = new Map<string, number>()
   const slotCounterByCluster = new Map<string, number>()
   for (const key of orderedRefs) {
     const cluster = homeClusterByRef.get(key)
-    if (!cluster || memberSlotByRef.has(key)) continue
-    // This member, then everything transitively linked to it within the
-    // same cluster (breadth-first, partners in codebook order), as one run
-    // of consecutive slots.
+    // A non-anchor member is placed with its group, when its anchor comes up.
+    if (!cluster || memberSlotByRef.has(key) || anchorByRef.get(key) !== key) continue
     const seen = new Set([key])
     const queue = [key]
     while (queue.length > 0) {
@@ -872,7 +901,7 @@ export function getVisibleBoardItems(
       slotCounterByCluster.set(cluster.id, slot + 1)
       const partners = (linkedRefsByRef.get(current) ?? [])
         .filter((p) => homeClusterByRef.get(p) === cluster && !seen.has(p))
-        .sort((a, b) => (rankByRef.get(a) ?? 0) - (rankByRef.get(b) ?? 0))
+        .sort(byRank)
       for (const partner of partners) {
         seen.add(partner)
         queue.push(partner)

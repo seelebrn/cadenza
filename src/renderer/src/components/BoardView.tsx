@@ -888,6 +888,11 @@ function BoardView(): JSX.Element {
       let adjustX = 0
       let adjustY = 0
       let isGrabbedSnapping = false
+      // The card the drop would link to gets the same ring as the card being
+      // held, so it's clear *which* neighbor a Shift-drop will link with
+      // before releasing — with cards packed in a grid, the nearest one
+      // isn't always the one the user is looking at.
+      let snapTargetId: string | null = null
       if (grabbedStart && liveDelta.shiftKey && Math.hypot(liveDelta.dx, liveDelta.dy) >= MIN_DRAG_DISTANCE_FOR_SNAP) {
         const rawX = grabbedStart.x + liveDelta.dx
         const rawY = grabbedStart.y + liveDelta.dy
@@ -897,6 +902,7 @@ function BoardView(): JSX.Element {
           adjustX = snap.snappedX - rawX
           adjustY = snap.snappedY - rawY
           isGrabbedSnapping = true
+          snapTargetId = snap.targetId
         }
       }
       for (const item of items) {
@@ -908,7 +914,7 @@ function BoardView(): JSX.Element {
             isSnapping: item.id === dragState.id && isGrabbedSnapping
           })
         } else {
-          map.set(item.id, { x: item.x, y: item.y, isSnapping: false })
+          map.set(item.id, { x: item.x, y: item.y, isSnapping: item.id === snapTargetId })
         }
       }
     } else if (dragState?.kind === 'cluster-move') {

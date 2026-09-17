@@ -3029,11 +3029,13 @@ describe('clustered cards always sit on their cluster grid', () => {
     const clusters = getVisibleBoardClusters(board, [], data.categories)
     const visible = getVisibleBoardItems(board, items, data.codes, data.notes, data.categories, clusters, data.boardLinks)
     const byRef = (refId: string) => visible.find((i) => i.refId === refId)!
-    // 4 members -> 2 columns: slots 0,1 on row 0; 2,3 on row 1. c1 takes
-    // slot 0, its partner c4 slot 1 (same row, right next to it), then c2, c3.
-    expect(byRef('c4').y).toBe(byRef('c1').y)
-    expect(byRef('c4').x).toBeGreaterThan(byRef('c1').x)
-    expect(byRef('c2').y).toBeGreaterThan(byRef('c1').y)
+    // The link is c1 (dragged) → c4 (aimed at), so c4 anchors the pair and
+    // c1 follows it. 4 members -> 2 columns: c2 slot 0, c3 slot 1 (row 0),
+    // c4 slot 2 and c1 slot 3 (row 1) — c1 lands in c4's old spot, right
+    // where it was dropped, rather than c4 being pulled back beside c1.
+    expect(byRef('c1').y).toBe(byRef('c4').y)
+    expect(byRef('c1').x).toBeGreaterThan(byRef('c4').x)
+    expect(byRef('c2').y).toBeLessThan(byRef('c4').y)
   })
 
   it("shows an explicit box no smaller than its own card grid, so cards can't hang out of it", () => {
@@ -3780,5 +3782,72 @@ describe('growth after a reset stays local once the top level is pinned', () => 
         for (let j = i + 1; j < roots.length; j++) expect(rectsOverlap(roots[i], roots[j])).toBe(false)
       }
     }
+  })
+})
+
+describe('linking cards keeps the aimed-at spot', () => {
+  const board = { id: 'b1', name: 'Main', isDefault: true }
+  const ids = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
+
+  function layout(
+    categories: CategoryRecord[],
+    codeIds: string[],
+    links: Array<{ itemAId: string; itemBId: string }>
+  ): Map<string, { x: number; y: number }> {
+    const explicit: BoardItem[] = codeIds.map((id) => ({ id: `item-${id}`, boardId: 'b1', refType: 'code', refId: id, x: 0, y: 0 }))
+    const clusters = getVisibleBoardClusters(board, [], categories)
+    const items = getVisibleBoardItems(board, explicit, codeIds.map(makeCode), [], categories, clusters, links)
+    return new Map(items.map((i) => [i.refId, { x: i.x, y: i.y }]))
+  }
+  const same = (a: { x: number; y: number }, b: { x: number; y: number }): boolean => a.x === b.x && a.y === b.y
+
+  // Reported: "I drag 1 next to 2 to link them (holding Shift). On release,
+  // another code, 3, takes the place of 2 and is instantly linked with 1."
+  // The link was right; the grid put the linked pair at the *earlier* card's
+  // codebook position, so when the dragged card came first, the target was
+  // pulled back beside it and a third card slid into the spot aimed at.
+  it('within one cluster: after linking dragged → target, the target’s old spot holds the target or the dragged card, never a third card', () => {
+    const categories = [makeCategory('A', { codeIds: ids })]
+    const before = layout(categories, ids, [])
+    for (const dragged of ids) {
+      for (const target of ids) {
+        if (dragged === target) continue
+        const after = layout(categories, ids, [{ itemAId: `item-${dragged}`, itemBId: `item-${target}` }])
+        const atTargetSpot = ids.filter((id) => same(after.get(id)!, before.get(target)!))
+        expect(atTargetSpot, `${dragged} → ${target}`).toHaveLength(1)
+        expect([dragged, target], `${dragged} → ${target}: ${atTargetSpot[0]} took the spot`).toContain(atTargetSpot[0])
+        // And the pair really is side by side.
+        const slotOf = (id: string): number => [...after.values()].filter((p) => p.y < after.get(id)!.y || (p.y === after.get(id)!.y && p.x < after.get(id)!.x)).length
+        expect(Math.abs(slotOf(dragged) - slotOf(target)), `${dragged} → ${target} adjacent`).toBe(1)
+      }
+    }
+  })
+
+  it('dragged in from another cluster: the target and every card before it keep their spots', () => {
+    const inCluster = ['c2', 'c3', 'c4', 'c5', 'c6']
+    const categories = [makeCategory('A', { codeIds: inCluster })]
+    const before = layout(categories, ids, [])
+    for (const target of inCluster) {
+      // c1 (earliest in the codebook) joins the cluster and links to target.
+      const joined = [makeCategory('A', { codeIds: [...inCluster, 'c1'] })]
+      const after = layout(joined, ids, [{ itemAId: 'item-c1', itemBId: `item-${target}` }])
+      for (const id of inCluster.slice(0, inCluster.indexOf(target) + 1)) {
+        expect(same(after.get(id)!, before.get(id)!), `c1 → ${target}: ${id} moved`).toBe(true)
+      }
+    }
+  })
+
+  it('a chain keeps growing from the card first aimed at', () => {
+    const categories = [makeCategory('A', { codeIds: ids })]
+    const before = layout(categories, ids, [])
+    // c1 dropped on c5, then c2 dropped on c1: c5 stays the anchor.
+    const after = layout(categories, ids, [
+      { itemAId: 'item-c1', itemBId: 'item-c5' },
+      { itemAId: 'item-c2', itemBId: 'item-c1' }
+    ])
+    const order = [...ids].sort((a, b) => after.get(a)!.y - after.get(b)!.y || after.get(a)!.x - after.get(b)!.x)
+    expect(order.indexOf('c1')).toBe(order.indexOf('c5') + 1)
+    expect(order.indexOf('c2')).toBe(order.indexOf('c1') + 1)
+    expect(same(after.get('c6')!, before.get('c6')!)).toBe(true)
   })
 })

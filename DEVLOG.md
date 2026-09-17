@@ -3498,3 +3498,38 @@ a text representation, an audio source, an integer variable) with every selectio
 offset mapper on its own. Full suite green (493/493), typecheck clean, production build clean,
 boot-tested. Not yet tried against a real NVivo/MAXQDA export — worth doing with one if you have
 access to any; the format has tool-specific quirks the spec doesn't mention.
+
+### A third card appeared where a linked card was dropped (2026-09-17)
+
+"I dragged a code and held Shift to link it to another code. On a few occasions, dragging the
+code next to another led to ANOTHER code taking the place of the link destination. I drag 1 next
+to 2 to link them; on release, another code, 3, takes the place of 2 and is instantly linked
+with 1."
+
+The link itself was right. The grid was wrong about *where* to put a linked pair. Clustered cards
+sit in codebook order, with linked cards on consecutive slots, and the group was placed where its
+**codebook-earliest** member sat. Whenever the dragged card came before the target in the
+codebook (same cluster, or dragged in from another), the target was pulled back beside the
+dragged card's position, every card in between shifted, and a third card slid into the exact
+spot the user had dropped onto — reading as "3 took 2's place and got linked." Hence "on a few
+occasions": it depended only on codebook order.
+
+Fix, in `getVisibleBoardItems`: a linked group is anchored on the card that was **aimed at**. A
+link already records direction — the dragged card as `itemA`, the card dropped on as `itemB` — so
+the anchor is the group's member that's never a link source within the cluster (codebook-earliest
+if several, or if a cycle leaves none); the group takes consecutive slots where the anchor would
+be, anchor first, the rest breadth-first. So the aimed-at card keeps its slot and the dragged card
+lands right after it; if the dragged card came from earlier in the same cluster, the target moves
+back by exactly one slot and the dragged card lands in the target's old spot — where it was
+dropped. No third card ever takes it. A chain (1 onto 5, then 2 onto 1) keeps growing from 5.
+
+Separately, a Shift-drag only ringed the card being held; the card the drop would link to wasn't
+marked, and in a packed grid the nearest card isn't always the one being looked at. The snap
+target now gets the same ring during the drag.
+
+Verified: three new tests — every dragged/target pair in a six-card cluster (the target's old
+spot holds the target or the dragged card, never a third, and the pair is adjacent); a card
+dragged in from another cluster onto each target (the target and every card before it keep their
+spots); a chain keeps its anchor. All three failed before the fix (first case: dragging c1 onto
+c3 put c2 in c3's spot). One older test that encoded the codebook-earliest anchor was updated to
+the new rule. Full suite green (496/496), typecheck clean, production build clean, boot-tested.

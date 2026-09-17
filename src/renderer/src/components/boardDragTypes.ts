@@ -25,6 +25,12 @@ export type DragState =
       startMouseX: number
       startMouseY: number
       startPositions: Record<string, Position>
+      /** Where the pointer grabbed the card, relative to its top-left, in
+       * canvas units — the pointer's canvas position during the drag is the
+       * card's position plus this. A Shift-drop links to the card under the
+       * pointer (see findPointerSnapTarget). */
+      grabOffsetX: number
+      grabOffsetY: number
     }
   | {
       kind: 'cluster-move'

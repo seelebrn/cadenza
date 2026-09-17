@@ -3567,3 +3567,29 @@ target. All four failed on the previous version (the reported case first). The p
 tests, which encoded consecutive slots, were removed, and the older "consecutive slots" test was
 rewritten as a touching test. Full suite green (497/497), typecheck clean, production build
 clean, boot-tested.
+
+### Linking picks the card under the pointer (2026-09-17)
+
+"If I click and hold/drag 1 around, it can only connect to 3. If I want to connect it to 2 from
+the side, it's impossible. Could the mouse position near/on another code be used as a way to
+guess which code the user wants to connect?"
+
+Yes — and the cause was geometric. The snap target was the card whose *center* came within
+70px of the dragged card's center. Cards are 180×64 with an 8px grid gap, so a card's
+neighbor below has its center 72px away (just reachable by drifting a little) while its
+neighbor beside is 188px away: to link sideways, the dragged card had to sit almost entirely on
+top of the target. Vertical links worked, horizontal ones effectively never did.
+
+New `findPointerSnapTarget` (replacing `findSnapTarget`, now removed with its tests): the target
+is the card under the pointer, or the nearest card whose edge is within 16 screen pixels of it
+(so pointing into the gap between two cards still picks the closer one; divided by zoom to get
+canvas units). Which side of the target the dragged card snaps to follows where the pointer sits
+on it, measured relative to the card's own width and height — so on a wide card, "the left part"
+means left rather than being swamped by the vertical offset. The pointer's canvas position comes
+from the grab offset recorded at mousedown (same approach as cluster drags) plus the live drag
+delta. The live preview (ring on the target) and the commit use the same call.
+
+Verified: 4 new tests on a 2×2 grid of real card sizes — the cards beside, below and diagonal
+are each reachable by pointing at them; the side follows the pointer's position on the target;
+in a gap the nearer card wins and nothing is picked beyond reach; the dragged card is never its
+own target. Full suite green (497/497), typecheck clean, production build clean, boot-tested.

@@ -13,6 +13,9 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   at stays put and the dragged code swaps places with one of its neighbors, so the pair always
   ends up side by side or one above the other. While Shift-dragging, the code the drop will link
   to is now highlighted too.
+- Shift-dragging a code could link it to the code *below* but never to the one *beside* it. The
+  link target is now the code under the pointer (or right next to it), whichever direction it
+  is in; where the pointer sits on that code decides which side the dragged code snaps to.
 
 ### Added
 - **Full-text search** (Analysis → Search): find every occurrence of a word or phrase across all

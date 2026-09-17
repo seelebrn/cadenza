@@ -31,7 +31,7 @@ import {
   findClustersEnclosedBy,
   findDistributionSnap,
   findNestTarget,
-  findSnapTarget,
+  findPointerSnapTarget,
   forgetItemPositionIfUnclustered,
   getClusterMemberItems,
   getDefaultBoardId,
@@ -2017,41 +2017,6 @@ describe('linkItems / unlinkItems / getLinkedGroup', () => {
   })
 })
 
-// --- findSnapTarget ---------------------------------------------------
-
-describe('findSnapTarget', () => {
-  const CARD_WIDTH = 180
-  const CARD_HEIGHT = 64
-
-  it('returns null when nothing is within snap distance', () => {
-    const items = [{ id: 'other', x: 2000, y: 2000 }]
-    expect(findSnapTarget(items, 'dragged', 0, 0, CARD_WIDTH, CARD_HEIGHT, 70)).toBeNull()
-  })
-
-  it('ignores the dragged item itself as a snap candidate', () => {
-    const items = [{ id: 'dragged', x: 0, y: 0 }]
-    expect(findSnapTarget(items, 'dragged', 0, 0, CARD_WIDTH, CARD_HEIGHT, 70)).toBeNull()
-  })
-
-  it('snaps to the horizontal neighbor when closer horizontally, placing the dragged card edge-to-edge', () => {
-    const items = [{ id: 'target', x: 300, y: 0 }]
-    // Dragged card approaches from the left, level vertically (dy=0), well
-    // within snap distance horizontally.
-    const snap = findSnapTarget(items, 'dragged', 100, 0, CARD_WIDTH, CARD_HEIGHT, 200)
-    expect(snap?.targetId).toBe('target')
-    expect(snap?.snappedX).toBe(300 - CARD_WIDTH - 12) // to the left of target, with the 12px gap
-  })
-
-  it('picks the nearest of several candidates within range', () => {
-    const items = [
-      { id: 'far', x: 150, y: 0 },
-      { id: 'near', x: 60, y: 0 }
-    ]
-    const snap = findSnapTarget(items, 'dragged', 0, 0, CARD_WIDTH, CARD_HEIGHT, 200)
-    expect(snap?.targetId).toBe('near')
-  })
-})
-
 describe('getVisibleClusterLinks', () => {
   function link(id: string, fromCategoryId: string, toCategoryId: string): ClusterLink {
     return { id, fromCategoryId, toCategoryId, label: 'x', directed: true, createdAt: '0' }
@@ -3868,5 +3833,54 @@ describe('linked cards touch, and linking moves as little as possible', () => {
       expect(touching(after.get('c1')!, after.get(target)!, all), `c1 → ${target}`).toBe(true)
       expect(new Set(all.map((p) => `${p.x},${p.y}`)).size).toBe(ids.length)
     }
+  })
+})
+
+describe('findPointerSnapTarget', () => {
+  // A 2×2 cluster grid of 180×64 cards with an 8px gap: 1 2 / 3 4.
+  const W = 180
+  const H = 64
+  const cards = [
+    { id: '1', x: 20, y: 48 },
+    { id: '2', x: 208, y: 48 },
+    { id: '3', x: 20, y: 120 },
+    { id: '4', x: 208, y: 120 }
+  ]
+  const others = cards.filter((c) => c.id !== '1')
+
+  // Reported: dragging 1 around, it could only ever link to 3 (below it),
+  // never to 2 (beside it).
+  it('reaches the card beside as easily as the card below: the card under the pointer is the target', () => {
+    expect(findPointerSnapTarget(others, '1', 300, 80, W, H, 16)?.targetId).toBe('2')
+    expect(findPointerSnapTarget(others, '1', 100, 150, W, H, 16)?.targetId).toBe('3')
+    expect(findPointerSnapTarget(others, '1', 300, 150, W, H, 16)?.targetId).toBe('4')
+  })
+
+  it('picks the side from where the pointer sits on the target, relative to its width and height', () => {
+    const on2 = (px: number, py: number): { x: number; y: number } => {
+      const s = findPointerSnapTarget(others, '1', px, py, W, H, 16)!
+      return { x: s.snappedX, y: s.snappedY }
+    }
+    // Left third of 2 → dragged card to 2's left, same row.
+    expect(on2(215, 80)).toEqual({ x: 208 - W - 12, y: 48 })
+    // Right part → to its right.
+    expect(on2(385, 80)).toEqual({ x: 208 + W + 12, y: 48 })
+    // Near the top edge, centered horizontally → above; near the bottom → below.
+    expect(on2(298, 50)).toEqual({ x: 208, y: 48 - H - 12 })
+    expect(on2(298, 110)).toEqual({ x: 208, y: 48 + H + 12 })
+  })
+
+  it('in a gap between cards, takes the nearest within reach, and nothing beyond it', () => {
+    // In the 8px gap between 2 (ends at y=112) and 4 (starts at y=120), closer to 4.
+    expect(findPointerSnapTarget(others, '1', 300, 117, W, H, 16)?.targetId).toBe('4')
+    expect(findPointerSnapTarget(others, '1', 300, 114, W, H, 16)?.targetId).toBe('2')
+    // Far from every card.
+    expect(findPointerSnapTarget(others, '1', 900, 900, W, H, 16)).toBeNull()
+    expect(findPointerSnapTarget(others, '1', 300, 112 + 20, W, H, 16)?.targetId).toBe('4')
+    expect(findPointerSnapTarget(others, '1', 600, 80, W, H, 16)).toBeNull()
+  })
+
+  it('never targets the dragged card itself', () => {
+    expect(findPointerSnapTarget(cards, '1', 100, 80, W, H, 16)?.targetId).not.toBe('1')
   })
 })

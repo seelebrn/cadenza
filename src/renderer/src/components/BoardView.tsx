@@ -11,7 +11,7 @@ import {
   findAlignmentSnap,
   findDistributionSnap,
   findNestTarget,
-  findSnapTarget,
+  findPointerSnapTarget,
   getClusterMemberItems,
   getDefaultBoardId,
   getLinkedGroup,
@@ -49,21 +49,20 @@ const MAX_ZOOM = 2.5
 const ZOOM_WHEEL_SENSITIVITY = 0.0015
 // Empty margin left around everything when "Fit view" zooms to show it all.
 const FIT_VIEW_PADDING = 60
-// How close two cards must get while dragging *with Shift held* to
-// snap/link; how far an already-linked pair must be dragged apart to sever
-// automatically. Snapping used to be automatic for any drag that ended
-// near another card — which made it impossible to drop a code into a
-// cluster with no free slot left (the drop necessarily lands on a card, so
-// it necessarily linked to it), and in general meant a link was created
-// as a side effect of placement rather than as a choice. Linking is now an
-// explicit gesture: hold Shift while dragging (live — pressing it partway
-// through a drag works) and the snap preview + link happen; release it
-// and the drop is a plain move.
-const SNAP_DISTANCE = 70
+// Linking is an explicit gesture: hold Shift while dragging a card (live —
+// pressing it partway through a drag works) and the card under the pointer,
+// or the nearest one within this many *screen* pixels of it, is the link
+// target (findPointerSnapTarget); release Shift and the drop is a plain
+// move. Snapping used to be automatic for any drag ending near another
+// card, which linked as a side effect of placement. It also used to pick
+// the target by center-to-center distance (70px), which with wide, short
+// cards could reach the card below but never the one beside.
+const SNAP_POINTER_REACH = 16
+// How far an already-linked pair must be dragged apart to sever automatically.
 const UNLINK_DISTANCE = 200
-// findSnapTarget itself has no minimum drag distance — without this, an
-// item picked up while already within SNAP_DISTANCE of a neighbor (common
-// in the default board's auto-packed grid layout) snaps to it the instant
+// The snap lookup itself has no minimum drag distance — without this, a
+// card picked up with the pointer already over a neighbor (common in the
+// default board's auto-packed grid layout) snaps to it the instant
 // it's grabbed, before the mouse has moved at all: it visibly jumps on a
 // plain (Shift+)click, and — since handleMouseUp runs the exact same check
 // against the final (here, zero) delta — a click with no drag at all could
@@ -194,7 +193,7 @@ function BoardView(): JSX.Element {
   const [newClusterKind, setNewClusterKind] = useState<CategoryKind>('theme')
   const [dragState, setDragState] = useState<DragState | null>(null)
   // shiftKey rides along with the pointer delta: snap-linking is an
-  // explicit, held-modifier gesture (see SNAP_DISTANCE), and it's read
+  // explicit, held-modifier gesture (see SNAP_POINTER_REACH), and it's read
   // live from each pointer event rather than once at mousedown, so Shift
   // can be pressed (or released) partway through a drag and the snap
   // preview follows immediately.
@@ -542,7 +541,15 @@ function BoardView(): JSX.Element {
           const candidates = items.filter((i) => !state.groupItemIds.includes(i.id))
           const snap =
             e.shiftKey && Math.hypot(dx, dy) >= MIN_DRAG_DISTANCE_FOR_SNAP
-              ? findSnapTarget(candidates, state.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+              ? findPointerSnapTarget(
+                  candidates,
+                  state.id,
+                  rawX + state.grabOffsetX,
+                  rawY + state.grabOffsetY,
+                  CARD_WIDTH,
+                  CARD_HEIGHT,
+                  SNAP_POINTER_REACH / zoom
+                )
               : null
           const adjustX = snap ? snap.snappedX - rawX : 0
           const adjustY = snap ? snap.snappedY - rawY : 0
@@ -584,7 +591,7 @@ function BoardView(): JSX.Element {
               targetPos = { x: targetItem.x, y: targetItem.y }
               targetId = snap.targetId
               // The snap target can be a still-virtual item (never
-              // individually touched) — findSnapTarget's candidates are
+              // individually touched) — the snap lookup's candidates are
               // every *visible* item, virtual ones included. A BoardLink
               // storing that virtual id directly would be fragile in two
               // ways: until the target is ever touched, its rendered
@@ -897,7 +904,15 @@ function BoardView(): JSX.Element {
         const rawX = grabbedStart.x + liveDelta.dx
         const rawY = grabbedStart.y + liveDelta.dy
         const candidates = items.filter((i) => !dragState.groupItemIds.includes(i.id))
-        const snap = findSnapTarget(candidates, dragState.id, rawX, rawY, CARD_WIDTH, CARD_HEIGHT, SNAP_DISTANCE)
+        const snap = findPointerSnapTarget(
+          candidates,
+          dragState.id,
+          rawX + dragState.grabOffsetX,
+          rawY + dragState.grabOffsetY,
+          CARD_WIDTH,
+          CARD_HEIGHT,
+          SNAP_POINTER_REACH / zoom
+        )
         if (snap) {
           adjustX = snap.snappedX - rawX
           adjustY = snap.snappedY - rawY
@@ -934,7 +949,7 @@ function BoardView(): JSX.Element {
     }
 
     return map
-  }, [items, dragState, liveDelta, clusterMoveDelta])
+  }, [items, dragState, liveDelta, clusterMoveDelta, zoom])
 
   // While dragging a cluster over another one it would nest into on drop,
   // identifies that destination so ClusterFrame can highlight it clearly
@@ -1921,7 +1936,7 @@ function BoardView(): JSX.Element {
                     // Ctrl/Cmd+drag is the escape hatch: move just this one
                     // card, ignoring whatever it's linked to. (Shift is the
                     // snap-link modifier, held during the drag — see
-                    // SNAP_DISTANCE.)
+                    // SNAP_POINTER_REACH.)
                     const group = e.ctrlKey || e.metaKey ? new Set([draggedId]) : getLinkedGroup(links, draggedId)
                     // Every snap-link created from here on always connects
                     // two already-real items (see the mouseup handler's own
@@ -1951,13 +1966,16 @@ function BoardView(): JSX.Element {
                       groupItemIds.push(id)
                       startPositions[id] = { x: gItem.x, y: gItem.y }
                     }
+                    const cardRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                     setDragState({
                       kind: 'item',
                       id: draggedId,
                       groupItemIds,
                       startMouseX: e.clientX,
                       startMouseY: e.clientY,
-                      startPositions
+                      startPositions,
+                      grabOffsetX: (e.clientX - cardRect.left) / zoom,
+                      grabOffsetY: (e.clientY - cardRect.top) / zoom
                     })
                   }}
                 />

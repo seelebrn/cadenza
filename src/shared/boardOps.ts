@@ -2633,7 +2633,7 @@ function findAlignmentGuides(x: number, y: number, size: { width: number; height
  * Snaps a tentative (x, y) to the nearest edge/center alignment with any of
  * `others`, independently per axis (an x-snap and a y-snap can both apply
  * at once, from different clusters) — the cluster-frame equivalent of
- * findSnapTarget's card-to-card snapping above, just against edges/centers
+ * findPointerSnapTarget's card-to-card snapping above, just against edges/centers
  * of a box instead of whole-card proximity. No match on an axis leaves
  * that coordinate untouched.
  */
@@ -2780,41 +2780,53 @@ export interface SnapResult {
 }
 
 /**
- * Finds the nearest other item within snapDistance of a tentative (x, y)
- * position, and where the dragged card should snap to sit edge-to-edge
- * beside it — used both for a live "magnetic" preview while dragging and
- * to decide the final drop position + auto-link. Snaps along whichever
- * axis (horizontal/vertical) the two cards are more aligned on.
+ * The link target for a Shift-drag, chosen by where the *pointer* is: the
+ * card under it, or failing that the nearest card whose edge is within
+ * `reach` of it. Which side of the target the pointer is on — measured
+ * relative to the card's own width and height, since cards are much wider
+ * than tall — decides whether the dragged card snaps beside it (left or
+ * right) or above/below it.
+ *
+ * Replaces center-to-center distance for this: with 180×64 cards, two
+ * stacked cards' centers are 72px apart but two side-by-side cards' are
+ * 188px apart, so a 70px center radius could reach the card below but
+ * never the one beside — linking horizontally was impossible. Reported
+ * as: "if I want to connect 1 to 2 from the side, it's impossible."
  */
-export function findSnapTarget(
+export function findPointerSnapTarget(
   items: PositionedItem[],
   draggedItemId: string,
-  x: number,
-  y: number,
+  pointerX: number,
+  pointerY: number,
   cardWidth: number,
   cardHeight: number,
-  snapDistance: number
+  reach: number
 ): SnapResult | null {
-  const centerX = x + cardWidth / 2
-  const centerY = y + cardHeight / 2
-
-  let best: (PositionedItem & { dist: number }) | null = null
+  let best: { item: PositionedItem; distance: number } | null = null
   for (const item of items) {
     if (item.id === draggedItemId) continue
-    const otherCenterX = item.x + cardWidth / 2
-    const otherCenterY = item.y + cardHeight / 2
-    const dist = Math.hypot(centerX - otherCenterX, centerY - otherCenterY)
-    if (dist <= snapDistance && (!best || dist < best.dist)) {
-      best = { ...item, dist }
-    }
+    const dx = Math.max(item.x - pointerX, 0, pointerX - (item.x + cardWidth))
+    const dy = Math.max(item.y - pointerY, 0, pointerY - (item.y + cardHeight))
+    const distance = Math.hypot(dx, dy)
+    if (distance <= reach && (!best || distance < best.distance)) best = { item, distance }
   }
   if (!best) return null
 
+  const target = best.item
   const gap = 12
-  const dx = centerX - (best.x + cardWidth / 2)
-  const dy = centerY - (best.y + cardHeight / 2)
-  const snappedX = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? best.x + cardWidth + gap : best.x - cardWidth - gap) : best.x
-  const snappedY = Math.abs(dx) >= Math.abs(dy) ? best.y : dy >= 0 ? best.y + cardHeight + gap : best.y - cardHeight - gap
-
-  return { targetId: best.id, snappedX, snappedY }
+  const offsetX = (pointerX - (target.x + cardWidth / 2)) / cardWidth
+  const offsetY = (pointerY - (target.y + cardHeight / 2)) / cardHeight
+  if (Math.abs(offsetX) >= Math.abs(offsetY)) {
+    return {
+      targetId: target.id,
+      snappedX: offsetX >= 0 ? target.x + cardWidth + gap : target.x - cardWidth - gap,
+      snappedY: target.y
+    }
+  }
+  return {
+    targetId: target.id,
+    snappedX: target.x,
+    snappedY: offsetY >= 0 ? target.y + cardHeight + gap : target.y - cardHeight - gap
+  }
 }
+

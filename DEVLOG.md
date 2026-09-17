@@ -3291,3 +3291,27 @@ boards in their fixtures, load creates a default board and now pins there, so th
 the fixture's own board (what they were actually checking). New: cycle breaking, duplicate
 removal, load-time pinning moves nothing, and the two locality tests. The probe file itself is
 deleted. Full suite green (451/451), typecheck clean, production build clean, boot-tested.
+
+### README restructure, and release pages with real descriptions (2026-09-17)
+
+The README's introduction was one wall of text. It's now short sections: what the app is for,
+the board (grouped by gesture: nesting, automatic arrangement, linking, large boards), import
+and export, install, development, status, project history. Two inaccuracies were corrected on
+the way: it claimed Excel import/export (there's none — import is `.docx`/`.odt`/`.txt`, export
+is reports as `.docx`/`.html`/`.pdf` plus boards as PDF), and it pointed to a planning file that
+only ever existed locally, not in the repository.
+
+The user also noticed a link to the development conversation on the GitHub release pages. It
+came from commit messages, not release notes: electron-builder publishes each release with an
+empty description, so GitHub shows the tagged commit's message instead — including its
+`Claude-Session` line, a link to a private conversation that is dead for anyone else. Agreed
+fix, in three parts:
+
+- New `scripts/release-notes.mjs` prints one version's section of `CHANGELOG.md`, rejoining the
+  file's hard-wrapped lines (GitHub renders every single line break in a release description).
+- New `.github/workflows/release-notes.yml` sets every published release's description from
+  it. It runs after each release build (called from `release.yml`, even if one platform's build
+  failed), whenever `CHANGELOG.md` changes on `main` — so fixing a changelog entry fixes the
+  published release — and on demand. Pushing it backfills all existing releases. Verified
+  locally that every tag from v0.1.0 to v0.4.6 has a section and extracts cleanly.
+- Commits keep the standard `Co-Authored-By` trailer but no longer carry the session link.

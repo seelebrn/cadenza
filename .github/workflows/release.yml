@@ -60,3 +60,12 @@ jobs:
       - run: npx electron-builder ${{ matrix.platform }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # electron-builder publishes the release with an empty description; fill
+  # it from CHANGELOG.md once the builds have created it. Runs even if one
+  # platform's build failed, as long as the release exists.
+  notes:
+    needs: build
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/release-notes.yml
+    secrets: inherit

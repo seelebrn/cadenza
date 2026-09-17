@@ -1,0 +1,44 @@
+name: Release notes
+
+# Keeps every published GitHub release's description in sync with its
+# section of CHANGELOG.md (see scripts/release-notes.mjs). electron-builder
+# creates releases with no description, which made GitHub fall back to
+# showing the tagged commit's message on the release page.
+#
+# Runs after each release build (called from release.yml), whenever
+# CHANGELOG.md changes on main (so fixing a changelog entry fixes the
+# published release too), and on demand. Idempotent: a release whose
+# version has no changelog section is left untouched.
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - CHANGELOG.md
+      - scripts/release-notes.mjs
+      - .github/workflows/release-notes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fill release descriptions from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName'); do
+            if node scripts/release-notes.mjs "$tag" > notes.md; then
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+              echo "Updated $tag"
+            else
+              echo "Skipped $tag (no changelog section)"
+            fi
+          done

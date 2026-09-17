@@ -1,0 +1,544 @@
+import { XMLBuilder, XMLParser } from 'fast-xml-parser'
+import { nanoid } from 'nanoid'
+import type {
+  CategoryRecord,
+  CodeNode,
+  Coding,
+  DocumentRecord,
+  NoteAttachment,
+  NoteRecord,
+  ProjectData,
+  Segment
+} from './types'
+import { PROJECT_SCHEMA_VERSION } from './types'
+import { joinParagraphs } from './text'
+
+/**
+ * REFI-QDA Project Exchange (.qdpx) — the format NVivo, MAXQDA, ATLAS.ti,
+ * QualCoder and others use to move a coded project between tools, and the
+ * one data repositories ask for when archiving qualitative data. A .qdpx
+ * is a zip: `project.qde` (XML, namespace urn:QDA-XML:project:1.0) plus a
+ * `sources/` folder with each document's plain text. This module is the
+ * pure part — building the XML and source texts from ProjectData, and
+ * reading them back — with zipping and dialogs in the main process.
+ *
+ * What travels: codes (hierarchy, color, description), documents as text
+ * sources, coded passages and their codings, notes (attached to a passage,
+ * document, code or the project), case attributes (as REFI Variables and
+ * Cases, one Case per document), and clusters as Sets (their code and note
+ * members). What doesn't exist in the standard and is left behind on
+ * export: boards and their layout, cluster links, cluster nesting and
+ * colors, note tags and note types, quotes filed directly under a cluster.
+ * Codes of kind "item" are marked through a Set named ITEMS_SET_NAME so a
+ * Cadenza→Cadenza round trip keeps them.
+ */
+
+export const REFI_NAMESPACE = 'urn:QDA-XML:project:1.0'
+export const ITEMS_SET_NAME = 'Cadenza: items'
+const DEFAULT_COLOR = '#94a3b8'
+
+// --- GUIDs -----------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** cyrb53 — a small, fast 53-bit string hash; three seeds give enough
+ * bits for a UUID-shaped id. */
+function hash53(text: string, seed: number): number {
+  let h1 = 0xdeadbeef ^ seed
+  let h2 = 0x41c6ce57 ^ seed
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0)
+}
+
+/** REFI requires UUID-shaped GUIDs; Cadenza ids are nanoids. A stable,
+ * deterministic mapping (the same id always gives the same GUID, across
+ * exports) — an id that already is a UUID (one that came in through
+ * import) is kept, so a round trip preserves the other tool's GUIDs. */
+export function toGuid(id: string): string {
+  if (UUID_RE.test(id)) return id.toLowerCase()
+  const hex = [0, 1, 2].map((seed) => hash53(id, seed).toString(16).padStart(14, '0')).join('')
+  const h = hex.slice(0, 32).split('')
+  h[12] = '4'
+  h[16] = '8'
+  const s = h.join('')
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20, 32)}`
+}
+
+// --- Export ----------------------------------------------------------------
+
+type XmlNode = Record<string, unknown>
+
+export interface QdpxBundle {
+  /** The project.qde XML document. */
+  qde: string
+  /** Files to put in the zip beside it, path → UTF-8 text (`sources/<guid>.txt`). */
+  sources: Record<string, string>
+}
+
+function noteXml(note: NoteRecord, userGuid: string): XmlNode {
+  const name = (note.question || note.answer).split('\n')[0].slice(0, 80) || 'Note'
+  const node: XmlNode = {
+    '@_guid': toGuid(note.id),
+    '@_name': name,
+    '@_creatingUser': userGuid,
+    '@_creationDateTime': note.createdAt,
+    '@_modifiedDateTime': note.updatedAt
+  }
+  if (note.question) node.Description = note.question
+  node.PlainTextContent = note.answer
+  return node
+}
+
+export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
+  const userGuid = toGuid(`user:${data.id}`)
+  const now = new Date().toISOString()
+  const noteRefs = (attachment: (n: NoteRecord) => boolean): XmlNode[] =>
+    data.notes.filter(attachment).map((n) => ({ '@_targetGUID': toGuid(n.id) }))
+
+  function codeXml(code: CodeNode): XmlNode {
+    const node: XmlNode = {
+      '@_guid': toGuid(code.id),
+      '@_name': code.name,
+      '@_isCodable': 'true',
+      '@_color': code.color
+    }
+    if (code.definition) node.Description = code.definition
+    const refs = noteRefs((n) => n.attachedTo.kind === 'code' && n.attachedTo.codeId === code.id)
+    if (refs.length) node.NoteRef = refs
+    const children = data.codes.filter((c) => c.parentId === code.id).map(codeXml)
+    if (children.length) node.Code = children
+    return node
+  }
+
+  const attributeNames: string[] = []
+  for (const d of data.documents) for (const k of Object.keys(d.attributes)) if (!attributeNames.includes(k)) attributeNames.push(k)
+  const variableGuid = (name: string): string => toGuid(`variable:${name}`)
+
+  const sources: Record<string, string> = {}
+  const textSources: XmlNode[] = data.documents.map((document) => {
+    const guid = toGuid(document.id)
+    const text = joinParagraphs(document.paragraphs)
+    sources[`sources/${guid}.txt`] = text
+    const selections: XmlNode[] = data.segments
+      .filter((s) => s.documentId === document.id)
+      .map((segment) => {
+        const node: XmlNode = {
+          '@_guid': toGuid(segment.id),
+          '@_name': segment.text.slice(0, 60) || 'Passage',
+          '@_startPosition': segment.start,
+          '@_endPosition': segment.end,
+          '@_creatingUser': userGuid,
+          '@_creationDateTime': data.createdAt
+        }
+        const codings: XmlNode[] = data.codings
+          .filter((c) => c.segmentId === segment.id)
+          .map((coding) => ({
+            '@_guid': toGuid(coding.id),
+            '@_creatingUser': userGuid,
+            '@_creationDateTime': coding.createdAt,
+            CodeRef: { '@_targetGUID': toGuid(coding.codeId) }
+          }))
+        if (codings.length) node.Coding = codings
+        const refs = noteRefs((n) => n.attachedTo.kind === 'segment' && n.attachedTo.segmentId === segment.id)
+        if (refs.length) node.NoteRef = refs
+        return node
+      })
+    const node: XmlNode = {
+      '@_guid': guid,
+      '@_name': document.title,
+      '@_plainTextPath': `internal://${guid}.txt`,
+      '@_creatingUser': userGuid,
+      '@_creationDateTime': document.importedAt,
+      '@_modifiedDateTime': document.importedAt
+    }
+    if (selections.length) node.PlainTextSelection = selections
+    const refs = noteRefs((n) => n.attachedTo.kind === 'document' && n.attachedTo.documentId === document.id)
+    if (refs.length) node.NoteRef = refs
+    return node
+  })
+
+  const cases: XmlNode[] = data.documents.map((document) => {
+    const node: XmlNode = { '@_guid': toGuid(`case:${document.id}`), '@_name': document.title }
+    const values = Object.entries(document.attributes).map(([name, value]) => ({
+      VariableRef: { '@_targetGUID': variableGuid(name) },
+      TextValue: value
+    }))
+    if (values.length) node.VariableValue = values
+    node.SourceRef = [{ '@_targetGUID': toGuid(document.id) }]
+    return node
+  })
+
+  const sets: XmlNode[] = data.categories.map((category) => {
+    const node: XmlNode = { '@_guid': toGuid(category.id), '@_name': category.name }
+    const parent = category.parentCategoryId ? data.categories.find((c) => c.id === category.parentCategoryId) : null
+    const description = [
+      category.definition,
+      category.kind === 'question' ? 'Cadenza: analytic question cluster' : '',
+      parent ? `Cadenza: nested under “${parent.name}”` : ''
+    ]
+      .filter(Boolean)
+      .join('\n')
+    if (description) node.Description = description
+    const codes = category.codeIds.filter((id) => data.codes.some((c) => c.id === id)).map((id) => ({ '@_targetGUID': toGuid(id) }))
+    const notes = category.noteIds.filter((id) => data.notes.some((n) => n.id === id)).map((id) => ({ '@_targetGUID': toGuid(id) }))
+    if (codes.length) node.MemberCode = codes
+    if (notes.length) node.MemberNote = notes
+    return node
+  })
+  const items = data.codes.filter((c) => c.kind === 'item')
+  if (items.length) {
+    sets.push({
+      '@_guid': toGuid('set:cadenza-items'),
+      '@_name': ITEMS_SET_NAME,
+      Description: 'Codes Cadenza treats as inventory items rather than thematic codes.',
+      MemberCode: items.map((c) => ({ '@_targetGUID': toGuid(c.id) }))
+    })
+  }
+
+  // A note attached to a cluster has no home in the standard (Sets carry
+  // no notes); it goes to the project level, its cluster named in front.
+  const projectNotes = data.notes.filter((n) => n.attachedTo.kind === 'project' || n.attachedTo.kind === 'category')
+  const notes: XmlNode[] = data.notes.map((note) => {
+    const node = noteXml(note, userGuid)
+    if (note.attachedTo.kind === 'category') {
+      const category = data.categories.find((c) => c.id === (note.attachedTo as { categoryId: string }).categoryId)
+      if (category) node.Description = `[Cluster: ${category.name}]${note.question ? ` ${note.question}` : ''}`
+    }
+    return node
+  })
+
+  const project: XmlNode = {
+    '@_xmlns': REFI_NAMESPACE,
+    '@_name': data.name,
+    '@_origin': origin,
+    '@_creatingUserGUID': userGuid,
+    '@_creationDateTime': data.createdAt,
+    '@_modifiedDateTime': data.updatedAt || now,
+    Users: { User: [{ '@_guid': userGuid, '@_name': 'Cadenza user' }] },
+    CodeBook: { Codes: { Code: data.codes.filter((c) => c.parentId === null).map(codeXml) } }
+  }
+  if (attributeNames.length) {
+    project.Variables = {
+      Variable: attributeNames.map((name) => ({ '@_guid': variableGuid(name), '@_name': name, '@_typeOfVariable': 'Text' }))
+    }
+  }
+  if (cases.length) project.Cases = { Case: cases }
+  if (textSources.length) project.Sources = { TextSource: textSources }
+  if (notes.length) project.Notes = { Note: notes }
+  if (sets.length) project.Sets = { Set: sets }
+  if (projectNotes.length) project.NoteRef = projectNotes.map((n) => ({ '@_targetGUID': toGuid(n.id) }))
+
+  const builder = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', format: true, suppressEmptyNode: true })
+  const qde = `<?xml version="1.0" encoding="UTF-8"?>\n${builder.build({ Project: project })}`
+  return { qde, sources }
+}
+
+// --- Import ----------------------------------------------------------------
+
+export interface QdpxImportReport {
+  documents: number
+  codes: number
+  codings: number
+  notes: number
+  clusters: number
+  /** Sources or elements the standard allows that Cadenza can't take, with why. */
+  skipped: string[]
+}
+
+const ARRAY_TAGS = new Set([
+  'User', 'Code', 'Variable', 'Case', 'VariableValue', 'SourceRef', 'CodeRef', 'TextSource', 'PDFSource',
+  'PictureSource', 'AudioSource', 'VideoSource', 'PlainTextSelection', 'Coding', 'NoteRef', 'Note', 'Set',
+  'MemberCode', 'MemberSource', 'MemberNote', 'Representation'
+])
+
+/** Source text as Cadenza stores it, plus a function mapping a position in
+ * the original text to the same place in the normalized one — REFI
+ * selections index the file as written (CRLF line ends, stray blank lines
+ * and all), and every one of them has to keep pointing at the same words. */
+export function normalizeSourceText(raw: string): { text: string; mapOffset: (original: number) => number } {
+  // Ranges of the original that are dropped, in order.
+  const removed: Array<{ start: number; end: number }> = []
+  const crPositions: number[] = []
+  for (const m of raw.matchAll(/\r/g)) {
+    crPositions.push(m.index)
+    removed.push({ start: m.index, end: m.index + 1 })
+  }
+  // Runs of three or more line breaks (blank lines in between) collapse to
+  // one paragraph break, and leading/trailing whitespace goes.
+  const noCr = raw.replace(/\r/g, '')
+  const toOriginal = (i: number): number => {
+    // Position in `noCr` → position in `raw`: add back the CRs before it.
+    let extra = 0
+    for (const cr of crPositions) if (cr - extra <= i) extra++
+    return i + extra
+  }
+  for (const m of noCr.matchAll(/\n{3,}/g)) removed.push({ start: toOriginal(m.index + 2), end: toOriginal(m.index + m[0].length) })
+  const leading = noCr.match(/^\s+/)
+  if (leading) removed.push({ start: 0, end: toOriginal(leading[0].length) })
+  const trailing = noCr.match(/\s+$/)
+  if (trailing) removed.push({ start: toOriginal(noCr.length - trailing[0].length), end: raw.length })
+  removed.sort((a, b) => a.start - b.start)
+  // Merge overlaps (a CR inside a collapsed run, say).
+  const merged: Array<{ start: number; end: number }> = []
+  for (const r of removed) {
+    const last = merged[merged.length - 1]
+    if (last && r.start <= last.end) last.end = Math.max(last.end, r.end)
+    else merged.push({ ...r })
+  }
+  let text = ''
+  let cursor = 0
+  for (const r of merged) {
+    text += raw.slice(cursor, r.start)
+    cursor = r.end
+  }
+  text += raw.slice(cursor)
+  const mapOffset = (original: number): number => {
+    let dropped = 0
+    for (const r of merged) {
+      if (r.end <= original) dropped += r.end - r.start
+      else if (r.start < original) return r.start - dropped
+      else break
+    }
+    return Math.max(0, Math.min(text.length, original - dropped))
+  }
+  return { text, mapOffset }
+}
+
+function asArray<T>(value: T | T[] | undefined): T[] {
+  if (value === undefined || value === null) return []
+  return Array.isArray(value) ? value : [value]
+}
+/** Numeric character references (`&#13;` for a carriage return is the
+ * common one in other tools' exports) come through the parser untouched;
+ * named entities it already decodes. */
+function decodeCharRefs(text: string): string {
+  return text
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
+}
+function attr(node: XmlNode | undefined, name: string): string {
+  const v = node?.[`@_${name}`]
+  return v === undefined || v === null ? '' : decodeCharRefs(String(v))
+}
+function textOf(value: unknown): string {
+  if (value === undefined || value === null) return ''
+  if (typeof value === 'object') return textOf((value as XmlNode)['#text'])
+  return decodeCharRefs(String(value))
+}
+
+/** Reads a .qdpx's project.qde (and its source texts, via `readSource`,
+ * given the path inside the zip such as `sources/<guid>.txt`) into
+ * ProjectData. GUIDs are kept as ids. The result still needs
+ * normalizeProjectData (default board, pinning) before use. */
+export function parseQdpx(qde: string, readSource: (zipPath: string) => string | undefined): { data: ProjectData; report: QdpxImportReport } {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    removeNSPrefix: true,
+    parseTagValue: false,
+    parseAttributeValue: false,
+    trimValues: false,
+    isArray: (name) => ARRAY_TAGS.has(name)
+  })
+  const root = parser.parse(qde) as { Project?: XmlNode }
+  const project = root.Project
+  if (!project) throw new Error('Not a REFI-QDA project: no <Project> element in project.qde')
+  const now = new Date().toISOString()
+  const report: QdpxImportReport = { documents: 0, codes: 0, codings: 0, notes: 0, clusters: 0, skipped: [] }
+  const guid = (s: string): string => s.trim().toLowerCase()
+
+  // Codes, recursively, with their note refs.
+  const codes: CodeNode[] = []
+  const noteAttachments = new Map<string, NoteAttachment>()
+  const rememberNoteRefs = (node: XmlNode, attachment: NoteAttachment): void => {
+    for (const ref of asArray(node.NoteRef as XmlNode[] | undefined)) {
+      const target = guid(attr(ref, 'targetGUID'))
+      if (target && !noteAttachments.has(target)) noteAttachments.set(target, attachment)
+    }
+  }
+  const walkCodes = (nodes: XmlNode[], parentId: string | null): void => {
+    for (const node of nodes) {
+      const id = guid(attr(node, 'guid'))
+      if (!id) continue
+      codes.push({
+        id,
+        kind: 'code',
+        name: attr(node, 'name') || 'Untitled code',
+        color: /^#[0-9a-f]{6}$/i.test(attr(node, 'color')) ? attr(node, 'color') : DEFAULT_COLOR,
+        definition: textOf(node.Description).trim(),
+        parentId,
+        createdAt: now
+      })
+      rememberNoteRefs(node, { kind: 'code', codeId: id })
+      walkCodes(asArray(node.Code as XmlNode[] | undefined), id)
+    }
+  }
+  walkCodes(asArray(((project.CodeBook as XmlNode | undefined)?.Codes as XmlNode | undefined)?.Code as XmlNode[] | undefined), null)
+  report.codes = codes.length
+  const codeIds = new Set(codes.map((c) => c.id))
+
+  // Sources → documents, selections → segments + codings.
+  const documents: DocumentRecord[] = []
+  const segments: Segment[] = []
+  const codings: Coding[] = []
+  const sourcesNode = project.Sources as XmlNode | undefined
+  const textLike: Array<{ node: XmlNode; kind: string }> = [
+    ...asArray(sourcesNode?.TextSource as XmlNode[] | undefined).map((node) => ({ node, kind: 'TextSource' })),
+    ...asArray(sourcesNode?.PDFSource as XmlNode[] | undefined).map((node) => ({ node, kind: 'PDFSource' }))
+  ]
+  for (const kind of ['PictureSource', 'AudioSource', 'VideoSource']) {
+    for (const node of asArray(sourcesNode?.[kind] as XmlNode[] | undefined)) {
+      report.skipped.push(`${kind.replace('Source', '')} source “${attr(node, 'name')}” — only text sources can be imported`)
+    }
+  }
+  for (const { node, kind } of textLike) {
+    const id = guid(attr(node, 'guid')) || nanoid()
+    const name = attr(node, 'name') || 'Untitled document'
+    // Text: the referenced plain-text file, else inline content; a PDF
+    // source only if it carries a plain-text representation.
+    let raw: string | undefined
+    let selectionHost: XmlNode = node
+    const path = attr(node, 'plainTextPath')
+    if (path.startsWith('internal://')) raw = readSource(`sources/${path.slice('internal://'.length)}`)
+    if (raw === undefined && node.PlainTextContent !== undefined) raw = textOf(node.PlainTextContent)
+    if (raw === undefined && kind === 'PDFSource') {
+      const representation = asArray(node.Representation as XmlNode[] | undefined)[0]
+      const rpath = attr(representation, 'plainTextPath')
+      if (rpath.startsWith('internal://')) raw = readSource(`sources/${rpath.slice('internal://'.length)}`)
+      if (raw === undefined && representation?.PlainTextContent !== undefined) raw = textOf(representation.PlainTextContent)
+      if (representation) selectionHost = representation
+    }
+    if (raw === undefined) {
+      report.skipped.push(`${kind === 'PDFSource' ? 'PDF' : 'Text'} source “${name}” — its text is not in the file${path.startsWith('internal://') ? '' : path ? ' (external path)' : ''}`)
+      continue
+    }
+    const { text, mapOffset } = normalizeSourceText(raw)
+    documents.push({
+      id,
+      title: name,
+      paragraphs: text.split('\n\n'),
+      sourceFormat: kind === 'PDFSource' ? 'pdf' : 'txt',
+      assetRelPath: null,
+      importedAt: attr(node, 'creationDateTime') || now,
+      attributes: {}
+    })
+    rememberNoteRefs(node, { kind: 'document', documentId: id })
+    for (const selection of asArray(selectionHost.PlainTextSelection as XmlNode[] | undefined)) {
+      const sid = guid(attr(selection, 'guid')) || nanoid()
+      const start = mapOffset(Number(attr(selection, 'startPosition')))
+      const end = mapOffset(Number(attr(selection, 'endPosition')))
+      if (!(end > start)) {
+        report.skipped.push(`An empty passage in “${name}”`)
+        continue
+      }
+      segments.push({ id: sid, documentId: id, start, end, text: text.slice(start, end) })
+      rememberNoteRefs(selection, { kind: 'segment', segmentId: sid })
+      for (const coding of asArray(selection.Coding as XmlNode[] | undefined)) {
+        for (const ref of asArray(coding.CodeRef as XmlNode[] | undefined)) {
+          const codeId = guid(attr(ref, 'targetGUID'))
+          if (!codeIds.has(codeId)) continue
+          codings.push({ id: guid(attr(coding, 'guid')) || nanoid(), segmentId: sid, codeId, createdAt: attr(coding, 'creationDateTime') || now })
+        }
+      }
+    }
+  }
+  report.documents = documents.length
+  report.codings = codings.length
+  rememberNoteRefs(project, { kind: 'project' })
+
+  // Cases and variables → document attributes.
+  const variableNames = new Map<string, string>()
+  for (const v of asArray((project.Variables as XmlNode | undefined)?.Variable as XmlNode[] | undefined)) {
+    variableNames.set(guid(attr(v, 'guid')), attr(v, 'name'))
+  }
+  const documentById = new Map(documents.map((d) => [d.id, d]))
+  for (const c of asArray((project.Cases as XmlNode | undefined)?.Case as XmlNode[] | undefined)) {
+    const values: Record<string, string> = {}
+    for (const vv of asArray(c.VariableValue as XmlNode[] | undefined)) {
+      const ref = asArray(vv.VariableRef as XmlNode[] | undefined)[0] ?? (vv.VariableRef as XmlNode | undefined)
+      const name = variableNames.get(guid(attr(ref, 'targetGUID')))
+      if (!name) continue
+      const value = ['TextValue', 'IntegerValue', 'FloatValue', 'DateValue', 'DateTimeValue', 'BooleanValue']
+        .map((k) => vv[k])
+        .find((v) => v !== undefined)
+      values[name] = textOf(value).trim()
+    }
+    if (Object.keys(values).length === 0) continue
+    for (const ref of asArray(c.SourceRef as XmlNode[] | undefined)) {
+      const document = documentById.get(guid(attr(ref, 'targetGUID')))
+      if (document) document.attributes = { ...document.attributes, ...values }
+    }
+  }
+
+  // Notes.
+  const notes: NoteRecord[] = []
+  for (const node of asArray((project.Notes as XmlNode | undefined)?.Note as XmlNode[] | undefined)) {
+    const id = guid(attr(node, 'guid')) || nanoid()
+    const content = textOf(node.PlainTextContent)
+    const description = textOf(node.Description).trim()
+    const answer = (content || description || attr(node, 'name')).trim()
+    const question = content && description && description !== content.trim() ? description : null
+    notes.push({
+      id,
+      question,
+      answer,
+      tags: [],
+      noteCategoryId: null,
+      attachedTo: noteAttachments.get(id) ?? { kind: 'project' },
+      createdAt: attr(node, 'creationDateTime') || now,
+      updatedAt: attr(node, 'modifiedDateTime') || attr(node, 'creationDateTime') || now
+    })
+  }
+  report.notes = notes.length
+  const noteIds = new Set(notes.map((n) => n.id))
+
+  // Sets → clusters (the "items" marker set flips code kinds instead).
+  const categories: CategoryRecord[] = []
+  for (const set of asArray((project.Sets as XmlNode | undefined)?.Set as XmlNode[] | undefined)) {
+    const memberCodes = asArray(set.MemberCode as XmlNode[] | undefined).map((m) => guid(attr(m, 'targetGUID'))).filter((id) => codeIds.has(id))
+    if (attr(set, 'name') === ITEMS_SET_NAME) {
+      for (const code of codes) if (memberCodes.includes(code.id)) code.kind = 'item'
+      continue
+    }
+    categories.push({
+      id: guid(attr(set, 'guid')) || nanoid(),
+      kind: 'theme',
+      name: attr(set, 'name') || 'Untitled cluster',
+      color: DEFAULT_COLOR,
+      definition: textOf(set.Description).trim(),
+      codeIds: memberCodes,
+      noteIds: asArray(set.MemberNote as XmlNode[] | undefined).map((m) => guid(attr(m, 'targetGUID'))).filter((id) => noteIds.has(id)),
+      segmentIds: [],
+      parentCategoryId: null,
+      createdAt: now
+    })
+  }
+  report.clusters = categories.length
+
+  const data: ProjectData = {
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    id: nanoid(),
+    name: attr(project, 'name') || 'Imported project',
+    createdAt: attr(project, 'creationDateTime') || now,
+    updatedAt: now,
+    documents,
+    segments,
+    codes,
+    codings,
+    notes,
+    noteCategories: [],
+    categories,
+    boards: [],
+    boardItems: [],
+    boardClusters: [],
+    boardLinks: [],
+    clusterLinks: []
+  }
+  return { data, report }
+}

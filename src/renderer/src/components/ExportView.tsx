@@ -48,6 +48,9 @@ function ExportView(): JSX.Element | null {
   const [format, setFormat] = useState<ReportExportFormat>('docx')
   const [status, setStatus] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
+  const exportQdpx = useProjectStore((s) => s.exportQdpx)
+  const [isExchanging, setIsExchanging] = useState(false)
+  const [exchangeStatus, setExchangeStatus] = useState<string | null>(null)
 
   if (!data) return null
 
@@ -262,6 +265,29 @@ function ExportView(): JSX.Element | null {
         For a visual export of a board's spatial layout, use "Export as PDF" from the Board tab's toolbar instead —
         this dialog only covers written report content.
       </p>
+
+      <div className="mt-8 rounded border border-slate-200 p-4">
+        <h3 className="text-sm font-semibold text-slate-700">Exchange with other tools</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          REFI-QDA (.qdpx) is the standard project format NVivo, MAXQDA, ATLAS.ti, QualCoder and data
+          repositories accept. It carries your documents, codes, coded passages, notes, case attributes and
+          clusters (as sets). Boards and their layout, cluster links, cluster nesting and colors, and note
+          tags have no equivalent in the standard and stay in the Cadenza project.
+        </p>
+        <button
+          className="mt-3 rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+          disabled={isExchanging}
+          onClick={() => {
+            setIsExchanging(true)
+            void exportQdpx()
+              .then((path) => setExchangeStatus(path ? `Exported to ${path}` : null))
+              .finally(() => setIsExchanging(false))
+          }}
+        >
+          {isExchanging ? 'Exporting…' : 'Export as REFI-QDA project (.qdpx)'}
+        </button>
+        {exchangeStatus && <p className="mt-2 text-xs text-slate-600">{exchangeStatus}</p>}
+      </div>
     </div>
   )
 }

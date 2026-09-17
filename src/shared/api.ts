@@ -1,5 +1,6 @@
 import type { BackupEntry, ImportedDocument, ProjectData, RecentProjectEntry, SerializedAssets } from './types'
 import type { Report } from './reportModel'
+import type { QdpxImportReport } from './refiQda'
 
 export type ReportExportFormat = 'html' | 'docx' | 'pdf'
 
@@ -48,6 +49,13 @@ export interface CadenzaApi {
     /** Loads one backup's contents as a copy, not tied to any file on disk —
      * the next save must go through Save As. */
     restoreBackup: (projectId: string, fileName: string) => Promise<RestoreBackupResult>
+    /** Writes the project as a REFI-QDA exchange file (.qdpx) via a save
+     * dialog — see shared/refiQda.ts for what travels. Returns the chosen
+     * path, or null if the user canceled. */
+    exportQdpx: (data: ProjectData) => Promise<string | null>
+    /** Opens a .qdpx from another tool as a new, unsaved project (the next
+     * save goes through Save As). Null = user canceled. */
+    importQdpx: () => Promise<{ data: ProjectData; report: QdpxImportReport } | null>
   }
   document: {
     /** Opens a native file picker (.docx/.odt/.txt) and imports the chosen file. Null = user canceled. */

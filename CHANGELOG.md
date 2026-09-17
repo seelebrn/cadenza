@@ -24,6 +24,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   with paragraph breaks inferred from the page's own line spacing and hyphenated line ends
   re-joined. A scan with no text layer is refused with a clear message instead of importing
   empty.
+- **REFI-QDA exchange (.qdpx)**: export a project in the standard format NVivo, MAXQDA, ATLAS.ti,
+  QualCoder and data repositories accept (Export tab), and open a .qdpx from another tool as a
+  new project (home screen). Documents, codes with their hierarchy, coded passages and codings,
+  notes, case attributes and clusters travel; boards, cluster links, cluster nesting and colors,
+  and note tags have no equivalent in the standard and stay in the Cadenza project. Imports
+  report what was brought in and what had to be skipped (audio/video sources).
 
 ## [0.4.7] - 2026-09-17
 

@@ -13,7 +13,9 @@ const api: CadenzaApi = {
     openExample: () => ipcRenderer.invoke('project:open-example'),
     listBackups: (projectId) => ipcRenderer.invoke('project:list-backups', projectId),
     restoreBackup: (projectId, fileName) =>
-      ipcRenderer.invoke('project:restore-backup', projectId, fileName)
+      ipcRenderer.invoke('project:restore-backup', projectId, fileName),
+    exportQdpx: (data) => ipcRenderer.invoke('project:export-qdpx', data),
+    importQdpx: () => ipcRenderer.invoke('project:import-qdpx')
   },
   document: {
     importDialog: () => ipcRenderer.invoke('document:import-dialog')

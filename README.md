@@ -70,8 +70,12 @@ between clusters and one-click tree or radial layouts — useful for building a 
 - **Import** documents from Word (`.docx`), OpenDocument (`.odt`), plain text (`.txt`) and PDF
   (`.pdf` — born-digital, or a scan that has been OCR'd; a scan with no text layer is refused
   with a message rather than imported empty).
-- **Export** reports (codebook, notes, cross-case comparison, results draft) as `.docx`,
-  `.html` or `.pdf`, and any board as a PDF figure.
+- **Export** reports (codebook, notes, cross-case comparison, co-occurrence, results draft) as
+  `.docx`, `.html` or `.pdf`, and any board as a PDF figure.
+- **Exchange** with other QDA tools through REFI-QDA (`.qdpx`), the standard NVivo, MAXQDA,
+  ATLAS.ti, QualCoder and data repositories accept: export the whole project, or open a `.qdpx`
+  made elsewhere as a new project. Documents, codes, coded passages, notes, case attributes and
+  clusters travel; boards, cluster links and nesting are Cadenza-only and stay behind.
 
 ## Download and install
 

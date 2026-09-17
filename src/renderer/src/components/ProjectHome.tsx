@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import type { QdpxImportReport } from '@shared/refiQda'
 
 function ProjectHome(): JSX.Element {
   const [name, setName] = useState('Untitled project')
@@ -10,6 +11,8 @@ function ProjectHome(): JSX.Element {
   const openRecent = useProjectStore((s) => s.openRecent)
   const removeRecent = useProjectStore((s) => s.removeRecent)
   const openExample = useProjectStore((s) => s.openExample)
+  const importQdpx = useProjectStore((s) => s.importQdpx)
+  const [importReport, setImportReport] = useState<QdpxImportReport | null>(null)
 
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col justify-center gap-8 px-8">
@@ -55,6 +58,33 @@ function ProjectHome(): JSX.Element {
         </button>{' '}
         — a small fictional study, already coded, notated, and organized into a thematic map.
       </p>
+
+      <p className="-mt-4 text-sm text-slate-500">
+        Coming from another tool?{' '}
+        <button
+          className="font-medium text-slate-700 underline hover:text-slate-900"
+          onClick={() => void importQdpx().then((report) => setImportReport(report))}
+        >
+          Import a REFI-QDA project (.qdpx)
+        </button>{' '}
+        — the exchange format NVivo, MAXQDA, ATLAS.ti and QualCoder can export. Documents, codes, coded
+        passages, notes, case attributes and sets come across; audio/video and layouts don't.
+      </p>
+      {importReport && (
+        <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Imported {importReport.documents} document{importReport.documents === 1 ? '' : 's'}, {importReport.codes} code
+          {importReport.codes === 1 ? '' : 's'}, {importReport.codings} coded passage{importReport.codings === 1 ? '' : 's'},{' '}
+          {importReport.notes} note{importReport.notes === 1 ? '' : 's'} and {importReport.clusters} cluster
+          {importReport.clusters === 1 ? '' : 's'} as a new project — save it to keep it.
+          {importReport.skipped.length > 0 && (
+            <ul className="mt-1 list-disc pl-4 text-amber-700">
+              {importReport.skipped.map((s, i) => (
+                <li key={i}>Skipped: {s}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div>
         <h2 className="mb-2 text-sm font-medium text-slate-500">Recent projects</h2>

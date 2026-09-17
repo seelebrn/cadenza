@@ -1,6 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { copyFile, writeFile } from 'fs/promises'
+import { copyFile, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
+import JSZip from 'jszip'
+import { buildQdpx, parseQdpx } from '../shared/refiQda'
+import { normalizeProjectData } from '../shared/normalizeProject'
 import type { ProjectData, SerializedAssets } from '../shared/types'
 import type { ReportExportFormat } from '../shared/api'
 import { importDocumentDialog } from './import'
@@ -15,6 +18,7 @@ import type { Report } from '../shared/reportModel'
 const isDev = !app.isPackaged
 
 const PROJECT_FILE_FILTERS = [{ name: 'Cadenza Project', extensions: ['qdaproj'] }]
+const QDPX_FILE_FILTERS = [{ name: 'REFI-QDA Project (.qdpx)', extensions: ['qdpx'] }]
 
 /** Bundled sample project shown from ProjectHome's "Explore an example"
  * button. Shipped via electron-builder's `extraResources` (see
@@ -112,6 +116,46 @@ function registerProjectHandlers(): void {
   ipcMain.handle('project:save-as', (_event, data: ProjectData, assets: SerializedAssets) =>
     saveAs(data, assets)
   )
+
+  ipcMain.handle('project:export-qdpx', async (_event, data: ProjectData) => {
+    const result = await dialog.showSaveDialog({
+      title: 'Export as REFI-QDA project',
+      defaultPath: `${data.name}.qdpx`,
+      filters: QDPX_FILE_FILTERS
+    })
+    if (result.canceled || !result.filePath) return null
+    const bundle = buildQdpx(data, `Cadenza ${app.getVersion()}`)
+    const zip = new JSZip()
+    zip.file('project.qde', bundle.qde)
+    for (const [path, text] of Object.entries(bundle.sources)) zip.file(path, text)
+    await writeFile(result.filePath, await zip.generateAsync({ type: 'nodebuffer' }))
+    return result.filePath
+  })
+
+  ipcMain.handle('project:import-qdpx', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Import a REFI-QDA project',
+      properties: ['openFile'],
+      filters: QDPX_FILE_FILTERS
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const zip = await JSZip.loadAsync(await readFile(result.filePaths[0]))
+    const qdeEntry = zip.file('project.qde') ?? zip.file(/(^|\/)project\.qde$/i)[0]
+    if (!qdeEntry) throw new Error('Not a REFI-QDA file: no project.qde inside the archive')
+    const qde = await qdeEntry.async('string')
+    // Source texts are read up front (the parser is synchronous), keyed by
+    // their path inside the zip; a tool that nests everything in a folder
+    // is tolerated by also matching on the trailing path.
+    const sources = new Map<string, string>()
+    for (const file of zip.file(/\.txt$/i)) sources.set(file.name, await file.async('string'))
+    const readSource = (zipPath: string): string | undefined => {
+      if (sources.has(zipPath)) return sources.get(zipPath)
+      for (const [name, text] of sources) if (name.endsWith(`/${zipPath}`)) return text
+      return undefined
+    }
+    const { data, report } = parseQdpx(qde, readSource)
+    return { data: normalizeProjectData(data), report }
+  })
 
   ipcMain.handle('project:get-recent', () => getRecentProjects())
 

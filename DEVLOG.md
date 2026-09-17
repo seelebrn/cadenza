@@ -3446,3 +3446,55 @@ pre-spaced runs, the threshold scaling to double-spaced text, the short-page cas
 suite green, typecheck clean, production build clean, boot-tested. The packaged-size exclusions
 are exercised by the next CI release build rather than locally (Windows packaging needs a
 privilege the dev machine lacks — see release.yml).
+
+### Feature: REFI-QDA exchange (2026-09-17)
+
+Fifth and last of the batch, and the largest: `.qdpx` in and out. REFI-QDA is the project
+exchange format the commercial tools and QualCoder share, and what journals and data
+repositories increasingly ask for; without it a Cadenza project could neither leave nor arrive.
+No new dependency — the format is a zip (`jszip`, already used for `.qdaproj`) holding a
+`project.qde` XML (`fast-xml-parser`, already used for `.odt`) and a `sources/` folder of plain
+texts.
+
+`src/shared/refiQda.ts` is the pure core. **Export** (`buildQdpx`): codes as a nested CodeBook
+with color and description; each document as a TextSource whose plain text is exactly
+`joinParagraphs(paragraphs)`, so every Segment's offsets are already the right PlainTextSelection
+positions; codings as Coding/CodeRef under their selection; notes as Notes with NoteRefs from
+the passage, document, code or project they belong to (a cluster note goes to the project level
+with "[Cluster: …]" in front, Sets carrying no notes in the standard); case attributes as
+Variables (Text) plus one Case per document; clusters as Sets with their code and note members,
+nesting and question-kind noted in the description as text. Codes of kind "item" are listed in a
+Set named `Cadenza: items`, which a Cadenza→Cadenza round trip recognizes.
+
+GUIDs are the awkward part: the standard wants UUIDs, Cadenza ids are nanoids. `toGuid` is a
+deterministic hash mapping (the same id always gives the same GUID, across exports), and an id
+that already is a UUID — one that arrived through import — is kept, so another tool's GUIDs
+survive a round trip through Cadenza.
+
+**Import** (`parseQdpx`): codes recursively, TextSources (from the referenced `sources/` file or
+inline `PlainTextContent`), PDFSources through their plain-text Representation, selections →
+segments with codings, notes attached where their NoteRef appeared, Cases/Variables → document
+attributes (any value type, as text), Sets → clusters. Picture/audio/video sources are skipped
+and named in the import report; so is a source whose text isn't in the file. Two things needed
+care: numeric character references (`&#13;`, how other tools write carriage returns) come
+through the parser undecoded, so they're decoded on read; and source text is normalized to
+Cadenza's shape (CR removed, runs of blank lines collapsed, trimmed) while **every selection's
+offsets are mapped through those edits** (`normalizeSourceText` returns the text and an
+offset-mapping function over the dropped ranges), so a passage still points at the same words —
+the test checks exactly that against a CRLF, blank-run-laden fixture. The result goes through
+`normalizeProjectData` (default board, pinning) and opens as a new, unsaved project.
+
+Main process: two IPC handlers (save dialog + zip write; open dialog + zip read, tolerant of a
+`.qdpx` whose files sit in a subfolder). UI: an "Export as REFI-QDA project" section at the
+bottom of the Export tab that says plainly what stays behind, and an "Import a REFI-QDA project"
+line on the home screen that shows a summary of what came in and what was skipped.
+
+Verified: 13 unit tests — GUID determinism/shape/UUID passthrough; a full round trip (sources
+written verbatim, XML escaping, documents with attributes, code tree with colors/definitions/item
+kinds, every passage still pointing at the same words with its codings, notes with their
+question attached where they were, clusters with members, GUID stability on a second export);
+a hand-written file in another tool's style (CRLF, blank runs, inline content, a PDF source with
+a text representation, an audio source, an integer variable) with every selection intact; the
+offset mapper on its own. Full suite green (493/493), typecheck clean, production build clean,
+boot-tested. Not yet tried against a real NVivo/MAXQDA export — worth doing with one if you have
+access to any; the format has tool-specific quirks the spec doesn't mention.

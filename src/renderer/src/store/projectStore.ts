@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { QdpxImportReport } from '@shared/refiQda'
 import type {
   BackupEntry,
   BoardItem,
@@ -134,6 +135,13 @@ interface ProjectState {
    * file it was recovered from, so it comes back dirty/unsaved and the
    * next save must go through Save As. */
   restoreBackup: (fileName: string) => Promise<void>
+  /** Writes the open project as a REFI-QDA exchange file (.qdpx) for other
+   * QDA tools / archiving; resolves to the saved path, or null if canceled. */
+  exportQdpx: () => Promise<string | null>
+  /** Opens a .qdpx (from NVivo, MAXQDA, ATLAS.ti, QualCoder…) as a new,
+   * unsaved project. Resolves to what was and wasn't brought in, or null
+   * if canceled. */
+  importQdpx: () => Promise<QdpxImportReport | null>
   /** Apply a change to the current project and (if already saved once) autosave it.
    * Records one undo step per call, UNLESS called from inside withBatch. */
   updateProject: (updater: (data: ProjectData) => ProjectData) => void
@@ -536,6 +544,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { data } = get()
     if (!data) return []
     return window.api.project.listBackups(data.id)
+  },
+
+  exportQdpx: async () => {
+    const { data } = get()
+    if (!data) return null
+    try {
+      return await window.api.project.exportQdpx(data)
+    } catch (e) {
+      set({ error: `Could not export: ${(e as Error).message}` })
+      return null
+    }
+  },
+
+  importQdpx: async () => {
+    try {
+      const result = await window.api.project.importQdpx()
+      if (!result) return null
+      set({ data: result.data, assets: {}, filePath: null, isDirty: true, error: null, past: [], future: [] })
+      useWorkspaceUiStore.getState().resetForProjectSwitch()
+      return result.report
+    } catch (e) {
+      set({ error: `Could not import: ${(e as Error).message}` })
+      return null
+    }
   },
 
   restoreBackup: async (fileName) => {

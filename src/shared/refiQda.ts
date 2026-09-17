@@ -125,14 +125,15 @@ export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
     const guid = toGuid(document.id)
     const text = joinParagraphs(document.paragraphs)
     sources[`sources/${guid}.txt`] = text
+    const toCodePoints = codeUnitsToCodePoints(text)
     const selections: XmlNode[] = data.segments
       .filter((s) => s.documentId === document.id)
       .map((segment) => {
         const node: XmlNode = {
           '@_guid': toGuid(segment.id),
           '@_name': segment.text.slice(0, 60) || 'Passage',
-          '@_startPosition': segment.start,
-          '@_endPosition': segment.end,
+          '@_startPosition': toCodePoints(segment.start),
+          '@_endPosition': toCodePoints(segment.end),
           '@_creatingUser': userGuid,
           '@_creationDateTime': data.createdAt
         }
@@ -310,6 +311,70 @@ export function normalizeSourceText(raw: string): { text: string; mapOffset: (or
   return { text, mapOffset }
 }
 
+/** REFI-QDA positions count characters (Unicode code points) — what
+ * QualCoder's Python strings count — while JavaScript string offsets count
+ * UTF-16 code units, where an emoji or other character outside the Basic
+ * Multilingual Plane takes two. Identical for most text; without converting,
+ * one emoji early in a transcript would shift every later passage by one.
+ * These return a converter for offsets into `text`. */
+export function codePointsToCodeUnits(text: string): (codePointOffset: number) => number {
+  if (!/[\uD800-\uDBFF]/.test(text)) return (offset) => offset
+  const units: number[] = []
+  let unit = 0
+  for (const char of text) {
+    units.push(unit)
+    unit += char.length
+  }
+  units.push(unit)
+  return (offset) => units[Math.max(0, Math.min(offset, units.length - 1))]
+}
+
+export function codeUnitsToCodePoints(text: string): (codeUnitOffset: number) => number {
+  if (!/[\uD800-\uDBFF]/.test(text)) return (offset) => offset
+  return (offset) => [...text.slice(0, offset)].length
+}
+
+/**
+ * The standard doesn't say whether a Windows line ending counts as one
+ * character or two, and tools differ: QualCoder (Python, reading text
+ * files in universal-newline mode) counts "\r\n" as one, so its positions
+ * are relative to the text with carriage returns removed; a tool that
+ * counts raw file content counts both. Both readings are tried, and the one
+ * under which more selections cover exactly the text the file records for
+ * them (a selection's `name`, which QualCoder and others set to the
+ * selected words) wins. With no such evidence — or a tie — carriage
+ * returns aren't counted, the common convention. Both readings end in the
+ * same normalized text; only the offset mapping differs.
+ */
+function chooseSourceReading(
+  raw: string,
+  selections: XmlNode[]
+): { text: string; mapOffset: (codePointOffset: number) => number } {
+  const readings = [raw.replace(/\r\n?/g, '\n'), raw].map((source) => {
+    const normalized = normalizeSourceText(source)
+    const fromCodePoints = codePointsToCodeUnits(source)
+    return {
+      text: normalized.text,
+      mapOffset: (offset: number): number => normalized.mapOffset(fromCodePoints(offset)),
+      source,
+      fromCodePoints
+    }
+  })
+  if (readings[0].source === readings[1].source) return readings[0]
+  const score = (reading: (typeof readings)[number]): number => {
+    let matches = 0
+    for (const selection of selections) {
+      const expected = attr(selection, 'name')
+      if (!expected) continue
+      const start = reading.fromCodePoints(Number(attr(selection, 'startPosition')))
+      const end = reading.fromCodePoints(Number(attr(selection, 'endPosition')))
+      if (reading.source.slice(start, end) === expected) matches++
+    }
+    return matches
+  }
+  return score(readings[1]) > score(readings[0]) ? readings[1] : readings[0]
+}
+
 function asArray<T>(value: T | T[] | undefined): T[] {
   if (value === undefined || value === null) return []
   return Array.isArray(value) ? value : [value]
@@ -353,8 +418,16 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
   const report: QdpxImportReport = { documents: 0, codes: 0, codings: 0, notes: 0, clusters: 0, skipped: [] }
   const guid = (s: string): string => s.trim().toLowerCase()
 
-  // Codes, recursively, with their note refs.
+  // The codebook, recursively, with note refs. A Code marked
+  // isCodable="false" is a grouping, not something passages are coded
+  // with — it's how QualCoder exports its categories, and how NVivo and
+  // MAXQDA export folders/code groups — so it becomes a cluster, nested
+  // under the nearest grouping above it, and each code directly inside it
+  // is filed under it. Codable codes keep their own parent/child hierarchy;
+  // a code whose parent is a grouping is top-level in the codebook.
   const codes: CodeNode[] = []
+  const categories: CategoryRecord[] = []
+  const categoryById = new Map<string, CategoryRecord>()
   const noteAttachments = new Map<string, NoteAttachment>()
   const rememberNoteRefs = (node: XmlNode, attachment: NoteAttachment): void => {
     for (const ref of asArray(node.NoteRef as XmlNode[] | undefined)) {
@@ -362,28 +435,52 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
       if (target && !noteAttachments.has(target)) noteAttachments.set(target, attachment)
     }
   }
-  const walkCodes = (nodes: XmlNode[], parentId: string | null): void => {
+  const colorOf = (node: XmlNode): string =>
+    /^#[0-9a-f]{6}$/i.test(attr(node, 'color')) ? attr(node, 'color') : DEFAULT_COLOR
+  const walkCodes = (nodes: XmlNode[], parentCodeId: string | null, parentCategoryId: string | null): void => {
     for (const node of nodes) {
       const id = guid(attr(node, 'guid'))
       if (!id) continue
+      const children = asArray(node.Code as XmlNode[] | undefined)
+      if (attr(node, 'isCodable').toLowerCase() === 'false') {
+        const category: CategoryRecord = {
+          id,
+          kind: 'theme',
+          name: attr(node, 'name') || 'Untitled cluster',
+          color: colorOf(node),
+          definition: textOf(node.Description).trim(),
+          codeIds: [],
+          noteIds: [],
+          segmentIds: [],
+          parentCategoryId,
+          createdAt: now
+        }
+        categories.push(category)
+        categoryById.set(id, category)
+        rememberNoteRefs(node, { kind: 'category', categoryId: id })
+        walkCodes(children, null, id)
+        continue
+      }
       codes.push({
         id,
         kind: 'code',
         name: attr(node, 'name') || 'Untitled code',
-        color: /^#[0-9a-f]{6}$/i.test(attr(node, 'color')) ? attr(node, 'color') : DEFAULT_COLOR,
+        color: colorOf(node),
         definition: textOf(node.Description).trim(),
-        parentId,
+        parentId: parentCodeId,
         createdAt: now
       })
+      if (parentCodeId === null && parentCategoryId) categoryById.get(parentCategoryId)!.codeIds.push(id)
       rememberNoteRefs(node, { kind: 'code', codeId: id })
-      walkCodes(asArray(node.Code as XmlNode[] | undefined), id)
+      walkCodes(children, id, parentCategoryId)
     }
   }
-  walkCodes(asArray(((project.CodeBook as XmlNode | undefined)?.Codes as XmlNode | undefined)?.Code as XmlNode[] | undefined), null)
+  walkCodes(asArray(((project.CodeBook as XmlNode | undefined)?.Codes as XmlNode | undefined)?.Code as XmlNode[] | undefined), null, null)
   report.codes = codes.length
   const codeIds = new Set(codes.map((c) => c.id))
 
   // Sources → documents, selections → segments + codings.
+  let codingsOnGroupings = 0
   const documents: DocumentRecord[] = []
   const segments: Segment[] = []
   const codings: Coding[] = []
@@ -418,7 +515,11 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
       report.skipped.push(`${kind === 'PDFSource' ? 'PDF' : 'Text'} source “${name}” — its text is not in the file${path.startsWith('internal://') ? '' : path ? ' (external path)' : ''}`)
       continue
     }
-    const { text, mapOffset } = normalizeSourceText(raw)
+    // A byte-order mark is an encoding marker, not text: positions never
+    // count it (QualCoder's source files start with one).
+    const withoutBom = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
+    const selections = asArray(selectionHost.PlainTextSelection as XmlNode[] | undefined)
+    const { text, mapOffset } = chooseSourceReading(withoutBom, selections)
     documents.push({
       id,
       title: name,
@@ -429,7 +530,7 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
       attributes: {}
     })
     rememberNoteRefs(node, { kind: 'document', documentId: id })
-    for (const selection of asArray(selectionHost.PlainTextSelection as XmlNode[] | undefined)) {
+    for (const selection of selections) {
       const sid = guid(attr(selection, 'guid')) || nanoid()
       const start = mapOffset(Number(attr(selection, 'startPosition')))
       const end = mapOffset(Number(attr(selection, 'endPosition')))
@@ -442,6 +543,7 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
       for (const coding of asArray(selection.Coding as XmlNode[] | undefined)) {
         for (const ref of asArray(coding.CodeRef as XmlNode[] | undefined)) {
           const codeId = guid(attr(ref, 'targetGUID'))
+          if (categoryById.has(codeId)) codingsOnGroupings++
           if (!codeIds.has(codeId)) continue
           codings.push({ id: guid(attr(coding, 'guid')) || nanoid(), segmentId: sid, codeId, createdAt: attr(coding, 'creationDateTime') || now })
         }
@@ -497,9 +599,14 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
   }
   report.notes = notes.length
   const noteIds = new Set(notes.map((n) => n.id))
+  if (codingsOnGroupings > 0) {
+    report.skipped.push(
+      `${codingsOnGroupings} coding${codingsOnGroupings === 1 ? '' : 's'} applied to a category (a non-codable grouping) — only codes can code a passage`
+    )
+  }
 
-  // Sets → clusters (the "items" marker set flips code kinds instead).
-  const categories: CategoryRecord[] = []
+  // Sets → clusters too, alongside the codebook's groupings above (the
+  // "items" marker set flips code kinds instead).
   for (const set of asArray((project.Sets as XmlNode | undefined)?.Set as XmlNode[] | undefined)) {
     const memberCodes = asArray(set.MemberCode as XmlNode[] | undefined).map((m) => guid(attr(m, 'targetGUID'))).filter((id) => codeIds.has(id))
     if (attr(set, 'name') === ITEMS_SET_NAME) {

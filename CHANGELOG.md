@@ -16,6 +16,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 - Shift-dragging a code could link it to the code *below* but never to the one *beside* it. The
   link target is now the code under the pointer (or right next to it), whichever direction it
   is in; where the pointer sits on that code decides which side the dragged code snaps to.
+- Importing a REFI-QDA project from QualCoder (and likely NVivo and MAXQDA, which export folders
+  and code groups the same way): its categories came in as codes, with their codes as sub-codes;
+  none of its documents came in at all; and every coded passage was shifted a few characters.
+  Categories now become clusters with their nesting and their codes filed inside, documents are
+  found regardless of how the export names its sources folder, and passages land on exactly the
+  words they covered.
 
 ### Added
 - **Full-text search** (Analysis → Search): find every occurrence of a word or phrase across all

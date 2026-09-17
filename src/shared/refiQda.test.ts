@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildQdpx, ITEMS_SET_NAME, normalizeSourceText, parseQdpx, toGuid } from './refiQda'
+import {
+  buildQdpx,
+  codePointsToCodeUnits,
+  codeUnitsToCodePoints,
+  ITEMS_SET_NAME,
+  normalizeSourceText,
+  parseQdpx,
+  toGuid
+} from './refiQda'
 import { joinParagraphs } from './text'
 import type { ProjectData } from './types'
 
@@ -144,10 +152,10 @@ describe('parseQdpx on a file from another tool', () => {
   <Sources>
     <TextSource guid="22222222-2222-4222-8222-222222222222" name="Inline one">
       <PlainTextContent>${raw.replace(/\r/g, '&#13;')}</PlainTextContent>
-      <PlainTextSelection guid="55555555-5555-4555-8555-555555555555" name="sel" startPosition="${raw.indexOf('Still')}" endPosition="${raw.indexOf('Still') + 5}">
+      <PlainTextSelection guid="55555555-5555-4555-8555-555555555555" name="Still" startPosition="${raw.indexOf('Still')}" endPosition="${raw.indexOf('Still') + 5}">
         <Coding guid="66666666-6666-4666-8666-666666666666"><CodeRef targetGUID="11111111-1111-4111-8111-111111111111"/></Coding>
       </PlainTextSelection>
-      <PlainTextSelection guid="57555555-5555-4555-8555-555555555555" name="sel2" startPosition="${raw.indexOf('Second')}" endPosition="${raw.indexOf('Second') + 6}"/>
+      <PlainTextSelection guid="57555555-5555-4555-8555-555555555555" name="Second" startPosition="${raw.indexOf('Second')}" endPosition="${raw.indexOf('Second') + 6}"/>
     </TextSource>
     <PDFSource guid="77777777-7777-4777-8777-777777777777" name="Scan"><Representation guid="78777777-7777-4777-8777-777777777777" plainTextPath="internal://scan.txt"/></PDFSource>
     <AudioSource guid="88888888-8888-4888-8888-888888888888" name="Recording" path="internal://a.mp3"/>
@@ -196,5 +204,146 @@ describe('normalizeSourceText', () => {
     const { text, mapOffset } = normalizeSourceText('One.\n\nTwo.')
     expect(text).toBe('One.\n\nTwo.')
     expect(mapOffset(6)).toBe(6)
+  })
+})
+
+describe('parseQdpx: non-codable codes are categories (QualCoder, NVivo folders, MAXQDA groups)', () => {
+  // Reported with a QualCoder 3.8.2 export: its categories came in as codes,
+  // and their codes as sub-codes. QualCoder writes a category as a Code
+  // with isCodable="false", nested as deep as the category tree goes.
+  const g = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+  const qde = `<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="urn:QDA-XML:project:1.0" name="QualCoder style" origin="QualCoder 3.8.2">
+  <CodeBook><Codes>
+    <Code guid="${g(1)}" name="04 Barri&#xE8;res" isCodable="false">
+      <Description>Obstacles to research</Description>
+      <NoteRef targetGUID="${g(90)}"/>
+      <Code guid="${g(2)}" name="B : Peu d&#x27;encadrement" isCodable="true" color="#880E4F">
+        <Code guid="${g(3)}" name="Sub-code" isCodable="true" color="#111111"/>
+      </Code>
+      <Code guid="${g(4)}" name="B - Environnement" isCodable="false">
+        <Code guid="${g(5)}" name="B - Au sein du service" isCodable="false">
+          <Code guid="${g(6)}" name="Etab : pas de temps" isCodable="true" color="#222222"/>
+        </Code>
+        <Code guid="${g(7)}" name="Env code" isCodable="true"/>
+      </Code>
+    </Code>
+    <Code guid="${g(8)}" name="Top-level code" isCodable="true" color="#333333"/>
+  </Codes></CodeBook>
+  <Sources>
+    <TextSource guid="${g(20)}" name="Doc">
+      <PlainTextContent>Hello world here.</PlainTextContent>
+      <PlainTextSelection guid="${g(21)}" startPosition="0" endPosition="5">
+        <Coding guid="${g(22)}"><CodeRef targetGUID="${g(6)}"/></Coding>
+        <Coding guid="${g(23)}"><CodeRef targetGUID="${g(4)}"/></Coding>
+      </PlainTextSelection>
+    </TextSource>
+  </Sources>
+  <Notes><Note guid="${g(90)}" name="memo"><PlainTextContent>About barriers.</PlainTextContent></Note></Notes>
+</Project>`
+  const { data, report } = parseQdpx(qde, () => undefined)
+  const byName = (name: string): { id: string } => [...data.codes, ...data.categories].find((x) => x.name === name)!
+
+  it('turns every non-codable code into a cluster, keeping the category tree', () => {
+    expect(data.categories.map((c) => c.name).sort()).toEqual(['04 Barrières', 'B - Au sein du service', 'B - Environnement'])
+    const top = data.categories.find((c) => c.name === '04 Barrières')!
+    const env = data.categories.find((c) => c.name === 'B - Environnement')!
+    const service = data.categories.find((c) => c.name === 'B - Au sein du service')!
+    expect(top.parentCategoryId).toBeNull()
+    expect(env.parentCategoryId).toBe(top.id)
+    expect(service.parentCategoryId).toBe(env.id)
+    expect(top.definition).toBe('Obstacles to research')
+    expect(report.clusters).toBe(3)
+    expect(data.codes.some((c) => c.name === '04 Barrières')).toBe(false)
+  })
+
+  it('files each code under the category directly above it; codes under categories are top-level codes', () => {
+    const top = data.categories.find((c) => c.name === '04 Barrières')!
+    const env = data.categories.find((c) => c.name === 'B - Environnement')!
+    const service = data.categories.find((c) => c.name === 'B - Au sein du service')!
+    expect(top.codeIds).toEqual([byName("B : Peu d'encadrement").id])
+    expect(env.codeIds).toEqual([byName('Env code').id])
+    expect(service.codeIds).toEqual([byName('Etab : pas de temps').id])
+    for (const name of ["B : Peu d'encadrement", 'Env code', 'Etab : pas de temps', 'Top-level code']) {
+      expect(data.codes.find((c) => c.name === name)!.parentId, name).toBeNull()
+    }
+    // A codable code under a codable code keeps its hierarchy, and isn't
+    // filed separately (it comes along with its parent).
+    expect(data.codes.find((c) => c.name === 'Sub-code')!.parentId).toBe(byName("B : Peu d'encadrement").id)
+    expect(report.codes).toBe(5)
+  })
+
+  it('keeps codings on codes, reports a coding that pointed at a category, and attaches a category note to the cluster', () => {
+    expect(data.codings.map((c) => c.codeId)).toEqual([byName('Etab : pas de temps').id])
+    expect(report.skipped).toEqual(['1 coding applied to a category (a non-codable grouping) — only codes can code a passage'])
+    expect(data.notes[0].attachedTo).toEqual({ kind: 'category', categoryId: byName('04 Barrières').id })
+  })
+})
+
+describe('REFI-QDA positions are characters, not UTF-16 code units', () => {
+  it('converts both ways, and is the identity for text without astral characters', () => {
+    const plain = 'Élève à côté'
+    expect(codePointsToCodeUnits(plain)(5)).toBe(5)
+    expect(codeUnitsToCodePoints(plain)(5)).toBe(5)
+    const withEmoji = 'ok 😀 then word'
+    // "word" starts at code unit 11 but character 10.
+    expect(withEmoji.indexOf('word')).toBe(11)
+    expect(codeUnitsToCodePoints(withEmoji)(11)).toBe(10)
+    expect(codePointsToCodeUnits(withEmoji)(10)).toBe(11)
+  })
+
+  it('a passage after an emoji round-trips to the same words, with character positions in the XML', () => {
+    const data = makeData({
+      documents: [{ id: 'd', title: 'T', paragraphs: ['Hi 😀 there, some words here.'], sourceFormat: 'txt', assetRelPath: null, importedAt: '0', attributes: {} }],
+      codes: [{ id: 'c', kind: 'code', name: 'C', color: '#000000', definition: '', parentId: null, createdAt: '0' }],
+      segments: [{ id: 's', documentId: 'd', start: 13, end: 23, text: 'some words' }],
+      codings: [{ id: 'k', segmentId: 's', codeId: 'c', createdAt: '0' }]
+    })
+    expect('Hi 😀 there, some words here.'.slice(13, 23)).toBe('some words')
+    const bundle = buildQdpx(data, 't')
+    expect(bundle.qde).toContain('startPosition="12"')
+    expect(bundle.qde).toContain('endPosition="22"')
+    const { data: back } = parseQdpx(bundle.qde, (p) => bundle.sources[p])
+    const doc = back.documents[0]
+    const seg = back.segments[0]
+    expect(joinParagraphs(doc.paragraphs).slice(seg.start, seg.end)).toBe('some words')
+  })
+})
+
+describe('parseQdpx: how a source file with Windows line endings is counted', () => {
+  // QualCoder reads text files in universal-newline mode, so its positions
+  // count "\r\n" as one character; its source files also start with a BOM.
+  // Reported: a QualCoder project's 1,303 passages all came in a few
+  // characters early.
+  const raw = '\uFEFFWEBVTT\r\n\r\n[02]: Du coup, je suis Charlotte.\r\nPar exemple... en clinique, on se pose une question.\r\n'
+  const lf = raw.slice(1).replace(/\r\n/g, '\n')
+  const passage = 'en clinique'
+  const start = lf.indexOf(passage)
+
+  function importWith(startPosition: number, endPosition: number, name: string): string {
+    const qde = `<Project xmlns="urn:QDA-XML:project:1.0" name="x">
+      <CodeBook><Codes><Code guid="11111111-1111-4111-8111-111111111111" name="C" isCodable="true"/></Codes></CodeBook>
+      <Sources><TextSource guid="22222222-2222-4222-8222-222222222222" name="charlotte.docx" plainTextPath="internal://t.txt">
+        <PlainTextSelection guid="33333333-3333-4333-8333-333333333333" name="${name}" startPosition="${startPosition}" endPosition="${endPosition}">
+          <Coding guid="44444444-4444-4444-8444-444444444444"><CodeRef targetGUID="11111111-1111-4111-8111-111111111111"/></Coding>
+        </PlainTextSelection>
+      </TextSource></Sources></Project>`
+    const { data } = parseQdpx(qde, (p) => (p === 'sources/t.txt' ? raw : undefined))
+    const full = joinParagraphs(data.documents[0].paragraphs)
+    return full.slice(data.segments[0].start, data.segments[0].end)
+  }
+
+  it('QualCoder-style positions (BOM not counted, CRLF as one) land on the recorded words', () => {
+    expect(importWith(start, start + passage.length, passage)).toBe(passage)
+  })
+
+  it('positions counting both characters of each CRLF also land, when the recorded words say so', () => {
+    const rawStart = raw.slice(1).indexOf(passage)
+    expect(rawStart).toBeGreaterThan(start)
+    expect(importWith(rawStart, rawStart + passage.length, passage)).toBe(passage)
+  })
+
+  it('with no recorded words to go by, CRLF counts as one (the common convention)', () => {
+    expect(importWith(start, start + passage.length, '')).toBe(passage)
   })
 })

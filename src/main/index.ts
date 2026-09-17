@@ -144,13 +144,16 @@ function registerProjectHandlers(): void {
     if (!qdeEntry) throw new Error('Not a REFI-QDA file: no project.qde inside the archive')
     const qde = await qdeEntry.async('string')
     // Source texts are read up front (the parser is synchronous), keyed by
-    // their path inside the zip; a tool that nests everything in a folder
-    // is tolerated by also matching on the trailing path.
+    // their path inside the zip, case-insensitively — QualCoder writes the
+    // folder as "Sources/", others as "sources/" — and a tool that nests
+    // everything in a top folder is tolerated by also matching on the
+    // trailing path.
     const sources = new Map<string, string>()
-    for (const file of zip.file(/\.txt$/i)) sources.set(file.name, await file.async('string'))
+    for (const file of zip.file(/\.txt$/i)) sources.set(file.name.toLowerCase(), await file.async('string'))
     const readSource = (zipPath: string): string | undefined => {
-      if (sources.has(zipPath)) return sources.get(zipPath)
-      for (const [name, text] of sources) if (name.endsWith(`/${zipPath}`)) return text
+      const wanted = zipPath.toLowerCase()
+      if (sources.has(wanted)) return sources.get(wanted)
+      for (const [name, text] of sources) if (name.endsWith(`/${wanted}`)) return text
       return undefined
     }
     const { data, report } = parseQdpx(qde, readSource)

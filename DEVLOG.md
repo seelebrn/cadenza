@@ -3593,3 +3593,50 @@ Verified: 4 new tests on a 2×2 grid of real card sizes — the cards beside, be
 are each reachable by pointing at them; the side follows the pointer's position on the target;
 in a gap the nearer card wins and nothing is picked beyond reach; the dragged card is never its
 own target. Full suite green (497/497), typecheck clean, production build clean, boot-tested.
+
+### REFI-QDA import, against a real QualCoder export (2026-09-17)
+
+"I tried to import a REFI-QDA project, but categories were imported as codes and nested codes
+rather than clusters." With the file itself (QualCoder 3.8.2, 22 interviews, 437 codebook
+entries, 1,303 coded passages) — the first real export the importer had seen, which the previous
+entry flagged as the thing to try. It found three problems, not one.
+
+1. **Categories.** QualCoder doesn't use REFI Sets; it writes each category as a `<Code>` with
+   `isCodable="false"`, nested as deep as its category tree (here 57 of them, up to 4 levels, with
+   367 codes inside and 13 at the top level; no coding ever points at one). NVivo folders and
+   MAXQDA code groups are exported the same way. The importer ignored the flag. Now a non-codable
+   code becomes a cluster, nested under the nearest grouping above it; a codable code directly
+   inside a grouping is a top-level code filed under that cluster; codable codes under codable
+   codes keep their hierarchy; a note attached to a grouping attaches to the cluster; a coding
+   pointing at a grouping (not allowed by the spec, but possible) is reported as skipped.
+
+2. **No documents at all.** Measuring the real import showed all 22 sources refused with "its text
+   is not in the file". The texts were there: QualCoder names the folder `Sources/`, the importer
+   looked for `sources/` exactly. The main process now matches zip paths case-insensitively.
+
+3. **Every passage shifted.** QualCoder records each selection's text in its `name` attribute, so
+   the import could be checked word for word: all 1,303 passages were a few characters early.
+   Probing the first source showed why — its positions are relative to the text **without its
+   UTF-8 BOM and without carriage returns** (QualCoder reads files in universal-newline mode, so
+   "\r\n" is one character); with both removed, positions matched exactly. The importer counted
+   the BOM and subtracted the carriage returns a second time. The spec says neither, and other
+   tools may count raw file content, so rather than hardcode one convention: the BOM is never
+   counted, and `chooseSourceReading` maps a source's positions both ways (carriage returns
+   counted or not) and keeps the reading under which more selections cover exactly their recorded
+   text, defaulting to not counting them when there's no evidence. While in there, positions are
+   now converted between REFI's characters (code points) and JavaScript's UTF-16 code units in
+   both directions, so an emoji early in a transcript can't shift every later passage by one.
+
+Result on the real file: 22 documents, 380 codes, 57 clusters with the same 7 top-level ones as
+in QualCoder, 1,303 codings, nothing skipped, no structural edge on the board; of 1,303 passages,
+925 identical to QualCoder's recorded text and 378 identical apart from whitespace (blank-line
+runs inside a passage collapse on import), 0 different. ~75 ms.
+
+Tests: QualCoder-shaped codebook (nested non-codable codes with hex character references in
+names, codes inside, a code under a code, a note on a category, a coding on a category); the two
+line-ending conventions with and without recorded passage text, starting from a BOM (the
+QualCoder cases confirmed to fail with the old counting); code point conversion both ways and an
+emoji round trip. The earlier "other tool" fixture now records its passages' text, so its
+carriage-return counting is detected rather than assumed. Full suite green (505/505), typecheck
+clean, production build clean, boot-tested; the real-file check was run as a temporary test
+against the user's export, not committed.

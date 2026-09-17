@@ -3533,3 +3533,37 @@ dragged in from another cluster onto each target (the target and every card befo
 spots); a chain keeps its anchor. All three failed before the fix (first case: dragging c1 onto
 c3 put c2 in c3's spot). One older test that encoded the codebook-earliest anchor was updated to
 the new rule. Full suite green (496/496), typecheck clean, production build clean, boot-tested.
+
+### Linking, second attempt: touching, not consecutive (2026-09-17)
+
+"This fix doesn't work properly. I have 4 codes in a small cluster, I hold click on 1, press
+Shift, drag 1 around, see 3 (just below) highlighted, release the click, and then 2 and 3 get
+linked, not 1 and 3."
+
+The previous entry's fix was built on a wrong idea of "together". Linked cards were given
+*consecutive slots*, anchored on the target — but consecutive slots aren't adjacent in a grid:
+the slot after the end of a row is the start of the next one. In the reported 2×2 cluster
+(`1 2 / 3 4`, 3 directly below 1) the link 1 → 3 made 1 leave slot 0 and follow 3, which
+re-packed three cards into `2 3 / 1 4`: the real pair diagonal, and 2 and 3 now side by side.
+The link stored was 1–3 all along; the arrangement made it read as 2–3. And in this case nothing
+needed to move at all — 1 and 3 already touched. The previous tests passed because they checked
+slot *numbers* ("adjacent" = slots differ by one), which is exactly the wrong notion.
+
+New rule in `getVisibleBoardItems`: cards keep their plain codebook-order slots; then links are
+applied in the order they were made, each moving as little as possible. If the two cards already
+touch (same row and neighboring columns, or same column and neighboring rows), nothing moves.
+Otherwise the target never moves: the dragged card (`itemA`) swaps places with the first
+neighbor of the target — right, left, below, above, within the grid — that isn't part of any
+link, so exactly two cards move and an earlier pair isn't broken to make a later one. Grid spots
+are only ever swapped, so nothing can stack or overflow the box. (A neighbor that is itself
+linked is never chosen; if every neighbor is, the pair is left as is — only possible with a
+target surrounded by linked cards.)
+
+Tests now check geometry, not slot numbers: the reported case moves nothing; for every
+dragged/target pair in a 2×3 cluster, the target never moves, at most one other card moves, the
+pair touches on screen, and every card still has its own spot; a chain keeps each earlier pair
+touching and its first target fixed; a card dragged in from another cluster ends up touching its
+target. All four failed on the previous version (the reported case first). The previous entry's
+tests, which encoded consecutive slots, were removed, and the older "consecutive slots" test was
+rewritten as a touching test. Full suite green (497/497), typecheck clean, production build
+clean, boot-tested.

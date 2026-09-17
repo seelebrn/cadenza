@@ -7,10 +7,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 ## [Unreleased]
 
 ### Fixed
-- Shift-dragging a code onto another to link them could make a *third* code appear in the spot
-  you dropped onto, looking like the one that got linked. Linked codes are now placed around the
-  code you aimed at: it keeps its place and the dragged code sits right next to it. While
-  Shift-dragging, the code the drop will link to is now highlighted too.
+- Shift-dragging a code onto another to link them could rearrange the cluster so that two
+  *other* codes ended up side by side and looked like the linked pair. Linking now moves as
+  little as possible: if the two codes already touch, nothing moves; otherwise the code you aimed
+  at stays put and the dragged code swaps places with one of its neighbors, so the pair always
+  ends up side by side or one above the other. While Shift-dragging, the code the drop will link
+  to is now highlighted too.
 
 ### Added
 - **Full-text search** (Analysis → Search): find every occurrence of a word or phrase across all

@@ -3013,7 +3013,7 @@ describe('clustered cards always sit on their cluster grid', () => {
     expect(rectContains(clusters[0], { ...clusters[0], x: c1.x, y: c1.y, width: MEMBER_CARD_WIDTH, height: MEMBER_CARD_HEIGHT })).toBe(true)
   })
 
-  it('gives linked members consecutive slots even when the codebook order separates them', () => {
+  it('makes linked members touch even when the codebook order separates them', () => {
     const a = makeCategory('A', { codeIds: ['c1', 'c2', 'c3', 'c4'] })
     const items: BoardItem[] = [
       { id: 'i1', boardId: 'b1', refType: 'code', refId: 'c1', x: 0, y: 0 },
@@ -3029,13 +3029,15 @@ describe('clustered cards always sit on their cluster grid', () => {
     const clusters = getVisibleBoardClusters(board, [], data.categories)
     const visible = getVisibleBoardItems(board, items, data.codes, data.notes, data.categories, clusters, data.boardLinks)
     const byRef = (refId: string) => visible.find((i) => i.refId === refId)!
-    // The link is c1 (dragged) → c4 (aimed at), so c4 anchors the pair and
-    // c1 follows it. 4 members -> 2 columns: c2 slot 0, c3 slot 1 (row 0),
-    // c4 slot 2 and c1 slot 3 (row 1) — c1 lands in c4's old spot, right
-    // where it was dropped, rather than c4 being pulled back beside c1.
+    // 4 members -> 2 columns: c1 c2 / c3 c4. The link is c1 (dragged) → c4
+    // (aimed at), which sit diagonally. c4 stays put; c1 swaps with c4's
+    // first unlinked neighbor — nothing to its right in that row, so the
+    // one on its left, c3 — giving c3 c2 / c1 c4. Only c1 and c3 moved.
+    expect(byRef('c4')).toMatchObject({ x: byRef('c2').x, y: byRef('c1').y })
     expect(byRef('c1').y).toBe(byRef('c4').y)
-    expect(byRef('c1').x).toBeGreaterThan(byRef('c4').x)
-    expect(byRef('c2').y).toBeLessThan(byRef('c4').y)
+    expect(byRef('c1').x).toBeLessThan(byRef('c4').x)
+    expect(byRef('c3').y).toBe(byRef('c2').y)
+    expect(byRef('c3').x).toBeLessThan(byRef('c2').x)
   })
 
   it("shows an explicit box no smaller than its own card grid, so cards can't hang out of it", () => {
@@ -3784,10 +3786,8 @@ describe('growth after a reset stays local once the top level is pinned', () => 
     }
   })
 })
-
-describe('linking cards keeps the aimed-at spot', () => {
+describe('linked cards touch, and linking moves as little as possible', () => {
   const board = { id: 'b1', name: 'Main', isDefault: true }
-  const ids = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
 
   function layout(
     categories: CategoryRecord[],
@@ -3800,54 +3800,73 @@ describe('linking cards keeps the aimed-at spot', () => {
     return new Map(items.map((i) => [i.refId, { x: i.x, y: i.y }]))
   }
   const same = (a: { x: number; y: number }, b: { x: number; y: number }): boolean => a.x === b.x && a.y === b.y
+  /** Side by side in a row, or one directly above the other — what "linked
+   * cards sit together" has to mean in a grid (the next slot can be the
+   * start of the next row). */
+  function touching(a: { x: number; y: number }, b: { x: number; y: number }, all: Array<{ x: number; y: number }>): boolean {
+    const xs = [...new Set(all.map((p) => p.x))].sort((p, q) => p - q)
+    const ys = [...new Set(all.map((p) => p.y))].sort((p, q) => p - q)
+    const col = (p: { x: number }): number => xs.indexOf(p.x)
+    const row = (p: { y: number }): number => ys.indexOf(p.y)
+    return (row(a) === row(b) && Math.abs(col(a) - col(b)) === 1) || (col(a) === col(b) && Math.abs(row(a) - row(b)) === 1)
+  }
 
-  // Reported: "I drag 1 next to 2 to link them (holding Shift). On release,
-  // another code, 3, takes the place of 2 and is instantly linked with 1."
-  // The link was right; the grid put the linked pair at the *earlier* card's
-  // codebook position, so when the dragged card came first, the target was
-  // pulled back beside it and a third card slid into the spot aimed at.
-  it('within one cluster: after linking dragged → target, the target’s old spot holds the target or the dragged card, never a third card', () => {
+  // Reported: four codes in a small cluster; 1 is Shift-dragged onto 3 (just
+  // below it); on release "2 and 3 get linked, not 1 and 3". The link was
+  // 1–3, but the grid re-slotted three cards and left 2 and 3 side by side
+  // while 1 and 3 ended up diagonal.
+  it('linking two cards that already touch moves nothing', () => {
+    const ids = ['c1', 'c2', 'c3', 'c4']
+    const categories = [makeCategory('A', { codeIds: ids })]
+    const before = layout(categories, ids, [])
+    const after = layout(categories, ids, [{ itemAId: 'item-c1', itemBId: 'item-c3' }])
+    for (const id of ids) expect(same(after.get(id)!, before.get(id)!), `${id} moved`).toBe(true)
+  })
+
+  it('for every dragged → target pair: the target never moves, at most one other card moves, and the pair touches', () => {
+    const ids = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
     const categories = [makeCategory('A', { codeIds: ids })]
     const before = layout(categories, ids, [])
     for (const dragged of ids) {
       for (const target of ids) {
         if (dragged === target) continue
         const after = layout(categories, ids, [{ itemAId: `item-${dragged}`, itemBId: `item-${target}` }])
-        const atTargetSpot = ids.filter((id) => same(after.get(id)!, before.get(target)!))
-        expect(atTargetSpot, `${dragged} → ${target}`).toHaveLength(1)
-        expect([dragged, target], `${dragged} → ${target}: ${atTargetSpot[0]} took the spot`).toContain(atTargetSpot[0])
-        // And the pair really is side by side.
-        const slotOf = (id: string): number => [...after.values()].filter((p) => p.y < after.get(id)!.y || (p.y === after.get(id)!.y && p.x < after.get(id)!.x)).length
-        expect(Math.abs(slotOf(dragged) - slotOf(target)), `${dragged} → ${target} adjacent`).toBe(1)
+        const label = `${dragged} → ${target}`
+        expect(same(after.get(target)!, before.get(target)!), `${label}: target moved`).toBe(true)
+        const moved = ids.filter((id) => id !== dragged && !same(after.get(id)!, before.get(id)!))
+        expect(moved.length, `${label}: others moved ${moved}`).toBeLessThanOrEqual(1)
+        expect(touching(after.get(dragged)!, after.get(target)!, [...after.values()]), `${label}: not touching`).toBe(true)
+        // Still a permutation of the same spots: nothing stacked, no spot lost.
+        const spots = new Set([...after.values()].map((p) => `${p.x},${p.y}`))
+        expect(spots.size, label).toBe(ids.length)
       }
     }
   })
 
-  it('dragged in from another cluster: the target and every card before it keep their spots', () => {
-    const inCluster = ['c2', 'c3', 'c4', 'c5', 'c6']
-    const categories = [makeCategory('A', { codeIds: inCluster })]
-    const before = layout(categories, ids, [])
-    for (const target of inCluster) {
-      // c1 (earliest in the codebook) joins the cluster and links to target.
-      const joined = [makeCategory('A', { codeIds: [...inCluster, 'c1'] })]
-      const after = layout(joined, ids, [{ itemAId: 'item-c1', itemBId: `item-${target}` }])
-      for (const id of inCluster.slice(0, inCluster.indexOf(target) + 1)) {
-        expect(same(after.get(id)!, before.get(id)!), `c1 → ${target}: ${id} moved`).toBe(true)
-      }
-    }
-  })
-
-  it('a chain keeps growing from the card first aimed at', () => {
+  it('a chain keeps each earlier pair touching, and the first card aimed at never moves', () => {
+    const ids = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9']
     const categories = [makeCategory('A', { codeIds: ids })]
     const before = layout(categories, ids, [])
-    // c1 dropped on c5, then c2 dropped on c1: c5 stays the anchor.
-    const after = layout(categories, ids, [
-      { itemAId: 'item-c1', itemBId: 'item-c5' },
+    const links = [
+      { itemAId: 'item-c1', itemBId: 'item-c9' },
       { itemAId: 'item-c2', itemBId: 'item-c1' }
-    ])
-    const order = [...ids].sort((a, b) => after.get(a)!.y - after.get(b)!.y || after.get(a)!.x - after.get(b)!.x)
-    expect(order.indexOf('c1')).toBe(order.indexOf('c5') + 1)
-    expect(order.indexOf('c2')).toBe(order.indexOf('c1') + 1)
-    expect(same(after.get('c6')!, before.get('c6')!)).toBe(true)
+    ]
+    const after = layout(categories, ids, links)
+    const all = [...after.values()]
+    expect(same(after.get('c9')!, before.get('c9')!)).toBe(true)
+    expect(touching(after.get('c1')!, after.get('c9')!, all)).toBe(true)
+    expect(touching(after.get('c2')!, after.get('c1')!, all)).toBe(true)
+  })
+
+  it('a card dragged in from another cluster ends up touching its target, nothing stacked', () => {
+    const inCluster = ['c2', 'c3', 'c4', 'c5', 'c6']
+    const ids = ['c1', ...inCluster]
+    for (const target of inCluster) {
+      const joined = [makeCategory('A', { codeIds: [...inCluster, 'c1'] })]
+      const after = layout(joined, ids, [{ itemAId: 'item-c1', itemBId: `item-${target}` }])
+      const all = [...after.values()]
+      expect(touching(after.get('c1')!, after.get(target)!, all), `c1 → ${target}`).toBe(true)
+      expect(new Set(all.map((p) => `${p.x},${p.y}`)).size).toBe(ids.length)
+    }
   })
 })

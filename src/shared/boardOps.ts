@@ -836,77 +836,71 @@ export function getVisibleBoardItems(
   }
 
   // Each member's slot within its home cluster's grid: codebook order
-  // (project-wide code order, then note order), except that cards linked
-  // together in the same cluster take consecutive slots, so a linked pair
-  // still reads as a pair inside the grid. Assigned once up front for every
-  // member (explicit ones included — on the default board a clustered card
-  // always sits at its slot; see placeRef), so a member's slot never
-  // depends on which of its siblings happen to have been touched.
-  //
-  // A linked group sits where its *anchor* would: the card that was aimed
-  // at. A link records the dragged card as itemA and the card it was
-  // dropped on as itemB, so the anchor is a member that's only ever a
-  // target within the group (earliest in codebook order if several, or if
-  // a cycle leaves none). The rest follow it, breadth-first. Anchoring on
-  // the codebook-earliest member instead pulled the target back to wherever
-  // the dragged card used to be, whenever the dragged card came first —
-  // shifting every card in between, so a third card slid into the very
-  // spot the user had dropped onto and looked like the one linked.
+  // (project-wide code order, then note order). Assigned once up front for
+  // every member (explicit ones included — on the default board a
+  // clustered card always sits at its slot; see placeRef), so a member's
+  // slot never depends on which of its siblings happen to have been
+  // touched.
+  const orderedRefs = [...codes.map((c) => `code:${c.id}`), ...notes.map((n) => `note:${n.id}`)]
+  const memberSlotByRef = new Map<string, number>()
+  const slotCounterByCluster = new Map<string, number>()
+  const occupantBySlotByCluster = new Map<string, Map<number, string>>()
+  for (const key of orderedRefs) {
+    const cluster = homeClusterByRef.get(key)
+    if (!cluster) continue
+    const slot = slotCounterByCluster.get(cluster.id) ?? 0
+    memberSlotByRef.set(key, slot)
+    slotCounterByCluster.set(cluster.id, slot + 1)
+    const occupants = occupantBySlotByCluster.get(cluster.id) ?? new Map<number, string>()
+    occupants.set(slot, key)
+    occupantBySlotByCluster.set(cluster.id, occupants)
+  }
+
+  // Linked cards in the same cluster are then made to *touch* — side by
+  // side in a row, or one directly above the other — moving as little as
+  // possible. A link records the dragged card as itemA and the card it was
+  // dropped on as itemB, and links apply in the order they were made:
+  //  - if the two already touch, nothing moves;
+  //  - otherwise the target never moves: the dragged card swaps places with
+  //    a neighbor of the target (right, left, below, above) that isn't part
+  //    of any link, so exactly two cards move and earlier pairs stay intact.
+  // "Consecutive slots" isn't the same as touching in a grid — the next
+  // slot after the end of a row is the start of the next one — and placing
+  // a linked group as a run of slots re-packed every card after it: in a
+  // 2×2 cluster, dropping 1 onto 3 (just below it) left `2 3 / 1 4`, with 2
+  // and 3 side by side and the actual pair diagonal. Reported as "2 and 3
+  // get linked, not 1 and 3."
   const refByItemId = new Map(explicitItems.map((i) => [i.id, `${i.refType}:${i.refId}`]))
-  const linkedRefsByRef = new Map<string, string[]>()
-  const sourceRefs = new Set<string>()
+  const clusterLinks: Array<{ a: string; b: string; clusterId: string }> = []
+  const linkedRefs = new Set<string>()
   for (const link of links) {
     const a = refByItemId.get(link.itemAId)
     const b = refByItemId.get(link.itemBId)
     if (!a || !b || a === b) continue
-    linkedRefsByRef.set(a, [...(linkedRefsByRef.get(a) ?? []), b])
-    linkedRefsByRef.set(b, [...(linkedRefsByRef.get(b) ?? []), a])
-    if (homeClusterByRef.get(a) === homeClusterByRef.get(b)) sourceRefs.add(a)
+    const cluster = homeClusterByRef.get(a)
+    if (!cluster || homeClusterByRef.get(b) !== cluster) continue
+    clusterLinks.push({ a, b, clusterId: cluster.id })
+    linkedRefs.add(a)
+    linkedRefs.add(b)
   }
-  const orderedRefs = [...codes.map((c) => `code:${c.id}`), ...notes.map((n) => `note:${n.id}`)]
-  const rankByRef = new Map(orderedRefs.map((key, index) => [key, index]))
-  const byRank = (a: string, b: string): number => (rankByRef.get(a) ?? 0) - (rankByRef.get(b) ?? 0)
-
-  // Linked groups within one cluster, each with its anchor.
-  const anchorByRef = new Map<string, string>()
-  for (const key of orderedRefs) {
-    const cluster = homeClusterByRef.get(key)
-    if (!cluster || anchorByRef.has(key)) continue
-    const group = [key]
-    const inGroup = new Set(group)
-    for (let i = 0; i < group.length; i++) {
-      for (const partner of linkedRefsByRef.get(group[i]) ?? []) {
-        if (homeClusterByRef.get(partner) !== cluster || inGroup.has(partner)) continue
-        inGroup.add(partner)
-        group.push(partner)
-      }
-    }
-    group.sort(byRank)
-    const anchor = group.find((ref) => !sourceRefs.has(ref)) ?? group[0]
-    for (const ref of group) anchorByRef.set(ref, anchor)
-  }
-
-  const memberSlotByRef = new Map<string, number>()
-  const slotCounterByCluster = new Map<string, number>()
-  for (const key of orderedRefs) {
-    const cluster = homeClusterByRef.get(key)
-    // A non-anchor member is placed with its group, when its anchor comes up.
-    if (!cluster || memberSlotByRef.has(key) || anchorByRef.get(key) !== key) continue
-    const seen = new Set([key])
-    const queue = [key]
-    while (queue.length > 0) {
-      const current = queue.shift()!
-      const slot = slotCounterByCluster.get(cluster.id) ?? 0
-      memberSlotByRef.set(current, slot)
-      slotCounterByCluster.set(cluster.id, slot + 1)
-      const partners = (linkedRefsByRef.get(current) ?? [])
-        .filter((p) => homeClusterByRef.get(p) === cluster && !seen.has(p))
-        .sort(byRank)
-      for (const partner of partners) {
-        seen.add(partner)
-        queue.push(partner)
-      }
-    }
+  for (const { a, b, clusterId } of clusterLinks) {
+    const columns = memberColumnCountByCluster.get(clusterId) ?? 1
+    const count = slotCounterByCluster.get(clusterId) ?? 0
+    const occupants = occupantBySlotByCluster.get(clusterId)!
+    const slotA = memberSlotByRef.get(a)!
+    const slotB = memberSlotByRef.get(b)!
+    const rowOf = (slot: number): number => Math.floor(slot / columns)
+    const neighbors = [slotB + 1, slotB - 1, slotB + columns, slotB - columns].filter(
+      (slot) => slot >= 0 && slot < count && (Math.abs(slot - slotB) === columns || rowOf(slot) === rowOf(slotB))
+    )
+    if (neighbors.includes(slotA)) continue
+    const swapSlot = neighbors.find((slot) => !linkedRefs.has(occupants.get(slot)!))
+    if (swapSlot === undefined) continue
+    const displaced = occupants.get(swapSlot)!
+    memberSlotByRef.set(a, swapSlot)
+    memberSlotByRef.set(displaced, slotA)
+    occupants.set(swapSlot, a)
+    occupants.set(slotA, displaced)
   }
 
   function positionForSlot(cluster: BoardCluster, slot: number): { x: number; y: number } {

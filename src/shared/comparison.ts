@@ -24,6 +24,34 @@ export function getCases(data: ProjectData): CaseInfo[] {
     .map((d) => ({ documentId: d.id, documentTitle: d.title }))
 }
 
+/** Cases grouped by the value they have for one attribute — "what do the
+ * nurses say vs. the managers" — with documents that don't have the
+ * attribute (or have it empty) collected under `unsetLabel`, last, so no
+ * case silently drops out of a comparison. Value groups come sorted
+ * (numeric-aware), cases within a group oldest-imported first. */
+export interface CaseGroup {
+  value: string
+  cases: CaseInfo[]
+}
+
+export const UNSET_ATTRIBUTE_LABEL = '(not set)'
+
+export function getCaseGroups(data: ProjectData, attributeName: string): CaseGroup[] {
+  const byValue = new Map<string, CaseInfo[]>()
+  const unset: CaseInfo[] = []
+  for (const document of [...data.documents].sort((a, b) => a.importedAt.localeCompare(b.importedAt))) {
+    const info = { documentId: document.id, documentTitle: document.title }
+    const value = document.attributes[attributeName]?.trim() ?? ''
+    if (!value) unset.push(info)
+    else byValue.set(value, [...(byValue.get(value) ?? []), info])
+  }
+  const groups = [...byValue.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+    .map(([value, cases]) => ({ value, cases }))
+  if (unset.length > 0) groups.push({ value: UNSET_ATTRIBUTE_LABEL, cases: unset })
+  return groups
+}
+
 export interface CodeCaseCount {
   codeId: string
   documentId: string
@@ -57,6 +85,45 @@ export function getCodeCaseMatrix(
     for (const [documentId, count] of byDocument) {
       results.push({ codeId, documentId, count })
     }
+  }
+  return results
+}
+
+export interface CodeGroupCount {
+  codeId: string
+  /** The attribute value this column stands for (or UNSET_ATTRIBUTE_LABEL). */
+  value: string
+  /** Coded passages across every case in the group. */
+  count: number
+  /** How many of the group's cases have at least one — "3 of 5 nurses"
+   * reads differently from "one nurse, three times". */
+  caseCount: number
+}
+
+/** The codes-by-cases matrix rolled up by an attribute: one column per
+ * attribute value instead of per document. Only cells with count > 0. */
+export function getCodeGroupMatrix(
+  data: ProjectData,
+  codeIds: string[],
+  attributeName: string,
+  includeDescendants: boolean
+): CodeGroupCount[] {
+  const groups = getCaseGroups(data, attributeName)
+  const valueByDocument = new Map<string, string>()
+  for (const group of groups) for (const c of group.cases) valueByDocument.set(c.documentId, group.value)
+
+  const results: CodeGroupCount[] = []
+  for (const codeId of codeIds) {
+    const counts = new Map<string, { count: number; documents: Set<string> }>()
+    for (const r of retrieveByCode(data, codeId, { includeDescendants })) {
+      const value = valueByDocument.get(r.documentId)
+      if (value === undefined) continue
+      const cell = counts.get(value) ?? { count: 0, documents: new Set<string>() }
+      cell.count++
+      cell.documents.add(r.documentId)
+      counts.set(value, cell)
+    }
+    for (const [value, cell] of counts) results.push({ codeId, value, count: cell.count, caseCount: cell.documents.size })
   }
   return results
 }

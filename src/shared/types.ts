@@ -43,6 +43,12 @@ export interface DocumentRecord {
   /** Path of the original imported file's bytes within the project's assets, if kept. */
   assetRelPath: string | null
   importedAt: ISODateString
+  /** Case attributes — facts about the case this document is (interviewee
+   * role, site, age band, date…), attribute name → value, free text. The
+   * set of attribute names in a project is simply the union across its
+   * documents; a document that has none of a given attribute just lacks
+   * the key. Used to group and filter cases in Compare. */
+  attributes: Record<string, string>
 }
 
 export interface ImportedDocument {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getCases, getCodeCaseMatrix } from './comparison'
+import { getCaseGroups, getCases, getCodeCaseMatrix, getCodeGroupMatrix, UNSET_ATTRIBUTE_LABEL } from './comparison'
 import type { CodeNode, DocumentRecord, ProjectData, Segment } from './types'
 
 function makeCode(id: string, overrides: Partial<CodeNode> = {}): CodeNode {
@@ -7,7 +7,7 @@ function makeCode(id: string, overrides: Partial<CodeNode> = {}): CodeNode {
 }
 
 function makeDoc(id: string, overrides: Partial<DocumentRecord> = {}): DocumentRecord {
-  return { id, title: id, paragraphs: ['x'], sourceFormat: 'txt', assetRelPath: null, importedAt: '0', ...overrides }
+  return { id, title: id, paragraphs: ['x'], sourceFormat: 'txt', assetRelPath: null, importedAt: '0', attributes: {}, ...overrides }
 }
 
 function makeData(overrides: Partial<ProjectData> = {}): ProjectData {
@@ -110,5 +110,46 @@ describe('getCodeCaseMatrix', () => {
     })
     const matrix = getCodeCaseMatrix(data, ['parent', 'other'], true)
     expect(matrix).toEqual([{ codeId: 'other', documentId: 'a', count: 1 }])
+  })
+})
+
+describe('comparison by attribute', () => {
+  function build(): ProjectData {
+    const docs = [
+      makeDoc('n1', { title: 'Nurse 1', importedAt: '2020-01-01', attributes: { Role: 'nurse' } }),
+      makeDoc('m1', { title: 'Manager 1', importedAt: '2020-01-02', attributes: { Role: 'manager' } }),
+      makeDoc('n2', { title: 'Nurse 2', importedAt: '2020-01-03', attributes: { Role: 'nurse' } }),
+      makeDoc('u1', { title: 'Unknown', importedAt: '2020-01-04', attributes: { Role: '  ' } })
+    ]
+    const seg = (id: string, documentId: string): Segment => ({ id, documentId, start: 0, end: 1, text: 'x' })
+    return makeData({
+      documents: docs,
+      codes: [makeCode('stress')],
+      segments: [seg('s1', 'n1'), seg('s2', 'n1'), seg('s3', 'm1'), seg('s4', 'u1')],
+      codings: [
+        { id: 'c1', segmentId: 's1', codeId: 'stress', createdAt: '0' },
+        { id: 'c2', segmentId: 's2', codeId: 'stress', createdAt: '0' },
+        { id: 'c3', segmentId: 's3', codeId: 'stress', createdAt: '0' },
+        { id: 'c4', segmentId: 's4', codeId: 'stress', createdAt: '0' }
+      ]
+    })
+  }
+
+  it('getCaseGroups groups cases by attribute value, sorted, with unset cases last', () => {
+    const groups = getCaseGroups(build(), 'Role')
+    expect(groups.map((g) => g.value)).toEqual(['manager', 'nurse', UNSET_ATTRIBUTE_LABEL])
+    expect(groups[1].cases.map((c) => c.documentTitle)).toEqual(['Nurse 1', 'Nurse 2'])
+    expect(groups[2].cases.map((c) => c.documentId)).toEqual(['u1'])
+    expect(getCaseGroups(build(), 'Missing')).toEqual([
+      { value: UNSET_ATTRIBUTE_LABEL, cases: getCases(build()) }
+    ])
+  })
+
+  it('getCodeGroupMatrix counts passages and cases per attribute value', () => {
+    const cells = getCodeGroupMatrix(build(), ['stress'], 'Role', false)
+    const byValue = new Map(cells.map((c) => [c.value, c]))
+    expect(byValue.get('nurse')).toMatchObject({ count: 2, caseCount: 1 })
+    expect(byValue.get('manager')).toMatchObject({ count: 1, caseCount: 1 })
+    expect(byValue.get(UNSET_ATTRIBUTE_LABEL)).toMatchObject({ count: 1, caseCount: 1 })
   })
 })

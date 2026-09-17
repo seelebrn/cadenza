@@ -22,7 +22,7 @@ function makeCategory(id: string, overrides: Partial<CategoryRecord> = {}): Cate
   }
 }
 function makeDoc(id: string, overrides: Partial<DocumentRecord> = {}): DocumentRecord {
-  return { id, title: id, paragraphs: ['x'], sourceFormat: 'txt', assetRelPath: null, importedAt: '0', ...overrides }
+  return { id, title: id, paragraphs: ['x'], sourceFormat: 'txt', assetRelPath: null, importedAt: '0', attributes: {}, ...overrides }
 }
 function makeNote(id: string, overrides: Partial<NoteRecord> = {}): NoteRecord {
   return {
@@ -307,7 +307,7 @@ describe('buildResultsDraftReport', () => {
   })
 
   it('by case: one section per document, only codes actually used in that case', () => {
-    const docA = makeDoc('d1', { title: 'Case A', importedAt: '0', paragraphs: ['alpha text'] })
+    const docA = makeDoc('d1', { title: 'Case A', importedAt: '0', attributes: {}, paragraphs: ['alpha text'] })
     const docB = makeDoc('d2', { title: 'Case B', importedAt: '1', paragraphs: ['beta text'] })
     const segA: Segment = { id: 's1', documentId: 'd1', start: 0, end: 5, text: 'alpha' }
     const data = makeData({

@@ -13,7 +13,7 @@ import {
 import type { DocumentRecord, NoteCategoryDef, ProjectData, Segment } from './types'
 
 function makeDoc(id: string, title = 'Doc'): DocumentRecord {
-  return { id, title, paragraphs: ['hello world'], sourceFormat: 'txt', assetRelPath: null, importedAt: '0' }
+  return { id, title, paragraphs: ['hello world'], sourceFormat: 'txt', assetRelPath: null, importedAt: '0', attributes: {} }
 }
 
 function makeData(overrides: Partial<ProjectData> = {}): ProjectData {

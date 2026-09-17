@@ -50,7 +50,14 @@ import {
   setCategoryDefinition as setCategoryDefinitionOp,
   updateClusterLink as updateClusterLinkOp
 } from '@shared/categoryOps'
-import { editParagraph as editParagraphOp, renameDocument as renameDocumentOp } from '@shared/documentOps'
+import {
+  deleteAttribute as deleteAttributeOp,
+  editParagraph as editParagraphOp,
+  removeDocumentAttribute as removeDocumentAttributeOp,
+  renameAttribute as renameAttributeOp,
+  renameDocument as renameDocumentOp,
+  setDocumentAttribute as setDocumentAttributeOp
+} from '@shared/documentOps'
 import {
   addAllClustersToBoard as addAllClustersToBoardOp,
   addAllCodesToBoard as addAllCodesToBoardOp,
@@ -232,6 +239,13 @@ interface ProjectState {
   // Editing the imported source text itself
   editParagraph: (documentId: string, paragraphIndex: number, newText: string) => void
   renameDocument: (documentId: string, title: string) => void
+  // Case attributes — see DocumentRecord.attributes / documentOps.ts.
+  setDocumentAttribute: (documentId: string, name: string, value: string) => void
+  removeDocumentAttribute: (documentId: string, name: string) => void
+  /** Renames the attribute on every document that has it. */
+  renameAttribute: (oldName: string, newName: string) => void
+  /** Removes the attribute from every document. */
+  deleteAttribute: (name: string) => void
 
   // Visual grouping board
   createBoard: (name: string) => string | null
@@ -794,6 +808,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   renameDocument: (documentId, title) =>
     get().updateProject((data) => renameDocumentOp(data, documentId, title)),
+
+  setDocumentAttribute: (documentId, name, value) =>
+    get().updateProject((data) => setDocumentAttributeOp(data, documentId, name, value)),
+  removeDocumentAttribute: (documentId, name) =>
+    get().updateProject((data) => removeDocumentAttributeOp(data, documentId, name)),
+  renameAttribute: (oldName, newName) => get().updateProject((data) => renameAttributeOp(data, oldName, newName)),
+  deleteAttribute: (name) => get().updateProject((data) => deleteAttributeOp(data, name)),
 
   createBoard: (name) => {
     const { data } = get()

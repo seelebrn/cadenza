@@ -46,7 +46,8 @@ export async function importDocumentDialog(): Promise<ImportedDocument | null> {
     paragraphs,
     sourceFormat: ext,
     assetRelPath: `documents/${id}${extname(filePath)}`,
-    importedAt: new Date().toISOString()
+    importedAt: new Date().toISOString(),
+    attributes: {}
   }
 
   return { document, assetBytes: new Uint8Array(bytes) }

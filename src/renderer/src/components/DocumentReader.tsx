@@ -4,6 +4,7 @@ import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { computeParagraphRuns, type CodingWithSegment } from '@shared/highlightRuns'
 import { getParagraphStartOffsets, joinParagraphs } from '@shared/text'
 import { resolveSelectionOffsets } from '../lib/selection'
+import CaseAttributes from './CaseAttributes'
 
 // A synthetic id standing in for "the current active span" wherever a real
 // Coding/Segment id is expected, so it can ride through the same
@@ -127,10 +128,11 @@ function DocumentReader(): JSX.Element {
           {document.title}
         </h2>
       )}
-      <p className="mb-6 text-xs uppercase tracking-wide text-slate-400">
+      <p className="mb-2 text-xs uppercase tracking-wide text-slate-400">
         {document.sourceFormat} · {document.paragraphs.length} paragraphs · imported{' '}
         {new Date(document.importedAt).toLocaleString()}
       </p>
+      <CaseAttributes documentId={document.id} />
       <div className="space-y-4 text-sm leading-relaxed text-slate-800">
         {document.paragraphs.map((paragraph, i) => {
           if (editingParagraphIndex === i) {

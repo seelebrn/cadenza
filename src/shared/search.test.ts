@@ -4,7 +4,7 @@ import { joinParagraphs } from './text'
 import type { DocumentRecord, ProjectData } from './types'
 
 function makeDoc(id: string, paragraphs: string[], title = id): DocumentRecord {
-  return { id, title, paragraphs, sourceFormat: 'txt', assetRelPath: null, importedAt: '0' }
+  return { id, title, paragraphs, sourceFormat: 'txt', assetRelPath: null, importedAt: '0', attributes: {} }
 }
 
 function makeData(overrides: Partial<ProjectData> = {}): ProjectData {

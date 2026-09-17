@@ -108,3 +108,87 @@ export function renameDocument(data: ProjectData, documentId: string, title: str
     documents: data.documents.map((d) => (d.id === documentId ? { ...d, title } : d))
   }
 }
+
+// --- Case attributes (see DocumentRecord.attributes) ---
+
+/** Every attribute name used by any document, in first-seen order (the
+ * order documents were imported, then the order each one's attributes
+ * were added) — the project's attribute "columns". */
+export function getAttributeNames(data: ProjectData): string[] {
+  const names: string[] = []
+  for (const document of data.documents) {
+    for (const name of Object.keys(document.attributes)) if (!names.includes(name)) names.push(name)
+  }
+  return names
+}
+
+/** The distinct non-empty values an attribute takes across documents,
+ * sorted — the groups a Compare-by-attribute view breaks cases into. */
+export function getAttributeValues(data: ProjectData, name: string): string[] {
+  const values = new Set<string>()
+  for (const document of data.documents) {
+    const value = document.attributes[name]
+    if (value !== undefined && value.trim() !== '') values.add(value.trim())
+  }
+  return [...values].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+}
+
+/** Sets one attribute on one document (creating the attribute if it's
+ * new). Names and values are trimmed; an empty name is ignored. An empty
+ * value is kept — the attribute then exists on this document with no
+ * value yet, so the column is there to fill in. */
+export function setDocumentAttribute(
+  data: ProjectData,
+  documentId: string,
+  name: string,
+  value: string
+): ProjectData {
+  const trimmedName = name.trim()
+  if (!trimmedName) return data
+  return {
+    ...data,
+    documents: data.documents.map((d) =>
+      d.id === documentId ? { ...d, attributes: { ...d.attributes, [trimmedName]: value.trim() } } : d
+    )
+  }
+}
+
+/** Removes an attribute from one document only. */
+export function removeDocumentAttribute(data: ProjectData, documentId: string, name: string): ProjectData {
+  return {
+    ...data,
+    documents: data.documents.map((d) => {
+      if (d.id !== documentId || !(name in d.attributes)) return d
+      const { [name]: _removed, ...rest } = d.attributes
+      return { ...d, attributes: rest }
+    })
+  }
+}
+
+/** Renames an attribute everywhere it's used. Merging into an existing
+ * name keeps each document's existing value for the target name where it
+ * has one. */
+export function renameAttribute(data: ProjectData, oldName: string, newName: string): ProjectData {
+  const target = newName.trim()
+  if (!target || target === oldName) return data
+  return {
+    ...data,
+    documents: data.documents.map((d) => {
+      if (!(oldName in d.attributes)) return d
+      const { [oldName]: value, ...rest } = d.attributes
+      return { ...d, attributes: { ...rest, [target]: rest[target] ?? value } }
+    })
+  }
+}
+
+/** Removes an attribute from every document. */
+export function deleteAttribute(data: ProjectData, name: string): ProjectData {
+  return {
+    ...data,
+    documents: data.documents.map((d) => {
+      if (!(name in d.attributes)) return d
+      const { [name]: _removed, ...rest } = d.attributes
+      return { ...d, attributes: rest }
+    })
+  }
+}

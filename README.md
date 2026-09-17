@@ -59,7 +59,9 @@ between clusters and one-click tree or radial layouts — useful for building a 
   filtered by category, tag, or whether it carries an analytic question.
 - **Clusters** — manage clusters and what's filed in them, outside the board.
 - **Compare cases** — a themes × cases table (IPA-style group experiential themes) and a
-  side-by-side contrast of one code across interviews (Kaufmann).
+  side-by-side contrast of one code across interviews (Kaufmann). Record **case attributes**
+  (role, site, age band…) under a document's title, and both views can group cases by one —
+  what do the nurses say vs. the managers.
 
 ## Import and export
 

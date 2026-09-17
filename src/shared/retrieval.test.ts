@@ -7,7 +7,7 @@ function makeCode(id: string, overrides: Partial<CodeNode> = {}): CodeNode {
 }
 
 function makeDoc(id: string, paragraphs: string[], title = 'Doc'): DocumentRecord {
-  return { id, title, paragraphs, sourceFormat: 'txt', assetRelPath: null, importedAt: '0' }
+  return { id, title, paragraphs, sourceFormat: 'txt', assetRelPath: null, importedAt: '0', attributes: {} }
 }
 
 function makeData(overrides: Partial<ProjectData> = {}): ProjectData {

@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { computePrefixSuffixDiff, editParagraph, renameDocument } from './documentOps'
+import {
+  computePrefixSuffixDiff,
+  deleteAttribute,
+  editParagraph,
+  getAttributeNames,
+  getAttributeValues,
+  removeDocumentAttribute,
+  renameAttribute,
+  renameDocument,
+  setDocumentAttribute
+} from './documentOps'
 import type { DocumentRecord, ProjectData, Segment } from './types'
 
 function makeDoc(id: string, paragraphs: string[]): DocumentRecord {
-  return { id, title: 'Doc', paragraphs, sourceFormat: 'txt', assetRelPath: null, importedAt: '0' }
+  return { id, title: 'Doc', paragraphs, sourceFormat: 'txt', assetRelPath: null, importedAt: '0', attributes: {} }
 }
 
 function makeData(overrides: Partial<ProjectData> = {}): ProjectData {
@@ -162,5 +172,59 @@ describe('renameDocument', () => {
     const next = renameDocument(data, 'd1', 'New title')
     expect(next.documents.find((d) => d.id === 'd1')?.title).toBe('New title')
     expect(next.documents.find((d) => d.id === 'd2')?.title).toBe('Doc')
+  })
+})
+
+describe('case attributes', () => {
+  function withDocs(attrs: Array<Record<string, string>>): ProjectData {
+    return makeData({
+      documents: attrs.map((attributes, i) => ({
+        id: `d${i}`,
+        title: `Doc ${i}`,
+        paragraphs: ['x'],
+        sourceFormat: 'txt',
+        assetRelPath: null,
+        importedAt: `2020-01-0${i + 1}`,
+        attributes
+      }))
+    })
+  }
+
+  it('setDocumentAttribute creates or updates one attribute on one document, trimming, ignoring an empty name', () => {
+    let data = withDocs([{}, {}])
+    data = setDocumentAttribute(data, 'd0', '  Role ', ' nurse ')
+    expect(data.documents[0].attributes).toEqual({ Role: 'nurse' })
+    expect(data.documents[1].attributes).toEqual({})
+    data = setDocumentAttribute(data, 'd0', 'Role', 'manager')
+    expect(data.documents[0].attributes).toEqual({ Role: 'manager' })
+    expect(setDocumentAttribute(data, 'd0', '   ', 'x')).toBe(data)
+    // An empty value still creates the attribute, so the column exists to fill in.
+    data = setDocumentAttribute(data, 'd1', 'Role', '')
+    expect(data.documents[1].attributes).toEqual({ Role: '' })
+  })
+
+  it('getAttributeNames is the union in first-seen order; getAttributeValues is distinct, non-empty, sorted numerically', () => {
+    const data = withDocs([{ Role: 'nurse', Site: 'B' }, { Age: '10', Role: '' }, { Age: '9', Role: 'manager' }])
+    expect(getAttributeNames(data)).toEqual(['Role', 'Site', 'Age'])
+    expect(getAttributeValues(data, 'Role')).toEqual(['manager', 'nurse'])
+    expect(getAttributeValues(data, 'Age')).toEqual(['9', '10'])
+    expect(getAttributeValues(data, 'Nope')).toEqual([])
+  })
+
+  it('removeDocumentAttribute, renameAttribute and deleteAttribute', () => {
+    let data = withDocs([{ Role: 'nurse', Site: 'A' }, { Role: 'manager' }, { Site: 'B', Job: 'x' }])
+    data = removeDocumentAttribute(data, 'd0', 'Site')
+    expect(data.documents[0].attributes).toEqual({ Role: 'nurse' })
+    expect(removeDocumentAttribute(data, 'd1', 'Site').documents[1]).toBe(data.documents[1])
+
+    data = renameAttribute(data, 'Role', 'Job')
+    expect(data.documents[0].attributes).toEqual({ Job: 'nurse' })
+    expect(data.documents[1].attributes).toEqual({ Job: 'manager' })
+    // Merging into an existing name keeps that document's existing value.
+    expect(data.documents[2].attributes).toEqual({ Site: 'B', Job: 'x' })
+    expect(renameAttribute(data, 'Job', 'Job')).toBe(data)
+
+    data = deleteAttribute(data, 'Job')
+    expect(getAttributeNames(data)).toEqual(['Site'])
   })
 })

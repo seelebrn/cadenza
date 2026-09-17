@@ -142,6 +142,7 @@ export function normalizeProjectData(raw: ProjectData): ProjectData {
     ...raw,
     noteCategories: raw.noteCategories ?? [],
     notes: raw.notes.map((n) => (n.noteCategoryId === undefined ? { ...n, noteCategoryId: null } : n)),
+    documents: (raw.documents ?? []).map((d) => (d.attributes ? d : { ...d, attributes: {} })),
     categories: withResolvedParents,
     boards,
     boardItems: keepLastPer(boardItems, (i) => `${i.boardId}|${i.refType}|${i.refId}`),

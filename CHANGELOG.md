@@ -12,6 +12,10 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   Ignores case and accents by default ("reunion" finds "réunion"); whole-word and match-case
   options; can be limited to one document. From a hit, jump to it in the reader, code the
   sentence it sits in, or code every hit's sentence at once (one undo step).
+- **Case attributes**: record facts about each case (interviewee role, site, age band, date…)
+  under a document's title in the Workspace. Compare cases can then group by an attribute —
+  one column per value instead of per case, with passage and case counts — in both the
+  themes × cases table and the side-by-side contrast of one code.
 
 ## [0.4.7] - 2026-09-17
 

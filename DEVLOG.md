@@ -3355,3 +3355,34 @@ an accented query finds unaccented text; whole word; sentence extraction incl. t
 existing codes reported; context clipping; document filter, literal regex chars, empty query;
 `foldAccents`' index map). Full suite green (462/462), typecheck clean, production build clean,
 boot-tested; the tab itself not exercised by hand here.
+
+### Feature: case attributes (2026-09-17)
+
+Second of the five. A document was only a title, so "what do the nurses say vs. the managers"
+had to be done by eye across columns. Now `DocumentRecord.attributes` is a name → value map of
+free text (role, site, age band, date…); the project's attribute "columns" are simply the union of
+names across documents (`getAttributeNames`, first-seen order), with no separate schema to
+maintain. `normalizeProjectData` backfills `{}` for older files; the importer sets it.
+
+Ops in `documentOps.ts` (tested): set / remove on one document (names and values trimmed; an
+empty value still creates the attribute so the column exists to fill in), rename everywhere
+(merging into an existing name keeps each document's own value), delete everywhere,
+`getAttributeValues` (distinct, non-empty, numeric-aware sort). Store actions mirror them.
+
+In the reader, `CaseAttributes` sits under the title as "Name: value" chips: click a value to
+edit it, × to drop it from this document, "+ attribute" to add one — with datalists of names and
+values already used elsewhere in the project so the same attribute is spelled the same way on
+every case (the add row pre-fills the first attribute other cases have that this one lacks).
+
+In Compare, a "Group cases by" select lists the attributes. Grouped, both sub-views get one
+column per attribute value instead of per case (`getCaseGroups`: sorted numeric-aware, cases
+without the attribute or with it empty collected last under "(not set)" so no case silently
+drops out). The matrix cell shows passages *and* "in how many of the group's cases" — 2 (1/5)
+reads very differently from 5 (5/5) — via `getCodeGroupMatrix`; the contrast columns pool the
+group's quotes with the document title above each. Ungrouped, nothing changed.
+
+Verified: 5 new tests (attribute ops incl. trim/empty-name/empty-value, names union and value
+sort, remove/rename-merge/delete; case groups incl. the unset bucket and a missing attribute;
+group matrix counts). Every test fixture that builds a `DocumentRecord` gained `attributes: {}`.
+Full suite green (467/467), typecheck clean, production build clean, boot-tested; the chips and
+the grouped views not exercised by hand here.

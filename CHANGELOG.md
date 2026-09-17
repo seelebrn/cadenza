@@ -20,6 +20,10 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   codes land on the same passage, shaded by frequency, with each code's own passage count on
   the diagonal. Click a cell to see the shared passages and jump to any of them. Also available
   as a table in the report export.
+- **PDF import**: born-digital PDFs and OCR'd scans (their text layer) import as paragraphs,
+  with paragraph breaks inferred from the page's own line spacing and hyphenated line ends
+  re-joined. A scan with no text layer is refused with a clear message instead of importing
+  empty.
 
 ## [0.4.7] - 2026-09-17
 

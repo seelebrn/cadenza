@@ -32,7 +32,7 @@ export interface CodeNode {
   createdAt: ISODateString
 }
 
-export type SourceFormat = 'docx' | 'odt' | 'txt' | 'xlsx' | 'manual'
+export type SourceFormat = 'docx' | 'odt' | 'txt' | 'pdf' | 'xlsx' | 'manual'
 
 export interface DocumentRecord {
   id: string

@@ -3411,3 +3411,38 @@ Verified: 5 unit tests on a two-document fixture with overlapping, identical and
 spans (symmetric counts and document counts, diagonal, descendant roll-up on/off, unused code
 omitted, drill-down order and symmetry) plus a report test for the table. Full suite green
 (473/473), typecheck clean, production build clean, boot-tested; the tab not exercised by hand.
+
+### Feature: PDF import (2026-09-17)
+
+Fourth of the five, and the one the user asked about specifically ("for OCRized ones"). The only
+new dependency in this batch: `pdfjs-dist` (Mozilla's pdf.js, pure JS, no native module). Its
+"legacy" build runs in the main process under Node with no DOM; with no worker configured it
+parses on the main thread, fine for a one-off import, and it's `import()`ed lazily so nothing is
+paid until a PDF is actually opened. The package is 35 MB on disk, most of it build variants,
+source maps, the viewer, image decoders and rendering fonts — none of which text extraction
+touches — so `package.json`'s `build.files` excludes them from the packaged app, keeping the
+legacy build, its worker and the CMap tables (needed to read text in CJK/CID-encoded fonts;
+`cMapUrl` points at the package's own `cmaps/`). Net cost in the installer: a few MB.
+
+A PDF has no paragraphs, only runs of text at (x, y) positions — and an OCR'd scan's text layer
+is whatever the OCR engine emitted (often one run per word, uneven spacing). The part that's
+actually ours is `pdfText.ts`, pure and tested on synthetic runs: group runs into lines by
+baseline (with a tolerance of half a line for OCR jitter and superscripts), order left to right
+and join with a space unless pdf.js already spaced them, then break paragraphs where the vertical
+gap between lines clearly exceeds the page's own ordinary line spacing (×1.7). That "ordinary
+spacing" is the page's *smallest* plausible gap, not the median — on a short page of two
+paragraphs half the gaps are breaks, and a median hides them (the first end-to-end probe came
+back as one paragraph for exactly that reason; the fixture is now a unit test). Every page ends a
+paragraph; "inter-" at a line end followed by a lowercase line start is re-joined.
+
+`extractPdfParagraphs` in `pdf.ts` is the thin pdf.js wrapper. An import that yields no text at
+all — a scan that was never OCR'd — is refused with a message saying so and suggesting OCR
+first, rather than creating an empty document. End-to-end, on two hand-built PDFs (one with three
+lines in two paragraphs, one with only a drawn rectangle): correct paragraphs and `[]`, ~250 ms
+including the library load. vitest's include list now covers `src/main/import`.
+
+Verified: 7 unit tests for the reconstruction (line joining, jitter, hyphenation and page ends,
+pre-spaced runs, the threshold scaling to double-spaced text, the short-page case, no text). Full
+suite green, typecheck clean, production build clean, boot-tested. The packaged-size exclusions
+are exercised by the next CI release build rather than locally (Windows packaging needs a
+privilege the dev machine lacks — see release.yml).

@@ -18,7 +18,7 @@ function DocumentList(): JSX.Element {
         >
           {isImporting ? 'Importing…' : 'Import document…'}
         </button>
-        <p className="mt-1 text-center text-[11px] text-slate-400">.docx · .odt · .txt</p>
+        <p className="mt-1 text-center text-[11px] text-slate-400">.docx · .odt · .txt · .pdf</p>
       </div>
 
       <ul className="flex-1 overflow-auto">

@@ -23,6 +23,7 @@
     "jszip": "^3.10.1",
     "mammoth": "^1.12.2",
     "nanoid": "^6.0.1",
+    "pdfjs-dist": "^6.3.289",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"
@@ -50,7 +51,11 @@
       "output": "release"
     },
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "!node_modules/pdfjs-dist/{build,web,image_decoders,types,wasm,standard_fonts}/**",
+      "!node_modules/pdfjs-dist/legacy/build/*.map",
+      "!node_modules/pdfjs-dist/legacy/build/*.min.mjs",
+      "!node_modules/pdfjs-dist/legacy/build/pdf.sandbox*"
     ],
     "extraResources": [
       {

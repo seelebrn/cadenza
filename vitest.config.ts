@@ -22,7 +22,8 @@ export default defineConfig({
     include: [
       'src/shared/**/*.test.ts',
       'src/renderer/src/lib/**/*.test.ts',
-      'src/main/export/**/*.test.ts'
+      'src/main/export/**/*.test.ts',
+      'src/main/import/**/*.test.ts'
     ],
     environment: 'node'
   }

@@ -38,6 +38,7 @@ function ExportView(): JSX.Element | null {
   const [includeVerbatim, setIncludeVerbatim] = useState(false)
   const [contextWords, setContextWords] = useState(15)
   const [includeFrequency, setIncludeFrequency] = useState(false)
+  const [includeCooccurrence, setIncludeCooccurrence] = useState(false)
 
   const [draftAxis, setDraftAxis] = useState<ResultsDraftAxis>('theme')
   const [draftIncludeNotes, setDraftIncludeNotes] = useState(true)
@@ -51,7 +52,8 @@ function ExportView(): JSX.Element | null {
   if (!data) return null
 
   const comparisonAvailable = hasComparisonData(data)
-  const nothingSelected = mode === 'standard' && !includeCodes && !includeNotes && !includeComparison
+  const nothingSelected =
+    mode === 'standard' && !includeCodes && !includeNotes && !includeComparison && !includeCooccurrence
 
   async function handleExport(): Promise<void> {
     if (!data) return
@@ -66,7 +68,8 @@ function ExportView(): JSX.Element | null {
               includeComparison: includeComparison && comparisonAvailable,
               includeVerbatim,
               contextWords: includeVerbatim ? Math.max(0, contextWords) : 0,
-              includeFrequency
+              includeFrequency,
+              includeCooccurrence: includeCooccurrence && comparisonAvailable
             })
           : buildResultsDraftReport(data, {
               axis: draftAxis,
@@ -190,6 +193,19 @@ function ExportView(): JSX.Element | null {
               onChange={(e) => setIncludeComparison(e.target.checked)}
             />
             Cross-case comparison (codes × cases table)
+          </label>
+
+          <label
+            className={`flex items-center gap-2 text-sm ${comparisonAvailable ? '' : 'text-slate-300'}`}
+            title={comparisonAvailable ? undefined : 'Needs at least one document and one code'}
+          >
+            <input
+              type="checkbox"
+              checked={includeCooccurrence}
+              disabled={!comparisonAvailable}
+              onChange={(e) => setIncludeCooccurrence(e.target.checked)}
+            />
+            Code co-occurrence (codes × codes table)
           </label>
 
           <div className="border-t border-slate-100 pt-3">

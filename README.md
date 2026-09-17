@@ -62,6 +62,8 @@ between clusters and one-click tree or radial layouts — useful for building a 
   side-by-side contrast of one code across interviews (Kaufmann). Record **case attributes**
   (role, site, age band…) under a document's title, and both views can group cases by one —
   what do the nurses say vs. the managers.
+- **Co-occurrence** — a codes × codes table of how often two codes land on the same passage;
+  click a cell to read the shared passages.
 
 ## Import and export
 

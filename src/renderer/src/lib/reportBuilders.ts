@@ -15,6 +15,7 @@ import type { ClusterTreeNode } from './clusterTree'
 import { retrieveByCode } from '@shared/retrieval'
 import { getSurroundingWords, joinParagraphs } from '@shared/text'
 import { getCases, getCodeCaseMatrix } from '@shared/comparison'
+import { getCodeCooccurrenceMatrix } from '@shared/cooccurrence'
 import { flattenCodeTree } from '@shared/codeTree'
 
 export interface ProjectReportOptions {
@@ -31,6 +32,9 @@ export interface ProjectReportOptions {
    * section. Independent of includeVerbatim (a frequency count, not a
    * quote). */
   includeFrequency: boolean
+  /** A codes × codes table of how often two codes land on the same
+   * passage — see cooccurrence.ts. */
+  includeCooccurrence: boolean
 }
 
 // Matches the indentation convention already used for a flattened code
@@ -190,6 +194,40 @@ function buildComparisonSection(data: ProjectData): ReportBlock[] {
   ]
 }
 
+function buildCooccurrenceSection(data: ProjectData): ReportBlock[] {
+  const flatCodes = flattenCodeTree(data.codes)
+  const cells = getCodeCooccurrenceMatrix(
+    data,
+    flatCodes.map((f) => f.code.id),
+    true
+  )
+  const cellByKey = new Map(cells.map((c) => [`${c.codeA}|${c.codeB}`, c.count]))
+  const lookup = (a: string, b: string): number => cellByKey.get(a < b ? `${a}|${b}` : `${b}|${a}`) ?? 0
+  // Only codes actually applied somewhere — an all-zero row and column for
+  // every unused code would drown the table.
+  const used = flatCodes.filter(({ code }) => lookup(code.id, code.id) > 0)
+  if (used.length === 0) {
+    return [
+      { kind: 'heading', level: 2, text: 'Code co-occurrence' },
+      { kind: 'paragraph', text: 'No coded passages yet.', style: 'meta' }
+    ]
+  }
+  const headers = ['Code / item', ...used.map(({ code }) => code.name)]
+  const rows = used.map(({ code, depth }) => [
+    indentedName(code.name, depth),
+    ...used.map((other) => String(lookup(code.id, other.code.id)))
+  ])
+  return [
+    { kind: 'heading', level: 2, text: 'Code co-occurrence' },
+    {
+      kind: 'paragraph',
+      text: 'How often two codes/items are applied to the same passage (overlapping selections in the same document), each rolled up with its sub-codes. The diagonal is the number of passages carrying each code.',
+      style: 'meta'
+    },
+    { kind: 'table', headers, rows }
+  ]
+}
+
 /** Assembles one Report from whichever sections are checked — the
  * flexible export dialog's whole "codebook / codebook+verbatim /
  * notes+clusters / notes+clusters+verbatim / cross-case comparison"
@@ -201,6 +239,7 @@ export function buildProjectReport(data: ProjectData, options: ProjectReportOpti
   if (options.includeCodes) blocks.push(...buildCodebookSection(data, options.includeVerbatim, options.contextWords))
   if (options.includeNotes) blocks.push(...buildNotesSection(data, options.includeVerbatim, options.contextWords))
   if (options.includeComparison) blocks.push(...buildComparisonSection(data))
+  if (options.includeCooccurrence) blocks.push(...buildCooccurrenceSection(data))
   if (blocks.length === 0) {
     blocks.push({ kind: 'paragraph', text: 'Nothing selected to export.', style: 'meta' })
   }

@@ -66,7 +66,8 @@ const NONE: ProjectReportOptions = {
   includeComparison: false,
   includeVerbatim: false,
   contextWords: 0,
-  includeFrequency: false
+  includeFrequency: false,
+  includeCooccurrence: false
 }
 
 describe('buildProjectReport', () => {
@@ -104,6 +105,28 @@ describe('buildProjectReport', () => {
     expect(table.rows).toEqual([
       ['A', '2'],
       ['B', '1']
+    ])
+  })
+
+  it('includeCooccurrence adds a codes × codes table over the codes actually applied', () => {
+    const data = makeData({
+      documents: [makeDoc('d1', { paragraphs: ['0123456789'] })],
+      codes: [makeCode('a', { name: 'A' }), makeCode('b', { name: 'B' }), makeCode('unused', { name: 'Unused' })],
+      segments: [
+        { id: 's1', documentId: 'd1', start: 0, end: 5, text: '01234' },
+        { id: 's2', documentId: 'd1', start: 3, end: 8, text: '34567' }
+      ],
+      codings: [
+        { id: 'c1', segmentId: 's1', codeId: 'a', createdAt: '0' },
+        { id: 'c2', segmentId: 's2', codeId: 'b', createdAt: '0' }
+      ]
+    })
+    const report = buildProjectReport(data, { ...NONE, includeCooccurrence: true })
+    const table = report.blocks.find((b) => b.kind === 'table') as { headers: string[]; rows: string[][] }
+    expect(table.headers).toEqual(['Code / item', 'A', 'B'])
+    expect(table.rows).toEqual([
+      ['A', '1', '1'],
+      ['B', '1', '1']
     ])
   })
 

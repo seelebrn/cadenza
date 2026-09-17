@@ -3,12 +3,14 @@ import RetrievalView from './RetrievalView'
 import SearchView from './SearchView'
 import ClustersView from './ClustersView'
 import ComparisonView from './ComparisonView'
+import CooccurrenceView from './CooccurrenceView'
 
 const TABS: Array<{ id: AnalysisTab; label: string }> = [
   { id: 'retrieval', label: 'Retrieval' },
   { id: 'search', label: 'Search' },
   { id: 'categories', label: 'Clusters' },
-  { id: 'compare', label: 'Compare cases' }
+  { id: 'compare', label: 'Compare cases' },
+  { id: 'cooccurrence', label: 'Co-occurrence' }
 ]
 
 function AnalysisView(): JSX.Element {
@@ -39,6 +41,8 @@ function AnalysisView(): JSX.Element {
           <SearchView />
         ) : analysisTab === 'categories' ? (
           <ClustersView />
+        ) : analysisTab === 'cooccurrence' ? (
+          <CooccurrenceView />
         ) : (
           <ComparisonView />
         )}

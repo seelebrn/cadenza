@@ -3386,3 +3386,28 @@ sort, remove/rename-merge/delete; case groups incl. the unset bucket and a missi
 group matrix counts). Every test fixture that builds a `DocumentRecord` gained `attributes: {}`.
 Full suite green (467/467), typecheck clean, production build clean, boot-tested; the chips and
 the grouped views not exercised by hand here.
+
+### Feature: code co-occurrence (2026-09-17)
+
+Third of the five. `src/shared/cooccurrence.ts`, pure and tested: two codes co-occur wherever a
+passage coded with one *overlaps* a passage coded with the other in the same document — the
+very same selection, or two selections that share a stretch. Each overlapping pair of passages
+counts once, so the measure is symmetric (A-with-B is B-with-A) and a matrix cell is stored once
+for the unordered pair. Touching passages (one ends exactly where the other starts) don't
+count. The diagonal is each code's own distinct-passage count — the "n" its row is read
+against — and codes never applied are omitted entirely rather than shown as all-zero rows.
+`getCooccurringPassages` drills into one cell: every overlapping pair, document by document in
+reading order, with the shared stretch of text (and both full selections, since they can
+differ). Both honor the usual "roll up sub-codes" toggle.
+
+New Analysis tab "Co-occurrence": the matrix with rotated column headers, cells shaded by count
+relative to the largest off-diagonal value (the diagonal is neutral), a tooltip spelling the cell
+out ("A and B share 3 passages in 2 documents"), "hide codes never applied" on by default, and a
+click opens the shared passages below with "Go to passage →" on the overlap — the reader then
+shows both codes' highlights around it. The report export gains a "Code co-occurrence" checkbox
+(same codes-actually-used filter; the diagonal explained in its caption).
+
+Verified: 5 unit tests on a two-document fixture with overlapping, identical and merely touching
+spans (symmetric counts and document counts, diagonal, descendant roll-up on/off, unused code
+omitted, drill-down order and symmetry) plus a report test for the table. Full suite green
+(473/473), typecheck clean, production build clean, boot-tested; the tab not exercised by hand.

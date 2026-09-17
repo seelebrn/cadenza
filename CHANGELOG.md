@@ -16,6 +16,10 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   under a document's title in the Workspace. Compare cases can then group by an attribute —
   one column per value instead of per case, with passage and case counts — in both the
   themes × cases table and the side-by-side contrast of one code.
+- **Code co-occurrence** (Analysis → Co-occurrence): a codes × codes table of how often two
+  codes land on the same passage, shaded by frequency, with each code's own passage count on
+  the diagonal. Click a cell to see the shared passages and jump to any of them. Also available
+  as a table in the report export.
 
 ## [0.4.7] - 2026-09-17
 

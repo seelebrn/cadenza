@@ -1,3 +1,4 @@
+import { XMLParser, XMLValidator } from 'fast-xml-parser'
 import { describe, expect, it } from 'vitest'
 import {
   buildQdpx,
@@ -6,6 +7,7 @@ import {
   ITEMS_SET_NAME,
   normalizeSourceText,
   parseQdpx,
+  stripIllegalXmlChars,
   toGuid
 } from './refiQda'
 import { joinParagraphs } from './text'
@@ -65,9 +67,10 @@ describe('buildQdpx → parseQdpx round trip', () => {
   const readSource = (path: string): string | undefined => bundle.sources[path]
   const { data: back, report } = parseQdpx(bundle.qde, readSource)
 
-  it('writes one plain-text source per document, the joined text exactly', () => {
-    expect(Object.keys(bundle.sources)).toHaveLength(2)
-    expect(bundle.sources[`sources/${toGuid('d1')}.txt`]).toBe(joinParagraphs(sample.documents[0].paragraphs))
+  it('writes one plain-text source per document, the joined text exactly, and one per note', () => {
+    expect(Object.keys(bundle.sources)).toHaveLength(2 + sample.notes.length)
+    expect(bundle.sources[`Sources/${toGuid('n1')}.txt`]).toBe('Why now?\n\nBecause of the merger.')
+    expect(bundle.sources[`Sources/${toGuid('d1')}.txt`]).toBe(joinParagraphs(sample.documents[0].paragraphs))
     expect(bundle.qde).toContain('urn:QDA-XML:project:1.0')
     expect(bundle.qde).toContain('&amp;')
   })
@@ -91,8 +94,9 @@ describe('buildQdpx → parseQdpx round trip', () => {
   })
 
   it('brings back every coded passage pointing at the same words, with its codings', () => {
-    expect(back.segments).toHaveLength(3)
-    for (const original of sample.segments) {
+    // s3 has neither a code nor a note: nothing to exchange, left out.
+    expect(back.segments).toHaveLength(2)
+    for (const original of sample.segments.filter((s) => s.id !== 's3')) {
       const doc = back.documents.find((d) => d.title === sample.documents.find((x) => x.id === original.documentId)!.title)!
       const segment = back.segments.find((s) => s.documentId === doc.id && s.text === original.text)!
       expect(segment, original.text).toBeDefined()
@@ -128,7 +132,7 @@ describe('buildQdpx → parseQdpx round trip', () => {
   it('keeps the GUIDs of codes, sources, passages, codings, notes and sets across a second round trip', () => {
     // (Cases and the user are regenerated: Cadenza has no ids of its own for them.)
     const again = buildQdpx(back, 'Cadenza test')
-    for (const id of ['c1', 'c2', 'c3', 'd1', 'd2', 's1', 's2', 's3', 'k1', 'k2', 'k3', 'n1', 'n2', 'n3', 'n4', 'cat1']) {
+    for (const id of ['c1', 'c2', 'c3', 'd1', 'd2', 's1', 's2', 'k1', 'k2', 'k3', 'n1', 'n2', 'n3', 'n4', 'cat1']) {
       expect(again.qde, id).toContain(`guid="${toGuid(id)}"`)
     }
   })
@@ -161,7 +165,7 @@ describe('parseQdpx on a file from another tool', () => {
     <AudioSource guid="88888888-8888-4888-8888-888888888888" name="Recording" path="internal://a.mp3"/>
   </Sources>
 </Project>`
-  const { data, report } = parseQdpx(qde, (path) => (path === 'sources/scan.txt' ? 'Scanned text.' : undefined))
+  const { data, report } = parseQdpx(qde, (path) => (path === 'Sources/scan.txt' ? 'Scanned text.' : undefined))
 
   it('normalizes line ends and blank runs while every selection still points at the same words', () => {
     const doc = data.documents.find((d) => d.title === 'Inline one')!
@@ -328,7 +332,7 @@ describe('parseQdpx: how a source file with Windows line endings is counted', ()
           <Coding guid="44444444-4444-4444-8444-444444444444"><CodeRef targetGUID="11111111-1111-4111-8111-111111111111"/></Coding>
         </PlainTextSelection>
       </TextSource></Sources></Project>`
-    const { data } = parseQdpx(qde, (p) => (p === 'sources/t.txt' ? raw : undefined))
+    const { data } = parseQdpx(qde, (p) => (p === 'Sources/t.txt' ? raw : undefined))
     const full = joinParagraphs(data.documents[0].paragraphs)
     return full.slice(data.segments[0].start, data.segments[0].end)
   }
@@ -345,5 +349,165 @@ describe('parseQdpx: how a source file with Windows line endings is counted', ()
 
   it('with no recorded words to go by, CRLF counts as one (the common convention)', () => {
     expect(importWith(start, start + passage.length, '')).toBe(passage)
+  })
+})
+
+describe('buildQdpx output that strict parsers and QualCoder accept', () => {
+  const g = (id: string): string => toGuid(id)
+  const control = String.fromCharCode(11) + String.fromCharCode(0) + String.fromCharCode(0xfffe)
+  const project = makeData({
+    documents: [{ id: 'd1', title: `Interview${control} 1`, paragraphs: [`Texte avec${control} contrôle.`, 'Deuxième paragraphe.'], sourceFormat: 'docx', assetRelPath: null, importedAt: '0', attributes: {} }],
+    codes: [
+      { id: 'a', kind: 'code', name: `Code${control} A`, color: '#111111', definition: `Def${control}`, parentId: null, createdAt: '0' },
+      { id: 'a1', kind: 'code', name: 'Sub of A', color: '#222222', definition: '', parentId: 'a', createdAt: '0' },
+      { id: 'b', kind: 'code', name: 'Code B', color: '#333333', definition: '', parentId: null, createdAt: '0' },
+      { id: 'loose', kind: 'code', name: 'Unfiled', color: '#444444', definition: '', parentId: null, createdAt: '0' }
+    ],
+    segments: [{ id: 's', documentId: 'd1', start: 0, end: 5, text: 'Texte' }],
+    codings: [{ id: 'k', segmentId: 's', codeId: 'a', createdAt: '0' }],
+    notes: [
+      { id: 'nCat', question: null, answer: 'Memo on the category.', tags: [], noteCategoryId: null, attachedTo: { kind: 'category', categoryId: 'top' }, createdAt: '0', updatedAt: '0' },
+      { id: 'nFiled', question: null, answer: 'Filed note.', tags: [], noteCategoryId: null, attachedTo: { kind: 'project' }, createdAt: '0', updatedAt: '0' }
+    ],
+    categories: [
+      { id: 'top', kind: 'theme', name: 'Top category', color: '#aa0000', definition: 'Top def', codeIds: ['a', 'a1'], noteIds: ['nFiled'], segmentIds: [], parentCategoryId: null, createdAt: '0' },
+      { id: 'sub', kind: 'question', name: 'Why do they stay?', color: '#00aa00', definition: '', codeIds: ['b', 'a'], noteIds: [], segmentIds: [], parentCategoryId: 'top', createdAt: '0' }
+    ]
+  })
+  const bundle = buildQdpx(project, 'Cadenza test')
+
+  // Reported from QualCoder: "ParseError: not well-formed (invalid token):
+  // line 8, column 105" — `isCodable` had been written with no value.
+  it('is well-formed XML: every attribute has a value, and no character XML forbids is left', () => {
+    expect(XMLValidator.validate(bundle.qde)).toBe(true)
+    expect(bundle.qde).not.toMatch(/\sisCodable(?!=)/)
+    expect(bundle.qde).toContain('isCodable="true"')
+    expect(bundle.qde).not.toMatch(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/)
+    expect(stripIllegalXmlChars(`a${control}b😀`)).toBe('ab😀')
+  })
+
+  it('writes clusters into the codebook as non-codable codes, the way QualCoder writes categories', () => {
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', isArray: (n) => n === 'Code' })
+    const book = parser.parse(bundle.qde).Project.CodeBook.Codes.Code as Array<Record<string, any>>
+    // Root: the top-level cluster, then the unfiled code.
+    expect(book.map((c) => [c['@_name'], c['@_isCodable']])).toEqual([
+      ['Top category', 'false'],
+      ['Unfiled', 'true']
+    ])
+    const top = book[0]
+    expect(top['@_guid']).toBe(g('top'))
+    expect(top['@_color']).toBe('#aa0000')
+    // Inside it: its sub-cluster first, then the top-level codes whose first cluster it is.
+    expect(top.Code.map((c: Record<string, string>) => [c['@_name'], c['@_isCodable']])).toEqual([
+      ['Why do they stay?', 'false'],
+      ['Code A', 'true']
+    ])
+    // A sub-code follows its parent code; a code already placed isn't repeated.
+    expect(top.Code[1].Code.map((c: Record<string, string>) => c['@_name'])).toEqual(['Sub of A'])
+    expect(top.Code[0].Code.map((c: Record<string, string>) => c['@_name'])).toEqual(['Code B'])
+    expect(bundle.qde.match(/name="Code A"/g)).toHaveLength(1)
+  })
+
+  it('round-trips through Cadenza with one cluster per category, nesting, question kind, notes and every membership intact', () => {
+    const { data: back, report } = parseQdpx(bundle.qde, (p) => bundle.sources[p])
+    expect(report.clusters).toBe(2)
+    expect(back.categories.map((c) => c.name).sort()).toEqual(['Top category', 'Why do they stay?'])
+    const top = back.categories.find((c) => c.name === 'Top category')!
+    const sub = back.categories.find((c) => c.name === 'Why do they stay?')!
+    expect(sub.parentCategoryId).toBe(top.id)
+    expect(sub.kind).toBe('question')
+    expect(top.kind).toBe('theme')
+    expect(top.definition).toBe('Top def')
+    expect(sub.definition).toBe('')
+    expect(top.color).toBe('#aa0000')
+    expect(top.codeIds.sort()).toEqual([g('a'), g('a1')].sort())
+    expect(sub.codeIds.sort()).toEqual([g('a'), g('b')].sort())
+    expect(top.noteIds).toEqual([g('nFiled')])
+    expect(back.notes.find((n) => n.answer === 'Memo on the category.')!.attachedTo).toEqual({ kind: 'category', categoryId: top.id })
+    expect(back.codes.find((c) => c.name === 'Sub of A')!.parentId).toBe(g('a'))
+    expect(back.codes.find((c) => c.name === 'Code A')!.parentId).toBeNull()
+  })
+
+  it('an older Cadenza export (clusters only as Sets, with a "nested under" line) still imports, without the bookkeeping lines in the definition', () => {
+    const old = `<Project xmlns="urn:QDA-XML:project:1.0" name="old">
+      <CodeBook><Codes><Code guid="${g('x')}" name="X" isCodable="true"/></Codes></CodeBook>
+      <Sets><Set guid="${g('s1')}" name="Old cluster"><Description>Its meaning
+Cadenza: analytic question cluster
+Cadenza: nested under “Parent”</Description><MemberCode targetGUID="${g('x')}"/></Set></Sets>
+    </Project>`
+    const { data } = parseQdpx(old, () => undefined)
+    expect(data.categories).toHaveLength(1)
+    expect(data.categories[0]).toMatchObject({ name: 'Old cluster', kind: 'question', definition: 'Its meaning', codeIds: [g('x')] })
+  })
+})
+
+describe('buildQdpx within what QualCoder’s database accepts', () => {
+  const doc = (id: string, title: string): ProjectData['documents'][number] =>
+    ({ id, title, paragraphs: ['Alpha beta gamma delta.'], sourceFormat: 'txt', assetRelPath: null, importedAt: '0', attributes: {} })
+  const code = (id: string, name: string): ProjectData['codes'][number] =>
+    ({ id, kind: 'code', name, color: '#000000', definition: '', parentId: null, createdAt: '0' })
+  const project = makeData({
+    documents: [doc('d1', 'Interview'), doc('d2', 'Interview')],
+    codes: [code('c1', 'Same'), code('c2', 'Same')],
+    // Two passages over the same words, one coded twice with the same code
+    // across both; two more over the same words with only notes; one with nothing.
+    segments: [
+      { id: 'a', documentId: 'd1', start: 0, end: 5, text: 'Alpha' },
+      { id: 'b', documentId: 'd1', start: 0, end: 5, text: 'Alpha' },
+      { id: 'm1', documentId: 'd1', start: 6, end: 10, text: 'beta' },
+      { id: 'm2', documentId: 'd1', start: 6, end: 10, text: 'beta' },
+      { id: 'bare', documentId: 'd1', start: 11, end: 16, text: 'gamma' }
+    ],
+    codings: [
+      { id: 'k1', segmentId: 'a', codeId: 'c1', createdAt: '0' },
+      { id: 'k2', segmentId: 'b', codeId: 'c1', createdAt: '0' },
+      { id: 'k3', segmentId: 'b', codeId: 'c2', createdAt: '0' }
+    ],
+    notes: [
+      { id: 'n1', question: null, answer: 'Same first line', tags: [], noteCategoryId: null, attachedTo: { kind: 'segment', segmentId: 'm1' }, createdAt: '0', updatedAt: '0' },
+      { id: 'n2', question: null, answer: 'Same first line', tags: [], noteCategoryId: null, attachedTo: { kind: 'segment', segmentId: 'm2' }, createdAt: '0', updatedAt: '0' }
+    ],
+    categories: [
+      { id: 'x', kind: 'theme', name: 'Group', color: '#aa0000', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' },
+      { id: 'y', kind: 'theme', name: 'Group', color: '#aa0000', definition: '', codeIds: [], noteIds: [], segmentIds: [], parentCategoryId: 'x', createdAt: '0' }
+    ]
+  })
+  const bundle = buildQdpx(project, 't')
+  const selections = [...bundle.qde.matchAll(/<PlainTextSelection [^>]*startPosition="(\d+)" endPosition="(\d+)"[^>]*>([\s\S]*?)<\/PlainTextSelection>/g)]
+
+  // Reported from QualCoder: "UNIQUE constraint failed: annotation.fid,
+  // annotation.pos0, annotation.pos1, annotation.owner".
+  it('writes one selection per range, each code once, and leaves out passages with nothing on them', () => {
+    expect(selections.map((m) => `${m[1]}-${m[2]}`)).toEqual(['0-5', '6-10'])
+    const coded = selections[0][3]
+    expect(coded.match(/<CodeRef /g)).toHaveLength(2)
+    const annotated = selections[1][3]
+    expect(annotated).not.toContain('<Coding')
+    expect(annotated).toContain('<Description>Same first line\n\nSame first line</Description>')
+  })
+
+  it('gives documents, codes, clusters and notes names no sibling of their kind shares', () => {
+    expect(bundle.qde).toContain('name="Interview"')
+    expect(bundle.qde).toContain('name="Interview (2)"')
+    expect(bundle.qde).toContain('name="Same (2)"')
+    expect(bundle.qde).toContain('name="Group (2)"')
+    expect(bundle.qde).toContain('name="Same first line (2)"')
+  })
+
+  it('still round-trips into Cadenza: the merged passages keep every code and note', () => {
+    const { data } = parseQdpx(bundle.qde, (p) => bundle.sources[p])
+    expect(data.segments).toHaveLength(2)
+    const alpha = data.segments.find((s) => s.text === 'Alpha')!
+    expect(data.codings.filter((k) => k.segmentId === alpha.id).map((k) => k.codeId).sort()).toEqual([toGuid('c1'), toGuid('c2')].sort())
+    const beta = data.segments.find((s) => s.text === 'beta')!
+    expect(data.notes.filter((n) => n.attachedTo.kind === 'segment' && n.attachedTo.segmentId === beta.id)).toHaveLength(2)
+  })
+
+  it('reads a note’s text from its file when it isn’t inline (QualCoder journals)', () => {
+    const qde = `<Project xmlns="urn:QDA-XML:project:1.0" name="j"><Notes>
+      <Note guid="${toGuid('j')}" name="Journal" plainTextPath="internal://${toGuid('j')}.txt"/>
+    </Notes></Project>`
+    const { data } = parseQdpx(qde, (p) => (p === `Sources/${toGuid('j')}.txt` ? `${String.fromCharCode(0xfeff)}Entry text` : undefined))
+    expect(data.notes[0].answer).toBe('Entry text')
   })
 })

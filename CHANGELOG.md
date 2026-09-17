@@ -22,6 +22,24 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   Categories now become clusters with their nesting and their codes filed inside, documents are
   found regardless of how the export names its sources folder, and passages land on exactly the
   words they covered.
+- Projects exported as REFI-QDA (.qdpx) could not be opened in QualCoder ("not well-formed
+  (invalid token)"): part of the file was written in a form strict XML readers reject. Exports are
+  now valid XML, and characters XML forbids (stray control characters pasted from other
+  documents) are dropped from them.
+- Once past that, QualCoder could still stop halfway through importing a Cadenza export ("UNIQUE
+  constraint failed: annotation…") when two passages covered the same words. The export now
+  writes one passage per stretch of text carrying all its codes and notes, leaves out passages
+  with neither, and gives documents, codes, clusters and notes that share a name a " (2)" suffix,
+  since QualCoder refuses or merges repeated names.
+
+### Changed
+- REFI-QDA export now writes clusters into the codebook as categories (the way QualCoder, NVivo
+  and MAXQDA write theirs), with their sub-clusters and codes inside and their notes attached, so
+  other tools show your clusters instead of a flat list of codes. A code filed in several clusters
+  appears under the first one. Re-importing into Cadenza still restores every cluster membership,
+  analytic questions, and filed notes.
+- Notes now reach QualCoder too (as journal entries), and a note on a passage also shows there as
+  that passage's memo.
 
 ### Added
 - **Full-text search** (Analysis → Search): find every occurrence of a word or phrase across all

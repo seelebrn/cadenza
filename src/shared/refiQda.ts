@@ -18,17 +18,18 @@ import { joinParagraphs } from './text'
  * QualCoder and others use to move a coded project between tools, and the
  * one data repositories ask for when archiving qualitative data. A .qdpx
  * is a zip: `project.qde` (XML, namespace urn:QDA-XML:project:1.0) plus a
- * `sources/` folder with each document's plain text. This module is the
+ * `Sources/` folder with each document's plain text. This module is the
  * pure part — building the XML and source texts from ProjectData, and
  * reading them back — with zipping and dialogs in the main process.
  *
  * What travels: codes (hierarchy, color, description), documents as text
  * sources, coded passages and their codings, notes (attached to a passage,
  * document, code or the project), case attributes (as REFI Variables and
- * Cases, one Case per document), and clusters as Sets (their code and note
- * members). What doesn't exist in the standard and is left behind on
- * export: boards and their layout, cluster links, cluster nesting and
- * colors, note tags and note types, quotes filed directly under a cluster.
+ * Cases, one Case per document), and clusters — as categories in the
+ * codebook (nesting, color, definition) and as Sets (every code and note
+ * member). What doesn't exist in the standard and is left behind on
+ * export: boards and their layout, cluster links, note tags and note types,
+ * quotes filed directly under a cluster.
  * Codes of kind "item" are marked through a Set named ITEMS_SET_NAME so a
  * Cadenza→Cadenza round trip keeps them.
  */
@@ -74,18 +75,60 @@ export function toGuid(id: string): string {
 
 type XmlNode = Record<string, unknown>
 
+/** Written into a cluster Set's description: the GUID of the grouping code
+ * that stands for the same cluster in the codebook (see buildQdpx), and
+ * whether it's a question-cluster. Lines starting with "Cadenza:" are
+ * Cadenza's own bookkeeping and are dropped from the definition on import. */
+const CLUSTER_MARKER = 'Cadenza: cluster'
+const QUESTION_MARKER = 'Cadenza: analytic question cluster'
+
+/** Characters XML 1.0 doesn't allow at all, even escaped — control
+ * characters (other than tab, line feed and carriage return), lone
+ * surrogates, U+FFFE/U+FFFF. Text pasted from Word or PDFs can carry some
+ * (a vertical tab for a manual line break, say), and a strict parser
+ * rejects the whole file on the first one. */
+export function stripIllegalXmlChars(value: unknown): string {
+  return String(value).replace(
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    ''
+  )
+}
+
 export interface QdpxBundle {
   /** The project.qde XML document. */
   qde: string
-  /** Files to put in the zip beside it, path → UTF-8 text (`sources/<guid>.txt`). */
+  /** Files to put in the zip beside it, path → UTF-8 text (`Sources/<guid>.txt`). */
   sources: Record<string, string>
 }
 
-function noteXml(note: NoteRecord, userGuid: string): XmlNode {
-  const name = (note.question || note.answer).split('\n')[0].slice(0, 80) || 'Note'
+/** Gives each item a name no other item of the list shares, suffixing
+ * repeats (“Name (2)”, “Name (3)”…). QualCoder stores documents, codes,
+ * categories and journals in tables where a name must be unique: a repeated
+ * document name makes its import fail outright, a repeated code or category
+ * silently merges into the first one. */
+function uniqueNames<T>(items: T[], idOf: (item: T) => string, nameOf: (item: T) => string): Map<string, string> {
+  const taken = new Set<string>()
+  const names = new Map<string, string>()
+  for (const item of items) {
+    const base = stripIllegalXmlChars(nameOf(item)).trim()
+    let name = base
+    for (let n = 2; taken.has(name); n++) name = `${base} (${n})`
+    taken.add(name)
+    names.set(idOf(item), name)
+  }
+  return names
+}
+
+/** A note, with its text both inline (PlainTextContent, which Cadenza reads)
+ * and as a file (plainTextPath, which QualCoder needs to make it a journal
+ * entry). */
+function noteXml(note: NoteRecord, name: string, userGuid: string, sources: Record<string, string>): XmlNode {
+  const guid = toGuid(note.id)
+  sources[`Sources/${guid}.txt`] = note.question ? `${note.question}\n\n${note.answer}` : note.answer
   const node: XmlNode = {
-    '@_guid': toGuid(note.id),
+    '@_guid': guid,
     '@_name': name,
+    '@_plainTextPath': `internal://${guid}.txt`,
     '@_creatingUser': userGuid,
     '@_creationDateTime': note.createdAt,
     '@_modifiedDateTime': note.updatedAt
@@ -100,11 +143,15 @@ export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
   const now = new Date().toISOString()
   const noteRefs = (attachment: (n: NoteRecord) => boolean): XmlNode[] =>
     data.notes.filter(attachment).map((n) => ({ '@_targetGUID': toGuid(n.id) }))
+  const documentNames = uniqueNames(data.documents, (d) => d.id, (d) => d.title || 'Document')
+  const codeNames = uniqueNames(data.codes, (c) => c.id, (c) => c.name || 'Code')
+  const clusterNames = uniqueNames(data.categories, (c) => c.id, (c) => c.name || 'Cluster')
+  const noteNames = uniqueNames(data.notes, (n) => n.id, (n) => (n.question || n.answer).split('\n')[0].slice(0, 80) || 'Note')
 
   function codeXml(code: CodeNode): XmlNode {
     const node: XmlNode = {
       '@_guid': toGuid(code.id),
-      '@_name': code.name,
+      '@_name': codeNames.get(code.id),
       '@_isCodable': 'true',
       '@_color': code.color
     }
@@ -124,35 +171,57 @@ export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
   const textSources: XmlNode[] = data.documents.map((document) => {
     const guid = toGuid(document.id)
     const text = joinParagraphs(document.paragraphs)
-    sources[`sources/${guid}.txt`] = text
+    // "Sources/", as QualCoder writes it (import looks it up either way).
+    sources[`Sources/${guid}.txt`] = text
     const toCodePoints = codeUnitsToCodePoints(text)
-    const selections: XmlNode[] = data.segments
-      .filter((s) => s.documentId === document.id)
-      .map((segment) => {
-        const node: XmlNode = {
-          '@_guid': toGuid(segment.id),
-          '@_name': segment.text.slice(0, 60) || 'Passage',
-          '@_startPosition': toCodePoints(segment.start),
-          '@_endPosition': toCodePoints(segment.end),
+    // One selection per distinct range, carrying every code and note on
+    // any passage over it. Cadenza can hold two passages over the same
+    // words; QualCoder allows one coding per code per range, and turns a
+    // selection without codes into an annotation, of which a range may have
+    // only one — a second one made its import fail. A passage with neither
+    // codes nor notes carries nothing to exchange and is left out.
+    const segmentsByRange = new Map<string, Segment[]>()
+    for (const segment of data.segments) {
+      if (segment.documentId !== document.id) continue
+      const key = `${segment.start}:${segment.end}`
+      segmentsByRange.set(key, [...(segmentsByRange.get(key) ?? []), segment])
+    }
+    const selections: XmlNode[] = []
+    for (const group of segmentsByRange.values()) {
+      const ids = new Set(group.map((s) => s.id))
+      const codedWith = new Set<string>()
+      const codings: XmlNode[] = []
+      for (const coding of data.codings) {
+        if (!ids.has(coding.segmentId) || codedWith.has(coding.codeId)) continue
+        codedWith.add(coding.codeId)
+        codings.push({
+          '@_guid': toGuid(coding.id),
           '@_creatingUser': userGuid,
-          '@_creationDateTime': data.createdAt
-        }
-        const codings: XmlNode[] = data.codings
-          .filter((c) => c.segmentId === segment.id)
-          .map((coding) => ({
-            '@_guid': toGuid(coding.id),
-            '@_creatingUser': userGuid,
-            '@_creationDateTime': coding.createdAt,
-            CodeRef: { '@_targetGUID': toGuid(coding.codeId) }
-          }))
-        if (codings.length) node.Coding = codings
-        const refs = noteRefs((n) => n.attachedTo.kind === 'segment' && n.attachedTo.segmentId === segment.id)
-        if (refs.length) node.NoteRef = refs
-        return node
-      })
+          '@_creationDateTime': coding.createdAt,
+          CodeRef: { '@_targetGUID': toGuid(coding.codeId) }
+        })
+      }
+      const attached = data.notes.filter((n) => n.attachedTo.kind === 'segment' && ids.has(n.attachedTo.segmentId))
+      if (codings.length === 0 && attached.length === 0) continue
+      const segment = group[0]
+      const node: XmlNode = {
+        '@_guid': toGuid(segment.id),
+        '@_name': segment.text || 'Passage',
+        '@_startPosition': toCodePoints(segment.start),
+        '@_endPosition': toCodePoints(segment.end),
+        '@_creatingUser': userGuid,
+        '@_creationDateTime': data.createdAt
+      }
+      // The notes' text as the selection's memo: QualCoder shows it as the
+      // coding memo, or as the annotation for a passage with no code.
+      if (attached.length) node.Description = attached.map((n) => (n.question ? `${n.question}\n${n.answer}` : n.answer)).join('\n\n')
+      if (codings.length) node.Coding = codings
+      if (attached.length) node.NoteRef = attached.map((n) => ({ '@_targetGUID': toGuid(n.id) }))
+      selections.push(node)
+    }
     const node: XmlNode = {
       '@_guid': guid,
-      '@_name': document.title,
+      '@_name': documentNames.get(document.id),
       '@_plainTextPath': `internal://${guid}.txt`,
       '@_creatingUser': userGuid,
       '@_creationDateTime': document.importedAt,
@@ -165,7 +234,7 @@ export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
   })
 
   const cases: XmlNode[] = data.documents.map((document) => {
-    const node: XmlNode = { '@_guid': toGuid(`case:${document.id}`), '@_name': document.title }
+    const node: XmlNode = { '@_guid': toGuid(`case:${document.id}`), '@_name': documentNames.get(document.id) }
     const values = Object.entries(document.attributes).map(([name, value]) => ({
       VariableRef: { '@_targetGUID': variableGuid(name) },
       TextValue: value
@@ -175,17 +244,53 @@ export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
     return node
   })
 
+  // Clusters travel twice, for two audiences. In the CodeBook, as codes
+  // marked isCodable="false" with their sub-clusters and filed codes nested
+  // inside — how QualCoder reads (and writes) categories, and how NVivo
+  // folders and MAXQDA code groups are exchanged — so another tool opens the
+  // project with its categories intact. A top-level code filed in several
+  // clusters sits under the first one; a sub-code follows its parent code.
+  // And as Sets, which carry what a codebook tree can't: notes filed in a
+  // cluster, a code in several clusters, sub-codes filed directly, and the
+  // question kind. A Set has its own GUID (two elements sharing one would
+  // confuse tools that index GUIDs project-wide) and names the grouping it
+  // belongs to in its description, so Cadenza's import merges the two back
+  // into one cluster.
+  const homeClusterByCode = new Map<string, string>()
+  for (const category of data.categories) {
+    for (const id of category.codeIds) {
+      const code = data.codes.find((c) => c.id === id)
+      if (code && code.parentId === null && !homeClusterByCode.has(id)) homeClusterByCode.set(id, category.id)
+    }
+  }
+  function clusterXml(category: CategoryRecord): XmlNode {
+    const node: XmlNode = { '@_guid': toGuid(category.id), '@_name': clusterNames.get(category.id), '@_isCodable': 'false' }
+    if (/^#[0-9a-f]{6}$/i.test(category.color)) node['@_color'] = category.color
+    if (category.definition) node.Description = category.definition
+    const refs = noteRefs((n) => n.attachedTo.kind === 'category' && n.attachedTo.categoryId === category.id)
+    if (refs.length) node.NoteRef = refs
+    const children = [
+      ...data.categories.filter((c) => c.parentCategoryId === category.id).map(clusterXml),
+      ...data.codes.filter((c) => c.parentId === null && homeClusterByCode.get(c.id) === category.id).map(codeXml)
+    ]
+    if (children.length) node.Code = children
+    return node
+  }
+  const codebook: XmlNode[] = [
+    ...data.categories.filter((c) => !c.parentCategoryId).map(clusterXml),
+    ...data.codes.filter((c) => c.parentId === null && !homeClusterByCode.has(c.id)).map(codeXml)
+  ]
+
   const sets: XmlNode[] = data.categories.map((category) => {
-    const node: XmlNode = { '@_guid': toGuid(category.id), '@_name': category.name }
-    const parent = category.parentCategoryId ? data.categories.find((c) => c.id === category.parentCategoryId) : null
+    const node: XmlNode = { '@_guid': toGuid(`set:${category.id}`), '@_name': clusterNames.get(category.id) }
     const description = [
       category.definition,
-      category.kind === 'question' ? 'Cadenza: analytic question cluster' : '',
-      parent ? `Cadenza: nested under “${parent.name}”` : ''
+      category.kind === 'question' ? QUESTION_MARKER : '',
+      `${CLUSTER_MARKER} ${toGuid(category.id)}`
     ]
       .filter(Boolean)
       .join('\n')
-    if (description) node.Description = description
+    node.Description = description
     const codes = category.codeIds.filter((id) => data.codes.some((c) => c.id === id)).map((id) => ({ '@_targetGUID': toGuid(id) }))
     const notes = category.noteIds.filter((id) => data.notes.some((n) => n.id === id)).map((id) => ({ '@_targetGUID': toGuid(id) }))
     if (codes.length) node.MemberCode = codes
@@ -202,17 +307,10 @@ export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
     })
   }
 
-  // A note attached to a cluster has no home in the standard (Sets carry
-  // no notes); it goes to the project level, its cluster named in front.
-  const projectNotes = data.notes.filter((n) => n.attachedTo.kind === 'project' || n.attachedTo.kind === 'category')
-  const notes: XmlNode[] = data.notes.map((note) => {
-    const node = noteXml(note, userGuid)
-    if (note.attachedTo.kind === 'category') {
-      const category = data.categories.find((c) => c.id === (note.attachedTo as { categoryId: string }).categoryId)
-      if (category) node.Description = `[Cluster: ${category.name}]${note.question ? ` ${note.question}` : ''}`
-    }
-    return node
-  })
+  // A note attached to a cluster is referenced from the cluster's grouping
+  // code in the codebook (clusterXml), like any code's note.
+  const projectNotes = data.notes.filter((n) => n.attachedTo.kind === 'project')
+  const notes: XmlNode[] = data.notes.map((note) => noteXml(note, noteNames.get(note.id)!, userGuid, sources))
 
   const project: XmlNode = {
     '@_xmlns': REFI_NAMESPACE,
@@ -222,7 +320,7 @@ export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
     '@_creationDateTime': data.createdAt,
     '@_modifiedDateTime': data.updatedAt || now,
     Users: { User: [{ '@_guid': userGuid, '@_name': 'Cadenza user' }] },
-    CodeBook: { Codes: { Code: data.codes.filter((c) => c.parentId === null).map(codeXml) } }
+    CodeBook: { Codes: { Code: codebook } }
   }
   if (attributeNames.length) {
     project.Variables = {
@@ -235,7 +333,19 @@ export function buildQdpx(data: ProjectData, origin: string): QdpxBundle {
   if (sets.length) project.Sets = { Set: sets }
   if (projectNotes.length) project.NoteRef = projectNotes.map((n) => ({ '@_targetGUID': toGuid(n.id) }))
 
-  const builder = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', format: true, suppressEmptyNode: true })
+  const builder = new XMLBuilder({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    format: true,
+    suppressEmptyNode: true,
+    // By default the builder writes an attribute whose value is "true" as a
+    // bare name (`isCodable` instead of `isCodable="true"`) — fine in HTML,
+    // not well-formed XML. Cadenza's own lenient parser accepted it; a strict
+    // one (Python's ElementTree, in QualCoder) rejects the whole file.
+    suppressBooleanAttributes: false,
+    attributeValueProcessor: (_name: string, value: unknown) => stripIllegalXmlChars(value),
+    tagValueProcessor: (_name: string, value: unknown) => stripIllegalXmlChars(value)
+  })
   const qde = `<?xml version="1.0" encoding="UTF-8"?>\n${builder.build({ Project: project })}`
   return { qde, sources }
 }
@@ -398,7 +508,7 @@ function textOf(value: unknown): string {
 }
 
 /** Reads a .qdpx's project.qde (and its source texts, via `readSource`,
- * given the path inside the zip such as `sources/<guid>.txt`) into
+ * given the path inside the zip such as `Sources/<guid>.txt`) into
  * ProjectData. GUIDs are kept as ids. The result still needs
  * normalizeProjectData (default board, pinning) before use. */
 export function parseQdpx(qde: string, readSource: (zipPath: string) => string | undefined): { data: ProjectData; report: QdpxImportReport } {
@@ -502,12 +612,12 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
     let raw: string | undefined
     let selectionHost: XmlNode = node
     const path = attr(node, 'plainTextPath')
-    if (path.startsWith('internal://')) raw = readSource(`sources/${path.slice('internal://'.length)}`)
+    if (path.startsWith('internal://')) raw = readSource(`Sources/${path.slice('internal://'.length)}`)
     if (raw === undefined && node.PlainTextContent !== undefined) raw = textOf(node.PlainTextContent)
     if (raw === undefined && kind === 'PDFSource') {
       const representation = asArray(node.Representation as XmlNode[] | undefined)[0]
       const rpath = attr(representation, 'plainTextPath')
-      if (rpath.startsWith('internal://')) raw = readSource(`sources/${rpath.slice('internal://'.length)}`)
+      if (rpath.startsWith('internal://')) raw = readSource(`Sources/${rpath.slice('internal://'.length)}`)
       if (raw === undefined && representation?.PlainTextContent !== undefined) raw = textOf(representation.PlainTextContent)
       if (representation) selectionHost = representation
     }
@@ -582,7 +692,11 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
   const notes: NoteRecord[] = []
   for (const node of asArray((project.Notes as XmlNode | undefined)?.Note as XmlNode[] | undefined)) {
     const id = guid(attr(node, 'guid')) || nanoid()
-    const content = textOf(node.PlainTextContent)
+    // Inline text, or else the file it points to (how QualCoder writes journals).
+    const path = attr(node, 'plainTextPath')
+    const content =
+      textOf(node.PlainTextContent) ||
+      (path.startsWith('internal://') ? (readSource(`Sources/${path.slice('internal://'.length)}`) ?? '').replace(/^\uFEFF/, '') : '')
     const description = textOf(node.Description).trim()
     const answer = (content || description || attr(node, 'name')).trim()
     const question = content && description && description !== content.trim() ? description : null
@@ -606,21 +720,43 @@ export function parseQdpx(qde: string, readSource: (zipPath: string) => string |
   }
 
   // Sets → clusters too, alongside the codebook's groupings above (the
-  // "items" marker set flips code kinds instead).
+  // "items" marker set flips code kinds instead). A Set Cadenza wrote for a
+  // cluster that's also a grouping code merges into that cluster rather
+  // than becoming a second one (see buildQdpx).
   for (const set of asArray((project.Sets as XmlNode | undefined)?.Set as XmlNode[] | undefined)) {
     const memberCodes = asArray(set.MemberCode as XmlNode[] | undefined).map((m) => guid(attr(m, 'targetGUID'))).filter((id) => codeIds.has(id))
     if (attr(set, 'name') === ITEMS_SET_NAME) {
       for (const code of codes) if (memberCodes.includes(code.id)) code.kind = 'item'
       continue
     }
+    const memberNotes = asArray(set.MemberNote as XmlNode[] | undefined).map((m) => guid(attr(m, 'targetGUID'))).filter((id) => noteIds.has(id))
+    const descriptionLines = textOf(set.Description).split('\n')
+    const isQuestion = descriptionLines.some((line) => line.trim() === QUESTION_MARKER)
+    const clusterGuid = descriptionLines
+      .map((line) => line.trim())
+      .find((line) => line.startsWith(`${CLUSTER_MARKER} `))
+      ?.slice(CLUSTER_MARKER.length + 1)
+      .trim()
+      .toLowerCase()
+    const definition = descriptionLines
+      .filter((line) => !line.trim().startsWith('Cadenza:'))
+      .join('\n')
+      .trim()
+    const existing = clusterGuid ? categoryById.get(clusterGuid) : undefined
+    if (existing) {
+      for (const id of memberCodes) if (!existing.codeIds.includes(id)) existing.codeIds.push(id)
+      for (const id of memberNotes) if (!existing.noteIds.includes(id)) existing.noteIds.push(id)
+      if (isQuestion) existing.kind = 'question'
+      continue
+    }
     categories.push({
       id: guid(attr(set, 'guid')) || nanoid(),
-      kind: 'theme',
+      kind: isQuestion ? 'question' : 'theme',
       name: attr(set, 'name') || 'Untitled cluster',
       color: DEFAULT_COLOR,
-      definition: textOf(set.Description).trim(),
+      definition,
       codeIds: memberCodes,
-      noteIds: asArray(set.MemberNote as XmlNode[] | undefined).map((m) => guid(attr(m, 'targetGUID'))).filter((id) => noteIds.has(id)),
+      noteIds: memberNotes,
       segmentIds: [],
       parentCategoryId: null,
       createdAt: now

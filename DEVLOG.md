@@ -3640,3 +3640,51 @@ emoji round trip. The earlier "other tool" fixture now records its passages' tex
 carriage-return counting is detected rather than assumed. Full suite green (505/505), typecheck
 clean, production build clean, boot-tested; the real-file check was run as a temporary test
 against the user's export, not committed.
+
+### REFI-QDA export that QualCoder can open, with its categories (2026-09-17)
+
+Reported: importing a Cadenza `.qdpx` into QualCoder failed with `ParseError: not well-formed
+(invalid token): line 8, column 105`, and the user asked for clusters to arrive in QualCoder as
+categories rather than being lost.
+
+1. **Not well-formed XML.** A temporary test exported every local project and ran it through
+   fast-xml-parser's validator: all failed at line 8 with "boolean attribute 'isCodable' is not
+   allowed". fast-xml-parser's builder writes an attribute whose value is `true` as a bare name
+   (`isCodable`) unless `suppressBooleanAttributes: false`; Cadenza's own lenient parser had
+   accepted it, Python's ElementTree does not. Fixed, and characters XML 1.0 forbids outright
+   (control characters, lone surrogates, U+FFFE/FFFF) are now stripped from every attribute and
+   text value (`stripIllegalXmlChars`), since one pasted vertical tab would fail the same way.
+   Verified: validator ok and ElementTree parses all seven local projects.
+
+2. **Clusters as categories.** QualCoder (like NVivo folders and MAXQDA code groups) writes
+   categories as `<Code isCodable="false">` with their codes nested inside. Clusters are now
+   written into the CodeBook that way: sub-clusters, then the top-level codes whose first cluster
+   it is (a code sits in one place in a tree), with color, definition, and notes attached. The
+   Sets stay, for what a tree can't carry (a code in several clusters, filed notes, question
+   kind), now with their own GUID plus a `Cadenza: cluster <guid>` line so the import merges each
+   Set into its grouping instead of making a second cluster. Read against QualCoder's current
+   `refi.py`: non-codable codes become `code_cat` rows with their nesting, codable codes under a
+   code become sub-codes, Sets without MemberSource are ignored.
+
+3. **Then: `UNIQUE constraint failed: annotation.fid, annotation.pos0, annotation.pos1,
+   annotation.owner`.** From `refi.py`: a `PlainTextSelection` without a `Coding` becomes an
+   annotation, and the table allows one per range; `code_text` allows one coding per code per
+   range; `source`, `code_name`, `code_cat` and `journal` require unique names (a repeated source
+   name makes its codings crash, a repeated code or category silently merges, and the journal
+   fallback `randint(100-999)` would itself raise). The export now groups passages by range into
+   one selection with the union of codes (each once) and notes, drops passages with neither
+   (quotes filed under clusters don't travel anyway), and suffixes repeated names per kind
+   (`uniqueNames`). Notes also get a `plainTextPath` file so QualCoder imports them as journals,
+   and a passage's notes go in the selection's Description, which QualCoder shows as its memo;
+   Cadenza's import now falls back to that file when a note has no inline text (how QualCoder
+   exports journals).
+
+Tests: well-formedness (validator, every attribute valued, forbidden characters gone); the
+codebook shape (root clusters then unfiled codes, sub-cluster before codes, sub-code under its
+code, no code repeated); a Cadenza round trip with nesting, question kind, definitions, colors,
+multi-cluster membership, filed and cluster-attached notes, and exactly one cluster per category;
+an older Set-only export still importing; ranges merged, codes once, empty passages dropped,
+repeated names suffixed, merged passages keeping all codes and notes on re-import; journal text
+read from its file. A Python script then checked the seven local exports against QualCoder's
+unique constraints: none violated. Full suite green (513/513), typecheck clean, production build
+clean, boot-tested.

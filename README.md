@@ -50,6 +50,17 @@ visually and build a thematic map.
 Other boards can be created alongside the Main board, curated by hand, with labeled links
 between clusters and one-click tree or radial layouts — useful for building a figure.
 
+## Analysis
+
+- **Search** — find every occurrence of a word or phrase across all documents, in context, with
+  the codes already on each passage. Accent- and case-insensitive by default. Jump to a hit in
+  the reader, code the sentence around it, or code every hit at once.
+- **Retrieval** — every passage coded with a code (optionally its sub-codes), and every note,
+  filtered by category, tag, or whether it carries an analytic question.
+- **Clusters** — manage clusters and what's filed in them, outside the board.
+- **Compare cases** — a themes × cases table (IPA-style group experiential themes) and a
+  side-by-side contrast of one code across interviews (Kaufmann).
+
 ## Import and export
 
 - **Import** documents from Word (`.docx`), OpenDocument (`.odt`) and plain text (`.txt`).

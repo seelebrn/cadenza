@@ -9,7 +9,7 @@ export interface ActiveSpan {
 
 export type SidebarTab = 'codes' | 'notes'
 export type MainView = 'workspace' | 'analysis' | 'board' | 'export'
-export type AnalysisTab = 'retrieval' | 'categories' | 'compare'
+export type AnalysisTab = 'retrieval' | 'search' | 'categories' | 'compare'
 
 const SIDEBAR_WIDTH_KEY = 'cadenza.sidebarWidth'
 const DEFAULT_SIDEBAR_WIDTH = 320

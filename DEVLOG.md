@@ -3315,3 +3315,43 @@ fix, in three parts:
   published release — and on demand. Pushing it backfills all existing releases. Verified
   locally that every tag from v0.1.0 to v0.4.6 has a section and extracts cleanly.
 - Commits keep the standard `Co-Authored-By` trailer but no longer carry the session link.
+
+### Feature: full-text search (2026-09-17)
+
+First of five gaps identified against comparable QDA tools (search, case attributes,
+co-occurrence, PDF import, REFI-QDA exchange), agreed in that order; the user's one condition is
+that Cadenza stays lightweight. This one adds no dependency at all.
+
+`src/shared/search.ts` — pure, tested. `searchDocuments(data, query, options)` walks every
+paragraph of every document (optionally a subset) and returns each occurrence as a `SearchHit`:
+the match as **global offsets into the document's joined text** (the same coordinates
+`Segment.start/end` use, so a hit can become the reader's active span or a coded segment with no
+conversion), the paragraph, context either side (80 chars, with "was clipped" flags), the codes
+already on any passage overlapping it, and the *sentence* containing it — a more useful unit to
+code than a lone word (`sentenceAround`: previous/next sentence punctuation *followed by
+whitespace*, so "3.5 fois" doesn't split).
+
+Matching is done with a regex built from the escaped query (so "what?" is literal) with the
+`u` flag, case-insensitive unless asked, and whole-word via `\p{L}\p{N}` lookarounds. The
+interesting part is **accent-insensitivity, on by default** — "reunion" finds "réunion" and the
+reverse — which matters for French transcripts and is where offsets get subtle: stripping
+combining marks (NFD, drop `\p{M}`) shortens the text, so a match position in the folded text
+can't be used on the original. `foldAccents` returns the folded string plus a table mapping every
+folded character position back to its original index (each original character contributes its
+folded length worth of entries), and hits are mapped back through it. Tests assert, for every
+hit, that slicing the *original* joined text at the reported offsets gives exactly the match.
+
+`SearchView` is a fourth Analysis tab. Hits are grouped by document with counts; each shows the
+context with the match highlighted and colored badges for codes already on it. Two actions per
+hit: **Go to →** (opens the document with the match as the active span, codes tab ready — the
+same hand-off Retrieval's "Go to passage" uses) and **Code sentence** with a code picked in a bar
+above; plus **Code all N sentences** for the whole result set in one `withBatch` (one undo step).
+That last one is what other tools call auto-coding. `applyCodeToSelection` already refuses to
+double-code the same span, so re-running is safe; a hit already carrying the picked code shows
+"Coded" and is disabled.
+
+Verified: 11 unit tests (offsets index the original text; case/accent defaults and their opt-outs;
+an accented query finds unaccented text; whole word; sentence extraction incl. the decimal case;
+existing codes reported; context clipping; document filter, literal regex chars, empty query;
+`foldAccents`' index map). Full suite green (462/462), typecheck clean, production build clean,
+boot-tested; the tab itself not exercised by hand here.

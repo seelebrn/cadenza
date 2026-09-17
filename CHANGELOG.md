@@ -6,6 +6,13 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Added
+- **Full-text search** (Analysis → Search): find every occurrence of a word or phrase across all
+  documents, shown in context and grouped by document, with the codes already on each passage.
+  Ignores case and accents by default ("reunion" finds "réunion"); whole-word and match-case
+  options; can be limited to one document. From a hit, jump to it in the reader, code the
+  sentence it sits in, or code every hit's sentence at once (one undo step).
+
 ## [0.4.7] - 2026-09-17
 
 ### Fixed

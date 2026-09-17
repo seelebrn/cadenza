@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-09-17
+
 ### Fixed
 - After "Reset placement" (or in a project whose clusters had never been moved), a cluster growing
   or shrinking — a card dropped in or taken out — rearranged the whole top level, sometimes

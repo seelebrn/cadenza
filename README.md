@@ -75,7 +75,8 @@ between clusters and one-click tree or radial layouts — useful for building a 
 - **Exchange** with other QDA tools through REFI-QDA (`.qdpx`), the standard NVivo, MAXQDA,
   ATLAS.ti, QualCoder and data repositories accept: export the whole project, or open a `.qdpx`
   made elsewhere as a new project. Documents, codes, coded passages, notes, case attributes and
-  clusters travel; boards, cluster links and nesting are Cadenza-only and stay behind.
+  clusters (as categories, with their nesting) travel; boards and cluster links are Cadenza-only
+  and stay behind.
 
 ## Download and install
 

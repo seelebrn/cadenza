@@ -6,40 +6,7 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
-### Fixed
-- Shift-dragging a code onto another to link them could rearrange the cluster so that two
-  *other* codes ended up side by side and looked like the linked pair. Linking now moves as
-  little as possible: if the two codes already touch, nothing moves; otherwise the code you aimed
-  at stays put and the dragged code swaps places with one of its neighbors, so the pair always
-  ends up side by side or one above the other. While Shift-dragging, the code the drop will link
-  to is now highlighted too.
-- Shift-dragging a code could link it to the code *below* but never to the one *beside* it. The
-  link target is now the code under the pointer (or right next to it), whichever direction it
-  is in; where the pointer sits on that code decides which side the dragged code snaps to.
-- Importing a REFI-QDA project from QualCoder (and likely NVivo and MAXQDA, which export folders
-  and code groups the same way): its categories came in as codes, with their codes as sub-codes;
-  none of its documents came in at all; and every coded passage was shifted a few characters.
-  Categories now become clusters with their nesting and their codes filed inside, documents are
-  found regardless of how the export names its sources folder, and passages land on exactly the
-  words they covered.
-- Projects exported as REFI-QDA (.qdpx) could not be opened in QualCoder ("not well-formed
-  (invalid token)"): part of the file was written in a form strict XML readers reject. Exports are
-  now valid XML, and characters XML forbids (stray control characters pasted from other
-  documents) are dropped from them.
-- Once past that, QualCoder could still stop halfway through importing a Cadenza export ("UNIQUE
-  constraint failed: annotation…") when two passages covered the same words. The export now
-  writes one passage per stretch of text carrying all its codes and notes, leaves out passages
-  with neither, and gives documents, codes, clusters and notes that share a name a " (2)" suffix,
-  since QualCoder refuses or merges repeated names.
-
-### Changed
-- REFI-QDA export now writes clusters into the codebook as categories (the way QualCoder, NVivo
-  and MAXQDA write theirs), with their sub-clusters and codes inside and their notes attached, so
-  other tools show your clusters instead of a flat list of codes. A code filed in several clusters
-  appears under the first one. Re-importing into Cadenza still restores every cluster membership,
-  analytic questions, and filed notes.
-- Notes now reach QualCoder too (as journal entries), and a note on a passage also shows there as
-  that passage's memo.
+## [0.5.0] - 2026-09-17
 
 ### Added
 - **Full-text search** (Analysis → Search): find every occurrence of a word or phrase across all
@@ -62,9 +29,29 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 - **REFI-QDA exchange (.qdpx)**: export a project in the standard format NVivo, MAXQDA, ATLAS.ti,
   QualCoder and data repositories accept (Export tab), and open a .qdpx from another tool as a
   new project (home screen). Documents, codes with their hierarchy, coded passages and codings,
-  notes, case attributes and clusters travel; boards, cluster links, cluster nesting and colors,
-  and note tags have no equivalent in the standard and stay in the Cadenza project. Imports
-  report what was brought in and what had to be skipped (audio/video sources).
+  notes, case attributes and clusters travel. Clusters are written as categories in the codebook,
+  the way QualCoder, NVivo and MAXQDA write theirs, with their nesting, colors and codes inside;
+  a code filed in several clusters appears under the first one elsewhere, while re-importing into
+  Cadenza restores every membership, analytic questions and filed notes. Notes reach QualCoder
+  as journal entries, and a passage's notes as its memo. Categories from other tools come back as
+  clusters, and passages land on exactly the words they covered, whatever line endings the
+  source used. Imports report what was brought in and what had to be skipped (audio/video
+  sources). Tested against QualCoder in both directions. Boards, cluster links, quotes filed
+  directly under a cluster, and note tags have no equivalent in the standard and stay in the
+  Cadenza project; passages with neither a code nor a note aren't exported, and names shared by
+  two documents, codes, clusters or notes get a " (2)" suffix, since QualCoder requires them
+  to be unique.
+
+### Fixed
+- Shift-dragging a code onto another to link them could rearrange the cluster so that two
+  *other* codes ended up side by side and looked like the linked pair. Linking now moves as
+  little as possible: if the two codes already touch, nothing moves; otherwise the code you aimed
+  at stays put and the dragged code swaps places with one of its neighbors, so the pair always
+  ends up side by side or one above the other. While Shift-dragging, the code the drop will link
+  to is now highlighted too.
+- Shift-dragging a code could link it to the code *below* but never to the one *beside* it. The
+  link target is now the code under the pointer (or right next to it), whichever direction it
+  is in; where the pointer sits on that code decides which side the dragged code snaps to.
 
 ## [0.4.7] - 2026-09-17
 

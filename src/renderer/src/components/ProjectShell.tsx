@@ -71,8 +71,12 @@ function ProjectShell(): JSX.Element | null {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-        <div>
+      {/* The name and status give way (cut with "…") when space runs out;
+          the navigation and buttons on the right never do — they used to
+          wrap onto two lines when "unsaved changes" appeared in a window of
+          the default size. */}
+      <header className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
+        <div className="min-w-0 flex-1">
           {isEditingName ? (
             <input
               autoFocus
@@ -84,7 +88,7 @@ function ProjectShell(): JSX.Element | null {
             />
           ) : (
             <h1
-              className="text-lg font-semibold"
+              className="truncate text-lg font-semibold"
               onDoubleClick={() => {
                 setNameDraft(data.name)
                 setIsEditingName(true)
@@ -94,13 +98,20 @@ function ProjectShell(): JSX.Element | null {
               {data.name}
             </h1>
           )}
-          <p className="text-xs text-slate-400">
-            {filePath ?? 'Not saved yet'}
-            {isDirty && ' • unsaved changes'}
-            {isSaving && ' • saving…'}
+          <p className="flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
+            {/* The file's name, not its whole path (on hover): a long path
+                is what crowded the header. */}
+            <span className="truncate" title={filePath ?? undefined}>
+              {filePath ? filePath.split(/[\\/]/).pop() : 'Not saved yet'}
+            </span>
+            {isSaving ? (
+              <span className="flex-shrink-0 text-slate-500">• saving…</span>
+            ) : (
+              isDirty && <span className="flex-shrink-0 text-amber-600">• unsaved changes</span>
+            )}
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-shrink-0 items-center gap-4 whitespace-nowrap">
           <div className="flex rounded border border-slate-300 text-sm">
             <button
               className={`px-3 py-1 ${mainView === 'workspace' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'}`}

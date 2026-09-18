@@ -31,6 +31,11 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
     ten times faster. Each document's total and "Code all N sentences" still count every hit.
 
 ### Fixed
+- In a window of the default size, the "unsaved changes" note under the project name squeezed the
+  buttons at the top (Undo, Redo, Save…) onto two lines as soon as something changed. The
+  buttons now keep their place at any window size; the project name and file name are cut with
+  "…" when space runs out (full text on hover), and "unsaved changes" stays visible. The line
+  under the name shows the file's name, with the full path on hover.
 - "Go to passage" (Retrieval, Search, Compare cases, Co-occurrence) opened the right document and
   marked the passage, but didn't scroll to it: a passage further down an interview stayed off
   screen. The reader now brings it to the middle of the view. Same for "Promote to code" from a

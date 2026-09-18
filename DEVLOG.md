@@ -3846,3 +3846,20 @@ its subtree), any other cluster is kept only if it holds a matching note or has 
 sub-cluster. The document/category filters still apply first, and the drag hint is hidden while
 filtering, as in the codebook. Checked in the app on the test project ("journal", "Transmissions",
 "a creuser", "reunion", "zzz", Escape). Tests cover the matching and the tree narrowing.
+
+### Header buttons no longer squeezed by "unsaved changes" (2026-09-18)
+
+Reported: at the window's starting size, the "unsaved changes" that appears after an action
+resized the buttons at the top and got in the way of navigating; fine when maximized. Measured
+over the DevTools protocol in the default window (1,266 px of content) with the 5-interview test
+project open: the left block (name, then full path + " • unsaved changes") had no width limit,
+so after one change the six action buttons wrapped their labels onto two lines and the header
+grew from 69 to 85 px.
+
+The header is now split so that only the left side gives way. The name block is `min-w-0 flex-1`
+with the title and the file name truncating, and the navigation and buttons are `flex-shrink-0`
+and `whitespace-nowrap`. "unsaved changes" / "saving…" moved out of the path text into its own
+non-shrinking label, so truncation never hides it. The status line shows the file name, split on
+either separator, with the full path in a tooltip: a full Windows path was the widest thing up
+there. Re-measured: header 69 px clean and dirty, no button wrapped or moved, at the default size
+and at the 960 px minimum window width (project name then cut to 135 px). 532 tests pass.

@@ -3827,3 +3827,22 @@ scrolling to the end, headers stay aligned with cells, cell clicks open the pane
 view, grouping by attribute works, search shows 200 then 400 hits with full per-document totals,
 and a code row's buttons appear on hover, stay while the merge list has focus, and go away after.
 527 tests pass, typecheck and build are clean.
+
+### Filter box in the Notes tab (2026-09-18)
+
+Asked for: the Notes tab had no equivalent of Codes & items' "Filter codes/clusters…", which with
+500 notes in 148 clusters left scrolling as the only way to find one. The request came with a
+constraint: the tab is already crowded.
+
+So no row was added. The "Show: This document | All notes | category" row became the filter row:
+a text box (flexible, at least 6rem), "This doc | All" as a compact segmented toggle, and the
+category select at a fixed 5.5rem. Measured in the app at the default 320 px sidebar, it stays one
+34 px line; a first version with a wider select wrapped to 64 px.
+
+Matching lives in `lib/noteFilter.ts`. A note matches on its question, answer or tags, accent- and
+case-insensitively, like Analysis > Search. The cluster tree follows the codebook filter's rules:
+a cluster whose own name matches is kept whole and shows all its notes (the query is lifted for
+its subtree), any other cluster is kept only if it holds a matching note or has a kept
+sub-cluster. The document/category filters still apply first, and the drag hint is hidden while
+filtering, as in the codebook. Checked in the app on the test project ("journal", "Transmissions",
+"a creuser", "reunion", "zzz", Escape). Tests cover the matching and the tree narrowing.

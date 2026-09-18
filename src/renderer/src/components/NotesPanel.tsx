@@ -4,6 +4,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { buildClusterTree, DRAG_KIND_MIME, SOURCE_CLUSTER_MIME } from '../lib/clusterTree'
 import type { ClusterTreeNode } from '../lib/clusterTree'
+import { clusterNameMatches, filterNoteClusterTree, normalizeForFilter, noteMatchesQuery } from '../lib/noteFilter'
 import { describeNoteAttachment } from '@shared/notesOps'
 import type { CategoryKind, NoteCategoryDef, NoteRecord } from '@shared/types'
 import ClusterRowShell from './ClusterRowShell'
@@ -52,6 +53,8 @@ function NotesPanel(): JSX.Element {
   const [manualTarget, setManualTarget] = useState<'document' | 'project'>('document')
   const [filterMode, setFilterMode] = useState<'document' | 'all'>('document')
   const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const normalizedQuery = normalizeForFilter(searchQuery.trim())
   const [newClusterName, setNewClusterName] = useState('')
   // Same theme/question choice Analysis > Clusters and the board's own
   // "+ New cluster" already offer — this form used to hardcode 'theme',
@@ -120,19 +123,30 @@ function NotesPanel(): JSX.Element {
     return [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   }, [data, filterMode, selectedDocumentId, categoryFilter])
 
+  // The filter box narrows further: notes whose text or tags match, and
+  // clusters whose name matches or that hold a matching note.
+  const matchingNotes = useMemo(
+    () => (normalizedQuery ? visibleNotes.filter((n) => noteMatchesQuery(n, normalizedQuery)) : visibleNotes),
+    [visibleNotes, normalizedQuery]
+  )
+  const filteredClusterTree = useMemo(
+    () => filterNoteClusterTree(clusterTree, new Set(matchingNotes.map((n) => n.id)), normalizedQuery),
+    [clusterTree, matchingNotes, normalizedQuery]
+  )
+
   // One combined tree, same idea as the codebook tab: clusters and
   // unclustered notes (that also pass the current filters) as siblings, in
   // creation order — a cluster is just another row here, not a separate
   // section, and a note filed under one renders as that cluster's child
   // instead of also appearing at the root.
   const mergedRoots = useMemo<MergedRootNode[]>(() => {
-    const rootNotes = visibleNotes.filter((n) => !claimedNoteIds.has(n.id))
+    const rootNotes = matchingNotes.filter((n) => !claimedNoteIds.has(n.id))
     const entries: MergedRootNode[] = [
       ...rootNotes.map((n) => ({ kind: 'note' as const, id: n.id, createdAt: n.createdAt, note: n })),
-      ...clusterTree.map((n) => ({ kind: 'cluster' as const, id: n.id, createdAt: n.createdAt, node: n }))
+      ...filteredClusterTree.map((n) => ({ kind: 'cluster' as const, id: n.id, createdAt: n.createdAt, node: n }))
     ]
     return entries.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  }, [visibleNotes, claimedNoteIds, clusterTree])
+  }, [matchingNotes, claimedNoteIds, filteredClusterTree])
 
   function handleCreateCluster(): void {
     const name = newClusterName.trim()
@@ -235,23 +249,37 @@ function NotesPanel(): JSX.Element {
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-3 py-1.5 text-xs text-slate-500">
-        <span>Show:</span>
-        <button
-          className={filterMode === 'document' ? 'font-semibold text-slate-800' : 'hover:text-slate-700'}
-          onClick={() => setFilterMode('document')}
-        >
-          This document
-        </button>
-        <button
-          className={filterMode === 'all' ? 'font-semibold text-slate-800' : 'hover:text-slate-700'}
-          onClick={() => setFilterMode('all')}
-        >
-          All notes
-        </button>
+      {/* Filtering lives on one row: the text filter, which notes (this
+          document's or all), and the note category. */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-2 py-1.5 text-xs text-slate-500">
+        <input
+          className="min-w-[6rem] flex-1 rounded border border-slate-300 px-2 py-0.5 text-xs"
+          placeholder="Filter notes/clusters…"
+          title="Matches a note's question, text and tags, and cluster names — accents and case ignored"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Escape' && setSearchQuery('')}
+        />
+        <span className="flex overflow-hidden rounded border border-slate-300">
+          <button
+            className={`px-1.5 py-0.5 ${filterMode === 'document' ? 'bg-slate-700 text-white' : 'hover:bg-slate-100'}`}
+            title="Notes on the open document and its passages"
+            onClick={() => setFilterMode('document')}
+          >
+            This doc
+          </button>
+          <button
+            className={`px-1.5 py-0.5 ${filterMode === 'all' ? 'bg-slate-700 text-white' : 'hover:bg-slate-100'}`}
+            title="Every note in the project"
+            onClick={() => setFilterMode('all')}
+          >
+            All
+          </button>
+        </span>
         {categories.length > 0 && (
           <select
-            className="ml-auto rounded border border-slate-300 px-1 py-0.5 text-[11px]"
+            className="w-[5.5rem] rounded border border-slate-300 px-1 py-0.5 text-[11px]"
+            title="Note category"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
           >
@@ -300,9 +328,11 @@ function NotesPanel(): JSX.Element {
         onDrop={handleRootDrop}
       >
         {mergedRoots.length === 0 && (
-          <p className="p-3 text-center text-sm text-slate-400">No notes or clusters yet.</p>
+          <p className="p-3 text-center text-sm text-slate-400">
+            {normalizedQuery ? 'Nothing matches that filter.' : 'No notes or clusters yet.'}
+          </p>
         )}
-        {mergedRoots.length > 0 && (
+        {mergedRoots.length > 0 && !normalizedQuery && (
           <p className="mb-1 px-1 text-[10px] text-slate-400">
             Drag a note onto a cluster to file it there, or drop here to move it back out.
           </p>
@@ -311,7 +341,14 @@ function NotesPanel(): JSX.Element {
           entry.kind === 'note' ? (
             <NoteCard key={entry.id} note={entry.note} />
           ) : (
-            <NoteClusterRow key={entry.id} node={entry.node} depth={0} visibleNotes={visibleNotes} />
+            <NoteClusterRow
+              key={entry.id}
+              node={entry.node}
+              depth={0}
+              visibleNotes={visibleNotes}
+              matchingNotes={matchingNotes}
+              query={normalizedQuery}
+            />
           )
         )}
       </div>
@@ -461,6 +498,10 @@ interface NoteClusterRowProps {
    * notes" behaves consistently whether a note happens to be filed under a
    * cluster or not. */
   visibleNotes: NoteRecord[]
+  /** visibleNotes narrowed by the filter box's `query`. A cluster whose own
+   * name matches shows all its visibleNotes; any other shows only these. */
+  matchingNotes: NoteRecord[]
+  query: string
 }
 
 /** A cluster, shown as a row in the same tree as notes — this is the same
@@ -471,14 +512,18 @@ interface NoteClusterRowProps {
  * itself (color swatch, name edit, drag/drop) is shared with the
  * codebook tab's equivalent row via ClusterRowShell — this wrapper's job
  * is just computing which notes belong here. */
-function NoteClusterRow({ node, depth, visibleNotes }: NoteClusterRowProps): JSX.Element {
+function NoteClusterRow({ node, depth, visibleNotes, matchingNotes, query }: NoteClusterRowProps): JSX.Element {
   const addNoteToCategory = useProjectStore((s) => s.addNoteToCategoryAndReflowBoard)
   const removeNoteFromCategory = useProjectStore((s) => s.removeNoteFromCategoryAndReflowBoard)
 
+  // A match on this cluster's name lifts the filter for everything inside it.
+  const selfMatches = clusterNameMatches(node, query)
+  const shownNotes = selfMatches ? visibleNotes : matchingNotes
+  const childQuery = selfMatches ? '' : query
   const memberNotes = useMemo(() => {
-    const byId = new Map(visibleNotes.map((n) => [n.id, n]))
+    const byId = new Map(shownNotes.map((n) => [n.id, n]))
     return node.noteIds.map((id) => byId.get(id)).filter((n): n is NoteRecord => Boolean(n))
-  }, [node.noteIds, visibleNotes])
+  }, [node.noteIds, shownNotes])
   const otherMemberCount = node.codeIds.length + node.segmentIds.length
 
   return (
@@ -494,7 +539,14 @@ function NoteClusterRow({ node, depth, visibleNotes }: NoteClusterRowProps): JSX
       onRemoveMember={removeNoteFromCategory}
     >
       {node.children.map((child) => (
-        <NoteClusterRow key={child.id} node={child} depth={depth + 1} visibleNotes={visibleNotes} />
+        <NoteClusterRow
+          key={child.id}
+          node={child}
+          depth={depth + 1}
+          visibleNotes={visibleNotes}
+          matchingNotes={selfMatches ? visibleNotes : matchingNotes}
+          query={childQuery}
+        />
       ))}
       {memberNotes.map((note) => (
         <NoteCard key={note.id} note={note} sourceClusterId={node.id} depth={depth + 1} />

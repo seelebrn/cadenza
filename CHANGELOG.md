@@ -6,6 +6,13 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Added
+- **Filter box in the Notes tab**, like the one in Codes & items: finds notes by their question,
+  text or tags, and clusters by name, ignoring accents and case ("reunion" finds "réunion").
+  A matching note shows inside its clusters; a cluster whose name matches shows with everything
+  in it. Escape clears it. It sits in the existing filter row, next to "This doc / All" and the
+  note category, so the tab gains no extra line.
+
 ### Changed
 - **Large projects are much faster** (measured on 5 interviews, 500 codes, 500 notes, 1,300
   passages):

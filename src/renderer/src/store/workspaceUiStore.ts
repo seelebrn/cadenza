@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { EMPTY_PASSAGE_QUERY } from '@shared/retrieval'
+import type { PassageQuery } from '@shared/retrieval'
 
 export interface ActiveSpan {
   documentId: string
@@ -10,6 +12,15 @@ export interface ActiveSpan {
 export type SidebarTab = 'codes' | 'notes'
 export type MainView = 'workspace' | 'analysis' | 'board' | 'export'
 export type AnalysisTab = 'retrieval' | 'search' | 'categories' | 'compare' | 'cooccurrence'
+
+/** The Retrieval view's note filters. */
+export interface NoteRetrievalUiFilters {
+  /** 'all', 'uncategorized', or a note category id. */
+  categoryId: string
+  tag: string
+  hasQuestionOnly: boolean
+}
+const DEFAULT_NOTE_FILTERS: NoteRetrievalUiFilters = { categoryId: 'all', tag: '', hasQuestionOnly: false }
 
 const SIDEBAR_WIDTH_KEY = 'cadenza.sidebarWidth'
 const DEFAULT_SIDEBAR_WIDTH = 320
@@ -111,6 +122,16 @@ interface WorkspaceUiState {
   analysisTab: AnalysisTab
   setAnalysisTab: (tab: AnalysisTab) => void
 
+  /** The Retrieval view's mode and filters, kept here rather than in the
+   * view so they're still there after a detour through another tab (the
+   * view unmounts when you leave it). Reset with the project. */
+  retrievalMode: 'codes' | 'notes'
+  setRetrievalMode: (mode: 'codes' | 'notes') => void
+  passageQuery: PassageQuery
+  setPassageQuery: (query: PassageQuery) => void
+  noteFilters: NoteRetrievalUiFilters
+  setNoteFilters: (filters: NoteRetrievalUiFilters) => void
+
   selectedBoardId: string | null
   setSelectedBoardId: (id: string | null) => void
 
@@ -182,6 +203,13 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   analysisTab: 'retrieval',
   setAnalysisTab: (tab) => set({ analysisTab: tab }),
 
+  retrievalMode: 'codes',
+  setRetrievalMode: (mode) => set({ retrievalMode: mode }),
+  passageQuery: EMPTY_PASSAGE_QUERY,
+  setPassageQuery: (query) => set({ passageQuery: query }),
+  noteFilters: DEFAULT_NOTE_FILTERS,
+  setNoteFilters: (filters) => set({ noteFilters: filters }),
+
   selectedBoardId: null,
   setSelectedBoardId: (id) => set({ selectedBoardId: id }),
 
@@ -244,6 +272,9 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
       selectedDocumentId: null,
       mainView: 'workspace',
       analysisTab: 'retrieval',
+      retrievalMode: 'codes',
+      passageQuery: EMPTY_PASSAGE_QUERY,
+      noteFilters: DEFAULT_NOTE_FILTERS,
       selectedBoardId: null,
       activeSidebarTab: 'codes',
       activeSpan: null,

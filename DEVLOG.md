@@ -3733,3 +3733,17 @@ codes), the passage and query sheets, and the package (parts well-formed, escapi
 characters, number cells, empty cells skipped, styles, freeze and filter, legal unique tab names,
 no filter on a plain sheet). Full suite green (526/526), typecheck clean, production build clean,
 boot-tested.
+
+### Retrieval keeps its filters across tabs (2026-09-18)
+
+Asked for while testing the filtered retrieval: leaving the Retrieval tab, for the Workspace say,
+and coming back reset every filter, because they were component state and the view unmounts on a
+tab change. The mode, the passage query and the note filters now live in `workspaceUiStore`,
+which already held the other per-session UI state and resets with `resetForProjectSwitch`. Kept
+filters are cleaned against the current project before use: codes, documents and attributes
+deleted in the meantime are dropped, and a vanished note category falls back to "all", so a
+stale filter can't silently match nothing. The list's scroll position and how many passages were
+revealed are kept in a module-level record keyed by project and by the query object's identity.
+Coming back to the same query lands on the same spot (the "Go to passage" round trip), and any
+change to the query starts again at the top. Typecheck, 526 tests, build and boot all clean. The
+round trip itself was not clicked through here.

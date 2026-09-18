@@ -18,6 +18,9 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   attribute, the passage, its codes (sub-codes as "Parent › Child"), the clusters they're in, and
   the notes on it. The header row is frozen with filter buttons, and a second tab records the
   query behind the table. Opens in Excel, LibreOffice and Numbers.
+- The Retrieval view keeps its filters, its mode (by code or by note) and your place in the list
+  when you leave it: "Go to passage", read it in the Workspace, come back, and you're where you
+  were. Filters naming something deleted since are dropped; opening another project starts fresh.
 
 ## [0.5.0] - 2026-09-17
 

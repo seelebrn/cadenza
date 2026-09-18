@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
@@ -13,6 +13,11 @@ import type { CodeNode } from '@shared/types'
 /** Passages rendered at once; more on demand, so a project with thousands
  * of codings doesn't stall the view. */
 const PAGE_SIZE = 200
+
+/** Where the passage list was when the view was last left (it unmounts on
+ * a tab change), so "Go to passage" and back lands on the same spot —
+ * valid only for the same project and the same query. */
+const lastPassageList = { projectId: '', query: null as PassageQuery | null, visibleCount: PAGE_SIZE, scrollTop: 0 }
 
 function FilterRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -81,16 +86,46 @@ function RetrievalView(): JSX.Element | null {
   const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const setActiveSidebarTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
 
-  const [mode, setMode] = useState<'codes' | 'notes'>('codes')
-  const [query, setQuery] = useState<PassageQuery>(EMPTY_PASSAGE_QUERY)
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const mode = useWorkspaceUiStore((s) => s.retrievalMode)
+  const setMode = useWorkspaceUiStore((s) => s.setRetrievalMode)
+  const storedQuery = useWorkspaceUiStore((s) => s.passageQuery)
+  const setQuery = useWorkspaceUiStore((s) => s.setPassageQuery)
+  const noteFilters = useWorkspaceUiStore((s) => s.noteFilters)
+  const setNoteFilters = useWorkspaceUiStore((s) => s.setNoteFilters)
+  const sameListAsBefore = lastPassageList.projectId === data?.id && lastPassageList.query === storedQuery
+  const [visibleCount, setVisibleCount] = useState(sameListAsBefore ? lastPassageList.visibleCount : PAGE_SIZE)
+  const passageListRef = useRef<HTMLDivElement>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [exportStatus, setExportStatus] = useState<string | null>(null)
-  const [noteCategoryFilter, setNoteCategoryFilter] = useState<string>('all')
-  const [tagFilter, setTagFilter] = useState('')
-  const [hasQuestionOnly, setHasQuestionOnly] = useState(false)
 
-  const update = (patch: Partial<PassageQuery>): void => setQuery((q) => ({ ...q, ...patch }))
+  // Kept filters may name a code, document, attribute or note category
+  // deleted since: those are dropped rather than silently matching nothing.
+  const query = useMemo<PassageQuery>(() => {
+    if (!data) return storedQuery
+    const codeIds = new Set(data.codes.map((c) => c.id))
+    const documentIds = new Set(data.documents.map((d) => d.id))
+    const attributeNames = new Set(getAttributeNames(data))
+    return {
+      ...storedQuery,
+      codeIds: storedQuery.codeIds.filter((id) => codeIds.has(id)),
+      excludeCodeIds: storedQuery.excludeCodeIds.filter((id) => codeIds.has(id)),
+      documentIds: storedQuery.documentIds.filter((id) => documentIds.has(id)),
+      attributes: Object.fromEntries(Object.entries(storedQuery.attributes).filter(([name]) => attributeNames.has(name)))
+    }
+  }, [data, storedQuery])
+  const update = (patch: Partial<PassageQuery>): void => setQuery({ ...query, ...patch })
+
+  const noteCategoryFilter =
+    noteFilters.categoryId === 'all' ||
+    noteFilters.categoryId === 'uncategorized' ||
+    data?.noteCategories.some((c) => c.id === noteFilters.categoryId)
+      ? noteFilters.categoryId
+      : 'all'
+  const tagFilter = noteFilters.tag
+  const hasQuestionOnly = noteFilters.hasQuestionOnly
+  const setNoteCategoryFilter = (categoryId: string): void => setNoteFilters({ ...noteFilters, categoryId })
+  const setTagFilter = (tag: string): void => setNoteFilters({ ...noteFilters, tag })
+  const setHasQuestionOnly = (hasQuestionOnly: boolean): void => setNoteFilters({ ...noteFilters, hasQuestionOnly })
 
   const flatCodes = useMemo(() => (data ? flattenCodeTree(data.codes) : []), [data])
   const codeById = useMemo(() => new Map((data?.codes ?? []).map((c) => [c.id, c])), [data])
@@ -109,10 +144,22 @@ function RetrievalView(): JSX.Element | null {
   }, [data, query.codeIds, query.includeDescendants])
   const isEmptyQuery = JSON.stringify(query) === JSON.stringify(EMPTY_PASSAGE_QUERY)
 
+  // A new query starts at the top; coming back to the same one doesn't.
   useEffect(() => {
+    if (lastPassageList.projectId === data?.id && lastPassageList.query === storedQuery) return
+    lastPassageList.projectId = data?.id ?? ''
+    lastPassageList.query = storedQuery
+    lastPassageList.scrollTop = 0
     setVisibleCount(PAGE_SIZE)
     setExportStatus(null)
-  }, [query])
+    passageListRef.current?.scrollTo({ top: 0 })
+  }, [data?.id, storedQuery])
+  useEffect(() => {
+    lastPassageList.visibleCount = visibleCount
+  }, [visibleCount])
+  useLayoutEffect(() => {
+    if (mode === 'codes' && passageListRef.current) passageListRef.current.scrollTop = lastPassageList.scrollTop
+  }, [mode])
 
   const noteResults = useMemo(() => {
     if (!data) return []
@@ -325,7 +372,13 @@ function RetrievalView(): JSX.Element | null {
             </div>
             {exportStatus && <p className="text-xs text-slate-500">{exportStatus}</p>}
           </div>
-          <div className="flex-1 overflow-auto p-4">
+          <div
+            ref={passageListRef}
+            className="flex-1 overflow-auto p-4"
+            onScroll={(e) => {
+              lastPassageList.scrollTop = e.currentTarget.scrollTop
+            }}
+          >
             {codeResults.length === 0 && (
               <p className="text-sm text-slate-400">
                 {data.codings.length === 0 ? 'Nothing is coded yet.' : 'No passage matches these filters.'}

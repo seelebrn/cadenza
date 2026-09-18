@@ -57,37 +57,93 @@ function overlaps(a: Segment, b: Segment): boolean {
 /** The full symmetric matrix over `codeIds`, as one cell per unordered
  * pair with at least one co-occurrence, plus one cell per code on the
  * diagonal (codeA === codeB) giving how many passages carry it at all —
- * the "n" a row's counts are read against. */
+ * the "n" a row's counts are read against.
+ *
+ * Computed from the passages rather than from the pairs of codes: comparing
+ * every pair of codes' passages is quadratic in the codebook (seconds for
+ * 500 codes); here each document's passages are swept once in reading order
+ * to find the overlapping ones, and each overlap credits the codes found on
+ * its two passages. */
 export function getCodeCooccurrenceMatrix(
   data: ProjectData,
   codeIds: string[],
   includeDescendants: boolean
 ): CooccurrenceCell[] {
-  const byCode = segmentsByCode(data, codeIds, includeDescendants)
+  const indexOf = new Map(codeIds.map((id, i) => [id, i]))
+  // The matrix codes a coding counts toward: its own code, and with
+  // roll-up every ancestor of it.
+  const parentOf = new Map(data.codes.map((c) => [c.id, c.parentId]))
+  const targetsCache = new Map<string, number[]>()
+  const targetsOf = (codeId: string): number[] => {
+    const cached = targetsCache.get(codeId)
+    if (cached) return cached
+    const targets: number[] = []
+    const seen = new Set<string>()
+    for (let id: string | null | undefined = codeId; id && !seen.has(id); id = includeDescendants ? parentOf.get(id) : null) {
+      seen.add(id)
+      const index = indexOf.get(id)
+      if (index !== undefined) targets.push(index)
+    }
+    targetsCache.set(codeId, targets)
+    return targets
+  }
+
+  const segmentById = new Map(data.segments.map((s) => [s.id, s]))
+  const codesBySegment = new Map<Segment, Set<number>>()
+  for (const coding of data.codings) {
+    const segment = segmentById.get(coding.segmentId)
+    if (!segment) continue
+    const targets = targetsOf(coding.codeId)
+    if (targets.length === 0) continue
+    let codes = codesBySegment.get(segment)
+    if (!codes) codesBySegment.set(segment, (codes = new Set()))
+    for (const index of targets) codes.add(index)
+  }
+
+  const n = codeIds.length
+  const tallies = new Map<number, { count: number; documents: Set<string> }>()
+  const credit = (i: number, j: number, documentId: string): void => {
+    const key = i < j ? i * n + j : j * n + i
+    let tally = tallies.get(key)
+    if (!tally) tallies.set(key, (tally = { count: 0, documents: new Set() }))
+    tally.count++
+    tally.documents.add(documentId)
+  }
+
+  const byDocument = new Map<string, Segment[]>()
+  for (const segment of codesBySegment.keys()) {
+    const list = byDocument.get(segment.documentId)
+    if (list) list.push(segment)
+    else byDocument.set(segment.documentId, [segment])
+  }
+  for (const [documentId, segments] of byDocument) {
+    segments.sort((a, b) => a.start - b.start)
+    for (let x = 0; x < segments.length; x++) {
+      const s = segments[x]
+      const codesS = [...codesBySegment.get(s)!]
+      // The passage itself: on the diagonal for each of its codes, and one
+      // co-occurrence for each pair of codes it carries.
+      for (let a = 0; a < codesS.length; a++) {
+        credit(codesS[a], codesS[a], documentId)
+        if (overlaps(s, s)) for (let b = a + 1; b < codesS.length; b++) credit(codesS[a], codesS[b], documentId)
+      }
+      // Later passages starting before this one ends.
+      for (let y = x + 1; y < segments.length && segments[y].start < s.end; y++) {
+        const t = segments[y]
+        if (!overlaps(s, t)) continue
+        for (const a of codesS) for (const b of codesBySegment.get(t)!) if (a !== b) credit(a, b, documentId)
+      }
+    }
+  }
+
+  // Same order as the matrix reads: by row, the diagonal first.
   const cells: CooccurrenceCell[] = []
-  for (let i = 0; i < codeIds.length; i++) {
-    const a = codeIds[i]
-    const segmentsA = byCode.get(a) ?? []
-    if (segmentsA.length > 0) {
-      cells.push({ codeA: a, codeB: a, count: segmentsA.length, documentCount: new Set(segmentsA.map((s) => s.documentId)).size })
-    }
-    for (let j = i + 1; j < codeIds.length; j++) {
-      const b = codeIds[j]
-      const segmentsB = byCode.get(b) ?? []
-      let count = 0
-      const documents = new Set<string>()
-      for (const sa of segmentsA) {
-        for (const sb of segmentsB) {
-          if (!overlaps(sa, sb)) continue
-          count++
-          documents.add(sa.documentId)
-        }
-      }
-      if (count > 0) {
-        const [codeA, codeB] = a < b ? [a, b] : [b, a]
-        cells.push({ codeA, codeB, count, documentCount: documents.size })
-      }
-    }
+  for (const key of [...tallies.keys()].sort((p, q) => p - q)) {
+    const i = Math.floor(key / n)
+    const j = key % n
+    const tally = tallies.get(key)!
+    const [codeA, codeB] = codeIds[i] < codeIds[j] ? [codeIds[i], codeIds[j]] : [codeIds[j], codeIds[i]]
+    cells.push({ codeA, codeB, count: tally.count, documentCount: tally.documents.size })
   }
   return cells
 }

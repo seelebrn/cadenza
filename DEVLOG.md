@@ -3784,3 +3784,46 @@ Re-measured in the app: the tab opens in 0.75 s with 27 rows drawn, a click take
 is on screen with the pair's passages, scrolling to the bottom draws the last code's row in place,
 and "Go to passage" from the panel lands on the passage. 526 tests pass, typecheck and build are
 clean.
+
+### Performance pass on large projects (2026-09-18)
+
+Reported: lag on a project of ~1,000 board items (the generated 5-interview project: 500 codes,
+500 notes, 1,292 passages), mostly in Analysis and above all in Co-occurrence. Profiled in the
+running app over the DevTools protocol: time to open each page, DOM size, scroll cost per frame,
+keystroke latency. The pure computations were timed separately in a throwaway test.
+
+What the measurements showed, and what was done:
+
+- **Workspace, 1,475 ms to open, 328,000 DOM nodes.** Not an Analysis page, but every "Go to
+  passage" lands there. 320,000 of the nodes were \`<option>\`s: each of the ~640 code rows in the
+  codebook panel rendered its hover toolbar hidden with CSS, including a "Merge into…" select
+  listing every other code. The toolbar is now mounted only while the row is hovered, or while
+  that select has focus, since moving onto its open list leaves the row. 4,300 nodes, 110 ms.
+- **Co-occurrence.** Columns were not windowed (27 rows × 344 columns per render), every scrolled
+  pixel re-rendered, and \`getCodeCooccurrenceMatrix\` compared every pair of codes' passages. The
+  view now windows columns too (fixed 40 px columns, a fixed-width code column so layout doesn't
+  follow whichever names are on screen) and tracks scroll in whole rows and columns, so it
+  re-renders only when one comes into range. The matrix is computed by sweeping each document's
+  passages in reading order and crediting each overlap to the codes on its two passages (with
+  roll-up, to their ancestors): ~2 ms for 500 codes. A test checks it against the pair-by-pair
+  definition, cell for cell and in order, on random projects with sub-codes, overlaps and empty
+  passages. Open 821 → ~100 ms, scroll 185 → 22 ms a frame, toggles 500–900 → 60–80 ms.
+- **Compare cases.** \`getCodeCaseMatrix\` and \`getCodeGroupMatrix\` called \`retrieveByCode\` per
+  code, re-indexing the project 500 times (52 ms). They now share one pass over the codings
+  (1.3 ms), checked equal to the old output, order included, on the test project. The table
+  renders through the new \`useRowWindow\` hook (rows of one height, fixed-width code column), which
+  the co-occurrence view uses too. Open 252 → 21 ms.
+- **Search.** A one-letter query has 5,873 hits, and all were rendered on each keystroke
+  (1,423 ms). Hits are paginated by 200, the query goes through \`useDeferredValue\` so the input
+  never waits on results, and \`searchDocuments\` caches accent-folded paragraphs per document text
+  (WeakMap on the paragraphs array), indexes codings by passage once, and only looks at the
+  passages reaching into the hit's paragraph: 116 → 16 ms for "l", 22 → 1.4 ms for a word.
+  Worst keystroke 57 ms.
+- **Clusters** (~140 ms) and **Retrieval** (~80 ms) profile as plain DOM creation with no hot
+  spot, so they were left alone. The Board (~300 ms for 1,000 cards) is outside this pass.
+
+Verified in the app after the changes: both matrices draw their last row and column after
+scrolling to the end, headers stay aligned with cells, cell clicks open the panel or the contrast
+view, grouping by attribute works, search shows 200 then 400 hits with full per-document totals,
+and a code row's buttons appear on hover, stay while the merge list has focus, and go away after.
+527 tests pass, typecheck and build are clean.

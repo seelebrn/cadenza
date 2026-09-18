@@ -6,6 +6,23 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Changed
+- **Large projects are much faster** (measured on 5 interviews, 500 codes, 500 notes, 1,300
+  passages):
+  - Opening the Workspace: 1.5 s → 0.1 s. Every code in the codebook carried a hidden "Merge
+    into…" list of all the other codes (320,000 hidden entries for 500 codes); a code's action
+    buttons now exist only while the pointer is on it.
+  - Co-occurrence: opens in 0.1 s instead of 0.8 s, scrolls at ~22 ms a frame instead of 185 ms,
+    and its checkboxes answer in ~70 ms instead of 0.5–0.9 s. Only the rows and columns in view
+    are drawn, and the matrix is computed from the overlapping passages instead of comparing
+    every pair of codes.
+  - Compare cases: opens in 20 ms instead of 250 ms (rows drawn as they scroll into view, counts
+    computed in one pass). The code column now has a fixed width; long names are cut with the
+    full name on hover.
+  - Search: typing no longer freezes on a short query with thousands of hits (1.4 s → 60 ms a
+    keystroke). Hits are listed 200 at a time with "Show more", and the search itself is about
+    ten times faster. Each document's total and "Code all N sentences" still count every hit.
+
 ### Fixed
 - "Go to passage" (Retrieval, Search, Compare cases, Co-occurrence) opened the right document and
   marked the passage, but didn't scroll to it: a passage further down an interview stayed off

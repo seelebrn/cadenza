@@ -92,6 +92,17 @@ export function sentenceAround(paragraph: string, localStart: number, localEnd: 
   return { start, end }
 }
 
+/** Accent-folded paragraphs, kept per document text: folding is the costly
+ * part of a search, and the same paragraphs are searched again on every
+ * keystroke. Keyed by the paragraphs array itself, which is replaced (never
+ * mutated) when a document's text changes. */
+const foldedParagraphsCache = new WeakMap<string[], { folded: string; indexMap: number[] }[]>()
+function foldedParagraphs(paragraphs: string[]): { folded: string; indexMap: number[] }[] {
+  let folded = foldedParagraphsCache.get(paragraphs)
+  if (!folded) foldedParagraphsCache.set(paragraphs, (folded = paragraphs.map(foldAccents)))
+  return folded
+}
+
 export function searchDocuments(data: ProjectData, query: string, options: SearchOptions = {}): SearchHit[] {
   const term = query.trim()
   if (!term) return []
@@ -103,14 +114,26 @@ export function searchDocuments(data: ProjectData, query: string, options: Searc
   const pattern = options.wholeWord ? `(?<![\\p{L}\\p{N}])${core}(?![\\p{L}\\p{N}])` : core
   const regex = new RegExp(pattern, `gu${options.matchCase ? '' : 'i'}`)
 
+  const codeIdsBySegment = new Map<string, string[]>()
+  for (const coding of data.codings) {
+    const codeIds = codeIdsBySegment.get(coding.segmentId)
+    if (codeIds) codeIds.push(coding.codeId)
+    else codeIdsBySegment.set(coding.segmentId, [coding.codeId])
+  }
+
   const hits: SearchHit[] = []
   for (const document of data.documents) {
     if (documentFilter && !documentFilter.has(document.id)) continue
     const paragraphStarts = getParagraphStartOffsets(document.paragraphs)
-    const documentSegments = data.segments.filter((s) => s.documentId === document.id)
+    const documentSegments = data.segments.filter((s) => s.documentId === document.id && codeIdsBySegment.has(s.id))
+    const folded = ignoreAccents ? foldedParagraphs(document.paragraphs) : null
 
     document.paragraphs.forEach((paragraph, paragraphIndex) => {
-      const haystack = ignoreAccents ? foldAccents(paragraph) : { folded: paragraph, indexMap: null }
+      const haystack = folded ? folded[paragraphIndex] : { folded: paragraph, indexMap: null }
+      // Only the coded passages reaching into this paragraph can be on a hit in it.
+      const paragraphStart = paragraphStarts[paragraphIndex]
+      const paragraphEnd = paragraphStart + paragraph.length
+      let paragraphSegments: typeof documentSegments | null = null
       regex.lastIndex = 0
       let found: RegExpExecArray | null
       while ((found = regex.exec(haystack.folded)) !== null) {
@@ -124,10 +147,11 @@ export function searchDocuments(data: ProjectData, query: string, options: Searc
         const start = base + localStart
         const end = base + localEnd
         const sentence = sentenceAround(paragraph, localStart, localEnd)
+        paragraphSegments ??= documentSegments.filter((s) => s.start < paragraphEnd && s.end > paragraphStart)
         const codeIds = new Set<string>()
-        for (const segment of documentSegments) {
+        for (const segment of paragraphSegments) {
           if (segment.start < end && segment.end > start) {
-            for (const coding of data.codings) if (coding.segmentId === segment.id) codeIds.add(coding.codeId)
+            for (const codeId of codeIdsBySegment.get(segment.id)!) codeIds.add(codeId)
           }
         }
         hits.push({

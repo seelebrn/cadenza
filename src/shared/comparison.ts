@@ -8,7 +8,6 @@
 // one transcript per import).
 
 import type { ProjectData } from './types'
-import { retrieveByCode } from './retrieval'
 
 export interface CaseInfo {
   documentId: string
@@ -58,6 +57,35 @@ export interface CodeCaseCount {
   count: number
 }
 
+/** For each code, how many codings it has in each document — one pass over
+ * the codings, each credited to its own code and (with roll-up) to every
+ * ancestor of it. Same counts as running retrieveByCode per code, which is
+ * what the matrices below used to do: that re-indexed the whole project
+ * once per code, 500 times over for a 500-code codebook. Documents come in
+ * title order, the order retrieveByCode lists them in. */
+function countCodingsByDocument(data: ProjectData, includeDescendants: boolean): Map<string, Map<string, number>> {
+  const parentOf = new Map(data.codes.map((c) => [c.id, c.parentId]))
+  const documentOfSegment = new Map(data.segments.map((s) => [s.id, s.documentId]))
+  const titleOf = new Map(data.documents.map((d) => [d.id, d.title]))
+  const counts = new Map<string, Map<string, number>>()
+  for (const coding of data.codings) {
+    const documentId = documentOfSegment.get(coding.segmentId)
+    if (documentId === undefined) continue
+    const seen = new Set<string>()
+    for (let id: string | null | undefined = coding.codeId; id && !seen.has(id); id = includeDescendants ? parentOf.get(id) : null) {
+      seen.add(id)
+      let byDocument = counts.get(id)
+      if (!byDocument) counts.set(id, (byDocument = new Map()))
+      byDocument.set(documentId, (byDocument.get(documentId) ?? 0) + 1)
+    }
+  }
+  const title = (id: string): string => titleOf.get(id) ?? '(deleted document)'
+  for (const [codeId, byDocument] of counts) {
+    counts.set(codeId, new Map([...byDocument].sort((a, b) => title(a[0]).localeCompare(title(b[0])))))
+  }
+  return counts
+}
+
 /**
  * How many segments each code (optionally rolled up with its descendants,
  * same toggle as the plain retrieval view) was applied to, in each case —
@@ -76,15 +104,10 @@ export function getCodeCaseMatrix(
   codeIds: string[],
   includeDescendants: boolean
 ): CodeCaseCount[] {
+  const counts = countCodingsByDocument(data, includeDescendants)
   const results: CodeCaseCount[] = []
   for (const codeId of codeIds) {
-    const byDocument = new Map<string, number>()
-    for (const r of retrieveByCode(data, codeId, { includeDescendants })) {
-      byDocument.set(r.documentId, (byDocument.get(r.documentId) ?? 0) + 1)
-    }
-    for (const [documentId, count] of byDocument) {
-      results.push({ codeId, documentId, count })
-    }
+    for (const [documentId, count] of counts.get(codeId) ?? []) results.push({ codeId, documentId, count })
   }
   return results
 }
@@ -112,18 +135,19 @@ export function getCodeGroupMatrix(
   const valueByDocument = new Map<string, string>()
   for (const group of groups) for (const c of group.cases) valueByDocument.set(c.documentId, group.value)
 
+  const countsByCode = countCodingsByDocument(data, includeDescendants)
   const results: CodeGroupCount[] = []
   for (const codeId of codeIds) {
-    const counts = new Map<string, { count: number; documents: Set<string> }>()
-    for (const r of retrieveByCode(data, codeId, { includeDescendants })) {
-      const value = valueByDocument.get(r.documentId)
+    const counts = new Map<string, { count: number; caseCount: number }>()
+    for (const [documentId, count] of countsByCode.get(codeId) ?? []) {
+      const value = valueByDocument.get(documentId)
       if (value === undefined) continue
-      const cell = counts.get(value) ?? { count: 0, documents: new Set<string>() }
-      cell.count++
-      cell.documents.add(r.documentId)
+      const cell = counts.get(value) ?? { count: 0, caseCount: 0 }
+      cell.count += count
+      cell.caseCount++
       counts.set(value, cell)
     }
-    for (const [value, cell] of counts) results.push({ codeId, value, count: cell.count, caseCount: cell.documents.size })
+    for (const [value, cell] of counts) results.push({ codeId, value, count: cell.count, caseCount: cell.caseCount })
   }
   return results
 }

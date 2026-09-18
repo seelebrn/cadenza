@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { flattenCodeTree } from '@shared/codeTree'
 import { searchDocuments, type SearchHit } from '@shared/search'
+
+/** Hits rendered at once; more on demand. A short query in a large corpus
+ * ("le") has thousands of hits, and drawing them all froze typing. */
+const PAGE_SIZE = 200
 
 /** Full-text search across every document, with each hit shown in context.
  * From a hit: jump to it in the reader (it becomes the active span, ready
@@ -24,25 +28,34 @@ function SearchView(): JSX.Element | null {
   const flatCodes = useMemo(() => (data ? flattenCodeTree(data.codes) : []), [data])
   const codeById = useMemo(() => new Map((data?.codes ?? []).map((c) => [c.id, c])), [data])
 
+  // The box shows what's typed at once; the results follow as soon as the
+  // renderer is free, so typing never waits on them.
+  const searchedQuery = useDeferredValue(query)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  useEffect(() => setVisibleCount(PAGE_SIZE), [searchedQuery, matchCase, wholeWord, ignoreAccents, documentFilter])
+
   const hits = useMemo(() => {
-    if (!data || !query.trim()) return []
-    return searchDocuments(data, query, {
+    if (!data || !searchedQuery.trim()) return []
+    return searchDocuments(data, searchedQuery, {
       matchCase,
       wholeWord,
       ignoreAccents,
       documentIds: documentFilter === 'all' ? undefined : [documentFilter]
     })
-  }, [data, query, matchCase, wholeWord, ignoreAccents, documentFilter])
+  }, [data, searchedQuery, matchCase, wholeWord, ignoreAccents, documentFilter])
 
+  // Grouped by document, with each document's full count but only the hits
+  // of the first `visibleCount` overall drawn.
   const hitsByDocument = useMemo(() => {
-    const groups = new Map<string, { title: string; hits: SearchHit[] }>()
-    for (const hit of hits) {
-      const group = groups.get(hit.documentId) ?? { title: hit.documentTitle, hits: [] }
-      group.hits.push(hit)
-      groups.set(hit.documentId, group)
-    }
-    return [...groups.entries()]
-  }, [hits])
+    const groups = new Map<string, { title: string; total: number; hits: SearchHit[] }>()
+    hits.forEach((hit, i) => {
+      let group = groups.get(hit.documentId)
+      if (!group) groups.set(hit.documentId, (group = { title: hit.documentTitle, total: 0, hits: [] }))
+      group.total++
+      if (i < visibleCount) group.hits.push(hit)
+    })
+    return [...groups.entries()].filter(([, group]) => group.hits.length > 0)
+  }, [hits, visibleCount])
 
   function goToHit(hit: SearchHit): void {
     goToPassage({ documentId: hit.documentId, start: hit.start, end: hit.end, text: hit.match })
@@ -138,12 +151,12 @@ function SearchView(): JSX.Element | null {
             Type a word or phrase to find every place it occurs across your documents.
           </p>
         )}
-        {query.trim() && hits.length === 0 && <p className="text-sm text-slate-400">No matches.</p>}
+        {query.trim() && searchedQuery === query && hits.length === 0 && <p className="text-sm text-slate-400">No matches.</p>}
         <div className="space-y-4">
           {hitsByDocument.map(([documentId, group]) => (
             <section key={documentId}>
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {group.title} <span className="font-normal text-slate-400">· {group.hits.length}</span>
+                {group.title} <span className="font-normal text-slate-400">· {group.total}</span>
               </h3>
               <ul className="space-y-1">
                 {group.hits.map((hit) => (
@@ -195,6 +208,11 @@ function SearchView(): JSX.Element | null {
             </section>
           ))}
         </div>
+        {hits.length > visibleCount && (
+          <button className="mt-3 text-sm text-slate-500 hover:underline" onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}>
+            Show {Math.min(PAGE_SIZE, hits.length - visibleCount)} more ({hits.length - visibleCount} not shown)
+          </button>
+        )}
       </div>
     </div>
   )

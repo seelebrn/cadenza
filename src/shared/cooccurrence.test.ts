@@ -89,3 +89,52 @@ describe('getCooccurringPassages', () => {
     expect(getCooccurringPassages(data, 'A', 'A', false).map((p) => p.segmentA.id)).toEqual(['s1', 's3', 's5'])
   })
 })
+
+describe('getCodeCooccurrenceMatrix against the pair-by-pair definition', () => {
+  // The definition, computed the slow way: for every pair of codes, every
+  // pair of their passages.
+  function reference(data: ProjectData, codeIds: string[], includeDescendants: boolean): string[] {
+    const descendants = (id: string): string[] => data.codes.filter((c) => c.parentId === id).flatMap((c) => [c.id, ...descendants(c.id)])
+    const segmentsOf = (codeId: string): Segment[] => {
+      const members = new Set([codeId, ...(includeDescendants ? descendants(codeId) : [])])
+      const ids = new Set(data.codings.filter((k) => members.has(k.codeId)).map((k) => k.segmentId))
+      return data.segments.filter((s) => ids.has(s.id))
+    }
+    const lines: string[] = []
+    codeIds.forEach((a, i) => {
+      const sa = segmentsOf(a)
+      if (sa.length) lines.push(`${a}|${a}|${sa.length}|${new Set(sa.map((s) => s.documentId)).size}`)
+      for (const b of codeIds.slice(i + 1)) {
+        const pairs = sa.flatMap((x) => segmentsOf(b).filter((y) => x.documentId === y.documentId && x.start < y.end && y.start < x.end).map(() => x.documentId))
+        if (pairs.length) lines.push(`${a < b ? a : b}|${a < b ? b : a}|${pairs.length}|${new Set(pairs).size}`)
+      }
+    })
+    return lines
+  }
+
+  it('gives the same cells, in the same order, on random projects with sub-codes, overlaps and empty passages', () => {
+    let seed = 7
+    const rand = (): number => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+    const int = (n: number): number => Math.floor(rand() * n)
+    for (let round = 0; round < 6; round++) {
+      const codes = Array.from({ length: 14 }, (_, i) => ({
+        id: `c${(i * 5) % 14}`, kind: 'code' as const, name: `c${i}`, color: '#000', definition: '', createdAt: '0',
+        parentId: null as string | null
+      }))
+      codes.forEach((c, i) => {
+        if (i > 3 && rand() < 0.6) c.parentId = codes[int(i)].id
+      })
+      const segments: Segment[] = Array.from({ length: 40 }, (_, i) => {
+        const start = int(200)
+        return { id: `s${i}`, documentId: `d${int(3)}`, start, end: start + (rand() < 0.1 ? 0 : 1 + int(60)), text: '' }
+      })
+      const codings = Array.from({ length: 90 }, (_, i) => ({ id: `k${i}`, segmentId: `s${int(44)}`, codeId: `c${int(14)}`, createdAt: '0' }))
+      const data = { codes, segments, codings, documents: [] } as unknown as ProjectData
+      const codeIds = codes.map((c) => c.id).filter(() => rand() < 0.9)
+      for (const rollUp of [true, false]) {
+        const cells = getCodeCooccurrenceMatrix(data, codeIds, rollUp).map((c) => `${c.codeA}|${c.codeB}|${c.count}|${c.documentCount}`)
+        expect(cells, `round ${round}, roll-up ${rollUp}`).toEqual(reference(data, codeIds, rollUp))
+      }
+    }
+  })
+})

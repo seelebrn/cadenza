@@ -5,6 +5,7 @@ import { flattenCodeTree } from '@shared/codeTree'
 import { getCaseGroups, getCases, getCodeCaseMatrix, getCodeGroupMatrix, type CaseInfo } from '@shared/comparison'
 import { getAttributeNames } from '@shared/documentOps'
 import { retrieveByCode } from '@shared/retrieval'
+import { useRowWindow } from '../lib/useRowWindow'
 import type { CodeRetrievalResult } from '@shared/retrieval'
 
 /** Phase 7 — cross-case comparison. A "case" is simply a document (no
@@ -85,6 +86,8 @@ function ComparisonView(): JSX.Element | null {
     setMode('contrast')
   }
 
+  const rows = useRowWindow(flatCodes.length, 37)
+
   if (!data) return null
 
   const hasCases = cases.length > 0
@@ -145,7 +148,7 @@ function ComparisonView(): JSX.Element | null {
             : 'Create at least one code to compare across cases.'}
         </div>
       ) : mode === 'matrix' ? (
-        <div className="flex-1 overflow-auto p-4">
+        <div ref={rows.scrollRef} className="relative flex-1 overflow-auto p-4" onScroll={rows.onScroll}>
           <p className="mb-3 text-xs text-slate-400">
             {isGrouped
               ? `How many coded passages each code/item has across the cases with each value of “${groupBy}” (and in how many of those cases). Click a cell to see the actual quotes side by side.`
@@ -173,14 +176,19 @@ function ComparisonView(): JSX.Element | null {
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {flatCodes.map(({ code, depth }) => (
-                <tr key={code.id} className="hover:bg-slate-50">
+            {/* Only the rows in view are rendered (useRowWindow): hence rows
+                of one height and a code column of one width, which would
+                otherwise follow whichever names happen to be on screen. */}
+            <tbody ref={rows.bodyRef}>
+              {rows.spacerBefore > 0 && <tr style={{ height: rows.spacerBefore }} aria-hidden />}
+              {flatCodes.slice(rows.firstRow, rows.lastRow).map(({ code, depth }) => (
+                <tr key={code.id} data-row className="h-9 hover:bg-slate-50">
                   <td
-                    className="sticky left-0 z-10 border-b border-slate-100 bg-white p-2"
+                    className="sticky left-0 z-10 border-b border-slate-100 bg-white px-2 py-0"
                     style={{ paddingLeft: `${depth * 14 + 8}px` }}
+                    title={code.name}
                   >
-                    <span className="flex items-center gap-1.5">
+                    <span className="flex w-72 items-center gap-1.5">
                       <span
                         className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
                         style={{ backgroundColor: code.color }}
@@ -191,7 +199,7 @@ function ComparisonView(): JSX.Element | null {
                   {columns.map((col) => {
                     const cell = matrix.get(`${code.id}:${col.key}`)
                     return (
-                      <td key={col.key} className="border-b border-slate-100 p-2">
+                      <td key={col.key} className="border-b border-slate-100 px-2 py-0">
                         {cell ? (
                           <button
                             className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-200"
@@ -217,6 +225,7 @@ function ComparisonView(): JSX.Element | null {
                   })}
                 </tr>
               ))}
+              {rows.spacerAfter > 0 && <tr style={{ height: rows.spacerAfter }} aria-hidden />}
             </tbody>
           </table>
         </div>

@@ -270,6 +270,13 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
   // a code, then every text field is unresponsive for a minute or so"
   // freeze.
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
+  // The row's action buttons exist only while the row is hovered (or its
+  // "Merge into…" list has focus — moving onto the open list leaves the
+  // row). They used to be rendered for every row and hidden with CSS: with
+  // a "Merge into…" option per other code, 500 codes meant 250,000+
+  // hidden <option> elements, and seconds to open the Workspace.
+  const [isHovered, setIsHovered] = useState(false)
+  const [isMergeListFocused, setIsMergeListFocused] = useState(false)
 
   function commitRename(): void {
     const trimmed = nameDraft.trim()
@@ -299,7 +306,7 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
     })
   }
 
-  const otherCodes = allCodes.filter((c) => c.id !== node.id)
+  const showActions = isHovered || isMergeListFocused
 
   return (
     <div>
@@ -308,6 +315,8 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
           isDragOver ? 'bg-blue-50 ring-1 ring-blue-300' : ''
         }`}
         style={{ paddingLeft: `${depth * 14 + 6}px` }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
         <div
           className="flex items-center gap-1.5"
@@ -354,73 +363,79 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
             </button>
           )}
 
-          <div className="hidden flex-shrink-0 gap-1 group-hover:flex">
-            {activeSpan && (
+          {showActions && (
+            <div className="flex flex-shrink-0 gap-1">
+              {activeSpan && (
+                <button
+                  className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
+                  title="Apply to the active span"
+                  onClick={() =>
+                    applyCodeToSelection(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, node.id)
+                  }
+                >
+                  Apply
+                </button>
+              )}
               <button
                 className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
-                title="Apply to the active span"
-                onClick={() =>
-                  applyCodeToSelection(activeSpan.documentId, activeSpan.start, activeSpan.end, activeSpan.text, node.id)
-                }
-              >
-                Apply
-              </button>
-            )}
-            <button
-              className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
-              title="Rename"
-              onClick={() => {
-                setNameDraft(node.name)
-                setIsEditingName(true)
-              }}
-            >
-              ✎
-            </button>
-            <button
-              className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
-              title="Edit definition"
-              onClick={() => {
-                setDefinitionDraft(node.definition)
-                setIsEditingDefinition((v) => !v)
-              }}
-            >
-              Def
-            </button>
-            {otherCodes.length > 0 && (
-              <select
-                className="rounded border border-slate-300 text-[10px]"
-                defaultValue=""
-                title="Merge into…"
-                onChange={(e) => {
-                  if (e.target.value) mergeCodes(node.id, e.target.value)
+                title="Rename"
+                onClick={() => {
+                  setNameDraft(node.name)
+                  setIsEditingName(true)
                 }}
               >
-                <option value="" disabled>
-                  Merge into…
-                </option>
-                {otherCodes.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {sourceClusterId && (
+                ✎
+              </button>
               <button
                 className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
-                title="Remove from this cluster"
-                onClick={() => removeCodeFromCategory(sourceClusterId, node.id)}
+                title="Edit definition"
+                onClick={() => {
+                  setDefinitionDraft(node.definition)
+                  setIsEditingDefinition((v) => !v)
+                }}
               >
-                Unfile
+                Def
               </button>
-            )}
-            <button
-              className="rounded border border-red-200 px-1 text-[10px] text-red-600 hover:bg-red-50"
-              onClick={() => setIsConfirmingDelete(true)}
-            >
-              Delete
-            </button>
-          </div>
+              {allCodes.length > 1 && (
+                <select
+                  className="rounded border border-slate-300 text-[10px]"
+                  defaultValue=""
+                  title="Merge into…"
+                  onFocus={() => setIsMergeListFocused(true)}
+                  onBlur={() => setIsMergeListFocused(false)}
+                  onChange={(e) => {
+                    if (e.target.value) mergeCodes(node.id, e.target.value)
+                  }}
+                >
+                  <option value="" disabled>
+                    Merge into…
+                  </option>
+                  {allCodes
+                    .filter((c) => c.id !== node.id)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </select>
+              )}
+              {sourceClusterId && (
+                <button
+                  className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
+                  title="Remove from this cluster"
+                  onClick={() => removeCodeFromCategory(sourceClusterId, node.id)}
+                >
+                  Unfile
+                </button>
+              )}
+              <button
+                className="rounded border border-red-200 px-1 text-[10px] text-red-600 hover:bg-red-50"
+                onClick={() => setIsConfirmingDelete(true)}
+              >
+                Delete
+              </button>
+            </div>
+          )}
         </div>
 
         {isConfirmingDelete && (

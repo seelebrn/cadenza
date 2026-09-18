@@ -3766,3 +3766,21 @@ test project. From Retrieval, the first, a middle and the last result each lande
 ~300–400 px in a 763 px window. A Search hit did the same. Leaving for the Workspace and coming
 back kept the document filter, the result count (249) and the list's scroll position (4000 px).
 526 tests pass, typecheck and build are clean.
+
+### Co-occurrence: passages in a side panel, rows drawn on demand (2026-09-18)
+
+Reported: "click a cell to see the shared passages", but nothing happened. Measured in the running
+app on the 5-interview test project (344 codes used, rolled up): the click worked, but the
+passages section was rendered under the matrix, with its heading 11,584 px down in a 763 px window,
+so nothing visible changed. Opening the tab also took 3.8 s, and a click 207 ms, because the table
+had 344 × 344 cells and all of them re-rendered on every selection.
+
+The shared passages now open in a side panel (fixed width, its own scroll) next to the matrix,
+which keeps its own scroll area. The matrix renders only the rows in view plus 12 above and below,
+with spacer rows for the rest. The row height is measured from a rendered row and the body's
+offset is read from the DOM, so the sticky header and codes column behave as before.
+
+Re-measured in the app: the tab opens in 0.75 s with 27 rows drawn, a click takes 59 ms, the panel
+is on screen with the pair's passages, scrolling to the bottom draws the last code's row in place,
+and "Go to passage" from the panel lands on the passage. 526 tests pass, typecheck and build are
+clean.

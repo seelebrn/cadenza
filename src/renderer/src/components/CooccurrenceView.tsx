@@ -1,13 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { flattenCodeTree } from '@shared/codeTree'
 import { getCodeCooccurrenceMatrix, getCooccurringPassages } from '@shared/cooccurrence'
 
+/** Rows drawn beyond the visible ones, above and below, so a fast scroll
+ * doesn't flash empty space. */
+const OVERSCAN_ROWS = 12
+
 /** Codes × codes: how often two codes land on the same passage (overlapping
  * selections in the same document — see cooccurrence.ts). The diagonal is
  * each code's own passage count, the "n" its row reads against. Click a
- * cell to see the shared passages underneath. */
+ * cell to see the shared passages in a side panel.
+ *
+ * Only the rows in view are rendered: a codebook of a few hundred codes
+ * makes a table of 100,000+ cells, which took seconds to draw and made
+ * every click re-render all of it. */
 function CooccurrenceView(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
   const goToPassage = useWorkspaceUiStore((s) => s.goToPassage)
@@ -15,6 +23,19 @@ function CooccurrenceView(): JSX.Element | null {
   const [includeDescendants, setIncludeDescendants] = useState(true)
   const [hideUnused, setHideUnused] = useState(true)
   const [selected, setSelected] = useState<{ a: string; b: string } | null>(null)
+
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const tbodyRef = useRef<HTMLTableSectionElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(800)
+  const [rowHeight, setRowHeight] = useState(33)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => setViewportHeight(el.clientHeight))
+    observer.observe(el)
+    return () => observer.disconnect()
+  })
 
   const flatCodes = useMemo(() => (data ? flattenCodeTree(data.codes) : []), [data])
   const codeById = useMemo(() => new Map((data?.codes ?? []).map((c) => [c.id, c])), [data])
@@ -51,6 +72,17 @@ function CooccurrenceView(): JSX.Element | null {
     if (!data || !selected) return []
     return getCooccurringPassages(data, selected.a, selected.b, includeDescendants)
   }, [data, selected, includeDescendants])
+
+  // Which rows are in view: the body's offset inside the scroll area,
+  // then whole rows of a measured height.
+  const bodyOffset = (tbodyRef.current?.offsetTop ?? 0) + ((tbodyRef.current?.offsetParent as HTMLElement | null)?.offsetTop ?? 0)
+  const firstRow = Math.max(0, Math.floor((scrollTop - bodyOffset) / rowHeight) - OVERSCAN_ROWS)
+  const lastRow = Math.min(shownCodes.length, Math.ceil((scrollTop - bodyOffset + viewportHeight) / rowHeight) + OVERSCAN_ROWS)
+  useLayoutEffect(() => {
+    const row = tbodyRef.current?.querySelector('tr[data-row]')
+    const height = row?.getBoundingClientRect().height
+    if (height && Math.abs(height - rowHeight) > 0.5) setRowHeight(height)
+  })
 
   function goToSpan(documentId: string, start: number, end: number, text: string): void {
     goToPassage({ documentId, start, end, text })
@@ -89,81 +121,89 @@ function CooccurrenceView(): JSX.Element | null {
         </label>
       </div>
 
-      <div className="flex-1 overflow-auto p-4">
-        <table className="border-collapse text-xs">
-          <thead>
-            <tr>
-              <th className="sticky left-0 top-0 z-20 border-b border-slate-200 bg-white p-2" />
-              {shownCodes.map(({ code }) => (
-                <th
-                  key={code.id}
-                  className="sticky top-0 z-10 border-b border-slate-200 bg-white p-1 align-bottom font-medium text-slate-500"
-                  title={code.name}
-                >
-                  <div className="flex h-28 items-end justify-center">
-                    <span
-                      className="block max-h-28 truncate"
-                      style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
-                    >
-                      {code.name}
-                    </span>
-                  </div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {shownCodes.map(({ code: row, depth }) => (
-              <tr key={row.id} className="hover:bg-slate-50">
-                <th
-                  className="sticky left-0 z-10 whitespace-nowrap border-b border-slate-100 bg-white p-2 text-left font-normal"
-                  style={{ paddingLeft: `${depth * 14 + 8}px` }}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
-                    {row.name}
-                  </span>
-                </th>
-                {shownCodes.map(({ code: col }) => {
-                  const cell = cellFor(row.id, col.id)
-                  const isDiagonal = row.id === col.id
-                  const isSelected =
-                    selected !== null &&
-                    ((selected.a === row.id && selected.b === col.id) || (selected.a === col.id && selected.b === row.id))
-                  const intensity = cell && !isDiagonal && maxOffDiagonal > 0 ? cell.count / maxOffDiagonal : 0
-                  return (
-                    <td
-                      key={col.id}
-                      className={`border-b border-slate-100 p-0 text-center ${isDiagonal ? 'bg-slate-50' : ''}`}
-                    >
-                      {cell ? (
-                        <button
-                          className={`h-8 w-full min-w-[2.5rem] px-1 font-medium hover:outline hover:outline-2 hover:outline-slate-400 ${
-                            isSelected ? 'outline outline-2 outline-slate-900' : ''
-                          } ${isDiagonal ? 'text-slate-400' : 'text-slate-800'}`}
-                          style={isDiagonal ? undefined : { backgroundColor: `rgba(217, 119, 6, ${0.12 + intensity * 0.55})` }}
-                          title={
-                            isDiagonal
-                              ? `${cell.count} passage${cell.count === 1 ? '' : 's'} coded “${row.name}” in ${cell.documentCount} document${cell.documentCount === 1 ? '' : 's'}`
-                              : `“${row.name}” and “${col.name}” share ${cell.count} passage${cell.count === 1 ? '' : 's'} in ${cell.documentCount} document${cell.documentCount === 1 ? '' : 's'}`
-                          }
-                          onClick={() => setSelected({ a: row.id, b: col.id })}
-                        >
-                          {cell.count}
-                        </button>
-                      ) : (
-                        <span className="text-slate-200">·</span>
-                      )}
-                    </td>
-                  )
-                })}
+      <div className="flex flex-1 overflow-hidden">
+        <div
+          ref={scrollRef}
+          className="relative flex-1 overflow-auto p-4"
+          onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        >
+          <table className="border-collapse text-xs">
+            <thead>
+              <tr>
+                <th className="sticky left-0 top-0 z-20 border-b border-slate-200 bg-white p-2" />
+                {shownCodes.map(({ code }) => (
+                  <th
+                    key={code.id}
+                    className="sticky top-0 z-10 border-b border-slate-200 bg-white p-1 align-bottom font-medium text-slate-500"
+                    title={code.name}
+                  >
+                    <div className="flex h-28 items-end justify-center">
+                      <span
+                        className="block max-h-28 truncate"
+                        style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                      >
+                        {code.name}
+                      </span>
+                    </div>
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody ref={tbodyRef}>
+              {firstRow > 0 && <tr style={{ height: firstRow * rowHeight }} aria-hidden />}
+              {shownCodes.slice(firstRow, lastRow).map(({ code: row, depth }) => (
+                <tr key={row.id} data-row className="hover:bg-slate-50">
+                  <th
+                    className="sticky left-0 z-10 whitespace-nowrap border-b border-slate-100 bg-white p-2 text-left font-normal"
+                    style={{ paddingLeft: `${depth * 14 + 8}px` }}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
+                      {row.name}
+                    </span>
+                  </th>
+                  {shownCodes.map(({ code: col }) => {
+                    const cell = cellFor(row.id, col.id)
+                    const isDiagonal = row.id === col.id
+                    const isSelected =
+                      selected !== null &&
+                      ((selected.a === row.id && selected.b === col.id) || (selected.a === col.id && selected.b === row.id))
+                    const intensity = cell && !isDiagonal && maxOffDiagonal > 0 ? cell.count / maxOffDiagonal : 0
+                    return (
+                      <td
+                        key={col.id}
+                        className={`border-b border-slate-100 p-0 text-center ${isDiagonal ? 'bg-slate-50' : ''}`}
+                      >
+                        {cell ? (
+                          <button
+                            className={`h-8 w-full min-w-[2.5rem] px-1 font-medium hover:outline hover:outline-2 hover:outline-slate-400 ${
+                              isSelected ? 'outline outline-2 outline-slate-900' : ''
+                            } ${isDiagonal ? 'text-slate-400' : 'text-slate-800'}`}
+                            style={isDiagonal ? undefined : { backgroundColor: `rgba(217, 119, 6, ${0.12 + intensity * 0.55})` }}
+                            title={
+                              isDiagonal
+                                ? `${cell.count} passage${cell.count === 1 ? '' : 's'} coded “${row.name}” in ${cell.documentCount} document${cell.documentCount === 1 ? '' : 's'}`
+                                : `“${row.name}” and “${col.name}” share ${cell.count} passage${cell.count === 1 ? '' : 's'} in ${cell.documentCount} document${cell.documentCount === 1 ? '' : 's'}`
+                            }
+                            onClick={() => setSelected({ a: row.id, b: col.id })}
+                          >
+                            {cell.count}
+                          </button>
+                        ) : (
+                          <span className="text-slate-200">·</span>
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+              {lastRow < shownCodes.length && <tr style={{ height: (shownCodes.length - lastRow) * rowHeight }} aria-hidden />}
+            </tbody>
+          </table>
+        </div>
 
         {selected && selectedA && selectedB && (
-          <section className="mt-6">
+          <aside className="w-96 flex-shrink-0 overflow-auto border-l border-slate-200 p-4">
             <h3 className="mb-2 text-sm font-semibold text-slate-700">
               {selectedA.id === selectedB.id ? (
                 <>Passages coded “{selectedA.name}”</>
@@ -198,7 +238,7 @@ function CooccurrenceView(): JSX.Element | null {
                 </li>
               ))}
             </ul>
-          </section>
+          </aside>
         )}
       </div>
     </div>

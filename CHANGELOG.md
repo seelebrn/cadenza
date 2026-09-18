@@ -11,6 +11,10 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   marked the passage, but didn't scroll to it: a passage further down an interview stayed off
   screen. The reader now brings it to the middle of the view. Same for "Promote to code" from a
   note.
+- Clicking a cell in Analysis → Co-occurrence seemed to do nothing: the shared passages were
+  listed below the whole matrix, thousands of pixels down in a large codebook. They now open in a
+  panel beside the matrix. The matrix also draws only the rows in view, so a codebook of a few
+  hundred codes opens in under a second instead of several, and clicks respond at once.
 
 ### Added
 - **Filtered retrieval** (Analysis → Retrieval): combine several codes, either *any* of them or

@@ -6,7 +6,20 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-18
+
 ### Added
+- **Filtered retrieval** (Analysis → Retrieval): combine several codes, either *any* of them or
+  *all* of them meeting on a passage (the passage itself or an overlapping one, as in the
+  co-occurrence table), leave out passages where some other code meets, and narrow to some
+  documents or to cases with given attribute values: "the nurses' passages coded Workload but not
+  Support". Each passage is listed once with all its codes, the ones asked for highlighted. With
+  no code chosen, every coded passage is listed.
+- **Excel export of passages**: what the Retrieval view lists, or every coded passage (Export
+  tab), as an .xlsx table, with one row per passage and columns for the document, each case
+  attribute, the passage, its codes (sub-codes as "Parent › Child"), the clusters they're in, and
+  the notes on it. The header row is frozen with filter buttons, and a second tab records the
+  query behind the table. Opens in Excel, LibreOffice and Numbers.
 - **Filter box in the Notes tab**, like the one in Codes & items: finds notes by their question,
   text or tags, and clusters by name, ignoring accents and case ("reunion" finds "réunion").
   A matching note shows inside its clusters; a cluster whose name matches shows with everything
@@ -14,12 +27,6 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   note category, so the tab gains no extra line.
 
 ### Changed
-- **The Notes tab is decluttered.** The note form, the new-cluster row and the note categories
-  used to take up to half of the tab; they now sit folded behind one toolbar line (+ Note,
-  + Cluster, Categories), and the notes list gets the room (587 px instead of 311 in a window of
-  the default size). Highlighting a passage in the reader opens the note form with the quote on
-  top, as before; the form folds again once the note is added, or with Cancel. "+ Note" turns
-  amber while a passage is highlighted and the form is folded.
 - **Large projects are much faster** (measured on 5 interviews, 500 codes, 500 notes, 1,300
   passages):
   - Opening the Workspace: 1.5 s → 0.1 s. Every code in the codebook carried a hidden "Merge
@@ -35,13 +42,17 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   - Search: typing no longer freezes on a short query with thousands of hits (1.4 s → 60 ms a
     keystroke). Hits are listed 200 at a time with "Show more", and the search itself is about
     ten times faster. Each document's total and "Code all N sentences" still count every hit.
+- **The Notes tab is decluttered.** The note form, the new-cluster row and the note categories
+  used to take up to half of the tab; they now sit folded behind one toolbar line (+ Note,
+  + Cluster, Categories), and the notes list gets the room (587 px instead of 311 in a window of
+  the default size). Highlighting a passage in the reader opens the note form with the quote on
+  top, as before; the form folds again once the note is added, or with Cancel. "+ Note" turns
+  amber while a passage is highlighted and the form is folded.
+- The Retrieval view keeps its filters, its mode (by code or by note) and your place in the list
+  when you leave it: "Go to passage", read it in the Workspace, come back, and you're where you
+  were. Filters naming something deleted since are dropped; opening another project starts fresh.
 
 ### Fixed
-- In a window of the default size, the "unsaved changes" note under the project name squeezed the
-  buttons at the top (Undo, Redo, Save…) onto two lines as soon as something changed. The
-  buttons now keep their place at any window size; the project name and file name are cut with
-  "…" when space runs out (full text on hover), and "unsaved changes" stays visible. The line
-  under the name shows the file's name, with the full path on hover.
 - "Go to passage" (Retrieval, Search, Compare cases, Co-occurrence) opened the right document and
   marked the passage, but didn't scroll to it: a passage further down an interview stayed off
   screen. The reader now brings it to the middle of the view. Same for "Promote to code" from a
@@ -50,22 +61,11 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   listed below the whole matrix, thousands of pixels down in a large codebook. They now open in a
   panel beside the matrix. The matrix also draws only the rows in view, so a codebook of a few
   hundred codes opens in under a second instead of several, and clicks respond at once.
-
-### Added
-- **Filtered retrieval** (Analysis → Retrieval): combine several codes, either *any* of them or
-  *all* of them meeting on a passage (the passage itself or an overlapping one, as in the
-  co-occurrence table), leave out passages where some other code meets, and narrow to some
-  documents or to cases with given attribute values: "the nurses' passages coded Workload but not
-  Support". Each passage is listed once with all its codes, the ones asked for highlighted. With
-  no code chosen, every coded passage is listed.
-- **Excel export of passages**: what the Retrieval view lists, or every coded passage (Export
-  tab), as an .xlsx table, with one row per passage and columns for the document, each case
-  attribute, the passage, its codes (sub-codes as "Parent › Child"), the clusters they're in, and
-  the notes on it. The header row is frozen with filter buttons, and a second tab records the
-  query behind the table. Opens in Excel, LibreOffice and Numbers.
-- The Retrieval view keeps its filters, its mode (by code or by note) and your place in the list
-  when you leave it: "Go to passage", read it in the Workspace, come back, and you're where you
-  were. Filters naming something deleted since are dropped; opening another project starts fresh.
+- In a window of the default size, the "unsaved changes" note under the project name squeezed the
+  buttons at the top (Undo, Redo, Save…) onto two lines as soon as something changed. The
+  buttons now keep their place at any window size; the project name and file name are cut with
+  "…" when space runs out (full text on hover), and "unsaved changes" stays visible. The line
+  under the name shows the file's name, with the full path on hover.
 
 ## [0.5.0] - 2026-09-17
 

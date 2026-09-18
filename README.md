@@ -55,8 +55,11 @@ between clusters and one-click tree or radial layouts — useful for building a 
 - **Search** — find every occurrence of a word or phrase across all documents, in context, with
   the codes already on each passage. Accent- and case-insensitive by default. Jump to a hit in
   the reader, code the sentence around it, or code every hit at once.
-- **Retrieval** — every passage coded with a code (optionally its sub-codes), and every note,
-  filtered by category, tag, or whether it carries an analytic question.
+- **Retrieval** — read the passages behind a question: coded with one code or several (any of
+  them, or all of them meeting on the same passage), except where another code is, in some
+  documents only, or for cases with a given attribute (the nurses' passages coded *Workload* but
+  not *Support*). Export what's listed to Excel. Notes can be browsed the same way, by category,
+  tag, or whether they carry an analytic question.
 - **Clusters** — manage clusters and what's filed in them, outside the board.
 - **Compare cases** — a themes × cases table (IPA-style group experiential themes) and a
   side-by-side contrast of one code across interviews (Kaufmann). Record **case attributes**
@@ -71,7 +74,8 @@ between clusters and one-click tree or radial layouts — useful for building a 
   (`.pdf` — born-digital, or a scan that has been OCR'd; a scan with no text layer is refused
   with a message rather than imported empty).
 - **Export** reports (codebook, notes, cross-case comparison, co-occurrence, results draft) as
-  `.docx`, `.html` or `.pdf`, and any board as a PDF figure.
+  `.docx`, `.html` or `.pdf`, any board as a PDF figure, and coded passages as an Excel table
+  (`.xlsx`: one row per passage with its document, case attributes, codes, clusters and notes).
 - **Exchange** with other QDA tools through REFI-QDA (`.qdpx`), the standard NVivo, MAXQDA,
   ATLAS.ti, QualCoder and data repositories accept: export the whole project, or open a `.qdpx`
   made elsewhere as a new project. Documents, codes, coded passages, notes, case attributes and

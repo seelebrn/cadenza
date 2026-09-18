@@ -1,6 +1,7 @@
 import type { BackupEntry, ImportedDocument, ProjectData, RecentProjectEntry, SerializedAssets } from './types'
 import type { Report } from './reportModel'
 import type { QdpxImportReport } from './refiQda'
+import type { Sheet } from './spreadsheet'
 
 export type ReportExportFormat = 'html' | 'docx' | 'pdf'
 
@@ -72,5 +73,8 @@ export interface CadenzaApi {
      * `widthPx`/`heightPx`, and shows a save dialog. Null = user canceled.
      */
     boardPdf: (html: string, widthPx: number, heightPx: number, suggestedName: string) => Promise<string | null>
+    /** Writes `sheets` as an Excel workbook (.xlsx) via a save dialog — see
+     * shared/spreadsheet.ts. Returns the chosen path, or null if canceled. */
+    spreadsheet: (sheets: Sheet[], suggestedName: string) => Promise<string | null>
   }
 }

@@ -3,6 +3,8 @@ import { useProjectStore } from '../store/projectStore'
 import type { ReportExportFormat } from '@shared/api'
 import { buildProjectReport, buildResultsDraftReport, hasComparisonData } from '../lib/reportBuilders'
 import type { ResultsDraftAxis } from '../lib/reportBuilders'
+import { EMPTY_PASSAGE_QUERY, queryPassages } from '@shared/retrieval'
+import { buildPassageSheet, buildQuerySheet } from '@shared/spreadsheet'
 
 const FORMATS: { value: ReportExportFormat; label: string }[] = [
   { value: 'docx', label: 'Word (.docx)' },
@@ -51,6 +53,8 @@ function ExportView(): JSX.Element | null {
   const exportQdpx = useProjectStore((s) => s.exportQdpx)
   const [isExchanging, setIsExchanging] = useState(false)
   const [exchangeStatus, setExchangeStatus] = useState<string | null>(null)
+  const [isTabulating, setIsTabulating] = useState(false)
+  const [spreadsheetStatus, setSpreadsheetStatus] = useState<string | null>(null)
 
   if (!data) return null
 
@@ -267,12 +271,42 @@ function ExportView(): JSX.Element | null {
       </p>
 
       <div className="mt-8 rounded border border-slate-200 p-4">
+        <h3 className="text-sm font-semibold text-slate-700">Spreadsheet</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Every coded passage as an Excel table (.xlsx, opens in LibreOffice too): one row per passage, with its
+          document, case attributes, codes, clusters and notes — for an appendix, or to sort and filter your own way.
+          To export only some passages, filter them in Analysis → Retrieval and export from there.
+        </p>
+        <button
+          className="mt-3 rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+          disabled={isTabulating || data.codings.length === 0}
+          onClick={() => {
+            setIsTabulating(true)
+            const results = queryPassages(data, EMPTY_PASSAGE_QUERY)
+            const sheets = [
+              buildPassageSheet(data, results),
+              buildQuerySheet(data, EMPTY_PASSAGE_QUERY, results.length, new Date().toLocaleString())
+            ]
+            void window.api.export
+              .spreadsheet(sheets, `${data.name} — coded passages`)
+              .then((path) => setSpreadsheetStatus(path ? `Exported ${results.length} passages to ${path}` : null))
+              .catch((e: Error) => setSpreadsheetStatus(`Could not export: ${e.message}`))
+              .finally(() => setIsTabulating(false))
+          }}
+        >
+          {isTabulating ? 'Exporting…' : 'Export coded passages (.xlsx)'}
+        </button>
+        {spreadsheetStatus && <p className="mt-2 text-xs text-slate-600">{spreadsheetStatus}</p>}
+      </div>
+
+      <div className="mt-4 rounded border border-slate-200 p-4">
         <h3 className="text-sm font-semibold text-slate-700">Exchange with other tools</h3>
         <p className="mt-1 text-xs text-slate-500">
           REFI-QDA (.qdpx) is the standard project format NVivo, MAXQDA, ATLAS.ti, QualCoder and data
           repositories accept. It carries your documents, codes, coded passages, notes, case attributes and
-          clusters (as sets). Boards and their layout, cluster links, cluster nesting and colors, and note
-          tags have no equivalent in the standard and stay in the Cadenza project.
+          clusters (as categories, with their nesting). Boards and their layout, cluster links, quotes filed
+          directly under a cluster, and note tags have no equivalent in the standard and stay in the Cadenza
+          project.
         </p>
         <button
           className="mt-3 rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"

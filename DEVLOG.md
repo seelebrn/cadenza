@@ -3688,3 +3688,48 @@ repeated names suffixed, merged passages keeping all codes and notes on re-impor
 read from its file. A Python script then checked the seven local exports against QualCoder's
 unique constraints: none violated. Full suite green (513/513), typecheck clean, production build
 clean, boot-tested.
+
+### Filtered retrieval and Excel export of passages (2026-09-18)
+
+Asked for after comparing Cadenza with NVivo, QualCoder and Taguette: what's missing without
+leaving Cadenza's scope. Two picks: reading the passages behind a combined question, and getting
+them out as a spreadsheet.
+
+**Query.** `queryPassages(data, query)` in `shared/retrieval.ts` replaces the single-code
+retrieval in the Retrieval view (`retrieveByCode` stays for the comparison and report code). A
+query holds codes with a match mode (any/all), excluded codes, documents, and case-attribute
+values, and a sub-codes toggle. "Meeting" is defined as in `cooccurrence.ts`, where two codes
+co-occur on the same passage or on overlapping ones, so an AND here reads the same passages a
+co-occurrence cell drills into, and EXCEPT drops a passage when an excluded code sits on it or on
+anything overlapping it. Results are one entry per passage, not per coding (a passage coded with
+a parent and its child used to show twice), with all its codes. No codes selected means every
+coded passage, so the view doubles as a browser and the export can cover everything. Attribute
+values compare trimmed, like `getAttributeValues`, which fills the filter's choices. On the real
+QualCoder project (1,303 passages): all passages in ~3 ms, an AND of 40 codes with 2 exclusions in
+~4 ms.
+
+**UI.** Chip rows for Codes (with an Any/All toggle once there are two), Except, Documents and
+Cases (one row of value toggles per chosen attribute), a result count, "Clear filters", and
+passages rendered 200 at a time.
+
+**Spreadsheet.** No spreadsheet library in the dependencies, and one table didn't justify one,
+so `shared/spreadsheet.ts` writes SpreadsheetML by hand (inline strings, 3 cell styles, frozen
+bold header, autoFilter plus the hidden `_FilterDatabase` name Excel writes itself, column widths,
+wrapped long text, text capped at Excel's 32,767 characters per cell, tab names made legal and
+unique) and the main process zips it (`export:spreadsheet`). `buildPassageSheet` gives one row per
+passage (document, one column per case attribute, passage, codes as paths, clusters, notes), and
+`buildQuerySheet` adds a tab recording the query. `stripIllegalXmlChars` moved to `text.ts`, where
+the renderer can use it without pulling in the REFI module's XML parser, and `refiQda.ts`
+re-exports it. The Export tab gained "Export coded passages (.xlsx)" and an up-to-date REFI
+description.
+
+Verified: files generated from the example project and from the real QualCoder import were read
+back with openpyxl, an independent reader. Sheets, header, frozen pane, filter range, bold header,
+wrapped passages, accents and the query tab all came back as written. Tests: query semantics
+(every coded passage, one entry per passage with codes in codebook order, OR with and without
+sub-codes, AND on the same or overlapping passages and not on adjacent ones, EXCEPT, documents,
+attributes including several values, empty value lists and documents lacking the attribute, unused
+codes), the passage and query sheets, and the package (parts well-formed, escaping, forbidden
+characters, number cells, empty cells skipped, styles, freeze and filter, legal unique tab names,
+no filter on a plain sheet). Full suite green (526/526), typecheck clean, production build clean,
+boot-tested.

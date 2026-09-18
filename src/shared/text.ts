@@ -54,3 +54,15 @@ export function getParagraphStartOffsets(paragraphs: string[]): number[] {
   }
   return offsets
 }
+
+/** Characters XML 1.0 doesn't allow at all, even escaped — control
+ * characters (other than tab, line feed and carriage return), lone
+ * surrogates, U+FFFE/U+FFFF. Text pasted from Word or PDFs can carry some
+ * (a vertical tab for a manual line break, say), and a strict parser
+ * rejects the whole file on the first one. */
+export function stripIllegalXmlChars(value: unknown): string {
+  return String(value).replace(
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    ''
+  )
+}

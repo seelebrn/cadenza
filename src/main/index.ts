@@ -3,6 +3,8 @@ import { copyFile, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import JSZip from 'jszip'
 import { buildQdpx, parseQdpx } from '../shared/refiQda'
+import { buildXlsxParts } from '../shared/spreadsheet'
+import type { Sheet } from '../shared/spreadsheet'
 import { normalizeProjectData } from '../shared/normalizeProject'
 import type { ProjectData, SerializedAssets } from '../shared/types'
 import type { ReportExportFormat } from '../shared/api'
@@ -236,6 +238,18 @@ function registerExportHandlers(): void {
       return result.filePath
     }
   )
+
+  ipcMain.handle('export:spreadsheet', async (_event, sheets: Sheet[], suggestedName: string) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: `${suggestedName}.xlsx`,
+      filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const zip = new JSZip()
+    for (const [path, xml] of Object.entries(buildXlsxParts(sheets))) zip.file(path, xml)
+    await writeFile(result.filePath, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }))
+    return result.filePath
+  })
 }
 
 app.whenReady().then(() => {

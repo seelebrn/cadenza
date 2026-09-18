@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CODE_USAGE_CONTEXT_WORDS, getCodeUsageDetail, getDescendantCodeIds, retrieveByCode, retrieveNotes } from './retrieval'
+import { CODE_USAGE_CONTEXT_WORDS, EMPTY_PASSAGE_QUERY, getCodeUsageDetail, getDescendantCodeIds, queryPassages, retrieveByCode, retrieveNotes } from './retrieval'
 import type { CodeNode, DocumentRecord, ProjectData, Segment } from './types'
 
 function makeCode(id: string, overrides: Partial<CodeNode> = {}): CodeNode {
@@ -197,5 +197,83 @@ describe('retrieveNotes', () => {
   it('combines filters (AND, not OR)', () => {
     const result = retrieveNotes(makeData({ notes }), { tag: 'x', hasQuestion: true })
     expect(result.map((n) => n.id).sort()).toEqual(['n1', 'n3'])
+  })
+})
+
+describe('queryPassages', () => {
+  // Two interviews; d1 by a nurse, d2 by a manager.
+  //   d1 "Alpha beta gamma delta epsilon"
+  //     s1 [0,10)  Load            s2 [6,16) Support   (overlaps s1)
+  //     s3 [17,22) Load + Support (one passage)
+  //     s4 [23,30) Load
+  //   d2 "Zeta eta theta"
+  //     s5 [0,4)   Load            s6 [5,8) Help (a sub-code of Support)
+  const data = makeData({
+    documents: [
+      { ...makeDoc('d1', ['Alpha beta gamma delta epsilon'], 'Interview A'), attributes: { Role: 'nurse' } },
+      { ...makeDoc('d2', ['Zeta eta theta'], 'Interview B'), attributes: { Role: 'manager' } }
+    ],
+    codes: [makeCode('load'), makeCode('support'), makeCode('help', { parentId: 'support' }), makeCode('unused')],
+    segments: [
+      { id: 's1', documentId: 'd1', start: 0, end: 10, text: 'Alpha beta' },
+      { id: 's2', documentId: 'd1', start: 6, end: 16, text: 'beta gamma' },
+      { id: 's3', documentId: 'd1', start: 17, end: 22, text: 'delta' },
+      { id: 's4', documentId: 'd1', start: 23, end: 30, text: 'epsilon' },
+      { id: 's5', documentId: 'd2', start: 0, end: 4, text: 'Zeta' },
+      { id: 's6', documentId: 'd2', start: 5, end: 8, text: 'eta' },
+      { id: 'uncoded', documentId: 'd2', start: 9, end: 14, text: 'theta' }
+    ],
+    codings: [
+      { id: 'k1', segmentId: 's1', codeId: 'load', createdAt: '0' },
+      { id: 'k2', segmentId: 's2', codeId: 'support', createdAt: '0' },
+      { id: 'k3a', segmentId: 's3', codeId: 'support', createdAt: '0' },
+      { id: 'k3b', segmentId: 's3', codeId: 'load', createdAt: '0' },
+      { id: 'k4', segmentId: 's4', codeId: 'load', createdAt: '0' },
+      { id: 'k5', segmentId: 's5', codeId: 'load', createdAt: '0' },
+      { id: 'k6', segmentId: 's6', codeId: 'help', createdAt: '0' }
+    ]
+  })
+  const ids = (query: Partial<typeof EMPTY_PASSAGE_QUERY>): string[] =>
+    queryPassages(data, { ...EMPTY_PASSAGE_QUERY, ...query }).map((r) => r.segment.id)
+
+  it('with no code chosen, lists every coded passage once, by document then position', () => {
+    expect(ids({})).toEqual(['s1', 's2', 's3', 's4', 's5', 's6'])
+  })
+
+  it('lists a passage once however many chosen codes it carries, with its codes in codebook order', () => {
+    const results = queryPassages(data, { ...EMPTY_PASSAGE_QUERY, codeIds: ['load', 'support'] })
+    expect(results.map((r) => r.segment.id)).toEqual(['s1', 's2', 's3', 's4', 's5', 's6'])
+    expect(results.find((r) => r.segment.id === 's3')!.codeIds).toEqual(['load', 'support'])
+  })
+
+  it('OR, with or without sub-codes', () => {
+    expect(ids({ codeIds: ['support'] })).toEqual(['s2', 's3', 's6'])
+    expect(ids({ codeIds: ['support'], includeDescendants: false })).toEqual(['s2', 's3'])
+  })
+
+  it('AND: codes that meet on the same passage or on overlapping ones', () => {
+    expect(ids({ codeIds: ['load', 'support'], match: 'all' })).toEqual(['s1', 's2', 's3'])
+    // Help sits beside Load in d2, not on it.
+    expect(ids({ codeIds: ['load', 'help'], match: 'all' })).toEqual([])
+  })
+
+  it('EXCEPT: leaves out passages where an excluded code meets', () => {
+    expect(ids({ codeIds: ['load'], excludeCodeIds: ['support'] })).toEqual(['s4', 's5'])
+    expect(ids({ codeIds: ['load'], excludeCodeIds: ['support'], includeDescendants: false })).toEqual(['s4', 's5'])
+    expect(ids({ excludeCodeIds: ['load'] })).toEqual(['s6'])
+  })
+
+  it('narrows by document and by case attribute', () => {
+    expect(ids({ codeIds: ['load'], documentIds: ['d2'] })).toEqual(['s5'])
+    expect(ids({ codeIds: ['load'], attributes: { Role: ['manager'] } })).toEqual(['s5'])
+    expect(ids({ codeIds: ['load'], attributes: { Role: ['manager', 'nurse'] } })).toEqual(['s1', 's3', 's4', 's5'])
+    expect(ids({ codeIds: ['load'], attributes: { Role: [] } })).toEqual(['s1', 's3', 's4', 's5'])
+    // A document without the attribute doesn't match a value of it.
+    expect(ids({ attributes: { Site: ['A'] } })).toEqual([])
+  })
+
+  it('a code nobody used gives nothing, and AND with it gives nothing', () => {
+    expect(ids({ codeIds: ['unused'] })).toEqual([])
+    expect(ids({ codeIds: ['load', 'unused'], match: 'all' })).toEqual([])
   })
 })

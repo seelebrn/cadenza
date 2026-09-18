@@ -6,6 +6,19 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Added
+- **Filtered retrieval** (Analysis → Retrieval): combine several codes, either *any* of them or
+  *all* of them meeting on a passage (the passage itself or an overlapping one, as in the
+  co-occurrence table), leave out passages where some other code meets, and narrow to some
+  documents or to cases with given attribute values: "the nurses' passages coded Workload but not
+  Support". Each passage is listed once with all its codes, the ones asked for highlighted. With
+  no code chosen, every coded passage is listed.
+- **Excel export of passages**: what the Retrieval view lists, or every coded passage (Export
+  tab), as an .xlsx table, with one row per passage and columns for the document, each case
+  attribute, the passage, its codes (sub-codes as "Parent › Child"), the clusters they're in, and
+  the notes on it. The header row is frozen with filter buttons, and a second tab records the
+  query behind the table. Opens in Excel, LibreOffice and Numbers.
+
 ## [0.5.0] - 2026-09-17
 
 ### Added

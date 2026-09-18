@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { computeParagraphRuns, type CodingWithSegment } from '@shared/highlightRuns'
@@ -25,6 +25,9 @@ function DocumentReader(): JSX.Element {
   const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
   const clearActiveSpan = useWorkspaceUiStore((s) => s.clear)
   const setInspectedCodeId = useWorkspaceUiStore((s) => s.setInspectedCodeId)
+  const pendingReveal = useWorkspaceUiStore((s) => s.pendingReveal)
+  const consumeReveal = useWorkspaceUiStore((s) => s.consumeReveal)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const [editingParagraphIndex, setEditingParagraphIndex] = useState<number | null>(null)
   const [draftText, setDraftText] = useState('')
@@ -66,6 +69,27 @@ function DocumentReader(): JSX.Element {
 
   const codeById = useMemo(() => new Map(codes.map((c) => [c.id, c])), [codes])
 
+  // "Go to passage" from elsewhere: once the document is rendered, bring
+  // the passage to the middle of the view — its first highlighted run, or
+  // its paragraph if it isn't rendered as highlights (being edited).
+  useEffect(() => {
+    if (!pendingReveal || !document || !activeSpan || activeSpan.documentId !== document.id) return
+    const frame = requestAnimationFrame(() => {
+      const container = containerRef.current
+      if (!container) return
+      let paragraphIndex = 0
+      paragraphStartOffsets.forEach((offset, i) => {
+        if (offset <= activeSpan.start) paragraphIndex = i
+      })
+      const target =
+        container.querySelector('[data-active-span]') ??
+        container.querySelector(`[data-paragraph-index="${paragraphIndex}"]`)
+      target?.scrollIntoView({ block: 'center' })
+      consumeReveal()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [pendingReveal, document, activeSpan, paragraphStartOffsets, consumeReveal])
+
   function handleMouseUp(): void {
     if (!document || editingParagraphIndex !== null) return
     const resolved = resolveSelectionOffsets(paragraphStartOffsets)
@@ -106,7 +130,7 @@ function DocumentReader(): JSX.Element {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-8" onMouseUp={handleMouseUp}>
+    <div ref={containerRef} className="mx-auto max-w-3xl px-8 py-8" onMouseUp={handleMouseUp}>
       {isEditingTitle ? (
         <input
           autoFocus
@@ -199,6 +223,7 @@ function DocumentReader(): JSX.Element {
                   return (
                     <mark
                       key={runIndex}
+                      data-active-span={isActive || undefined}
                       style={{ backgroundColor: color ? `${color}55` : isActive ? '#fde68a80' : undefined }}
                       className={`cursor-pointer rounded-sm ${
                         isActive ? 'outline-dashed outline-2 outline-amber-500 outline-offset-1' : ''

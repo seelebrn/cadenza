@@ -24,10 +24,7 @@ import type { CodeRetrievalResult } from '@shared/retrieval'
  * nurses say vs. the managers". */
 function ComparisonView(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
-  const setMainView = useWorkspaceUiStore((s) => s.setMainView)
-  const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
-  const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
-  const setActiveSidebarTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
+  const goToPassage = useWorkspaceUiStore((s) => s.goToPassage)
 
   const [mode, setMode] = useState<'matrix' | 'contrast'>('matrix')
   const [includeDescendants, setIncludeDescendants] = useState(true)
@@ -80,10 +77,7 @@ function ComparisonView(): JSX.Element | null {
   }, [contrastResults])
 
   function goToSegment(documentId: string, start: number, end: number, text: string): void {
-    setSelectedDocumentId(documentId)
-    setActiveSpan({ documentId, start, end, text })
-    setActiveSidebarTab('codes')
-    setMainView('workspace')
+    goToPassage({ documentId, start, end, text })
   }
 
   function openContrastFor(codeId: string): void {

@@ -3747,3 +3747,22 @@ revealed are kept in a module-level record keyed by project and by the query obj
 Coming back to the same query lands on the same spot (the "Go to passage" round trip), and any
 change to the query starts again at the top. Typecheck, 526 tests, build and boot all clean. The
 round trip itself was not clicked through here.
+
+### "Go to passage" scrolls to the passage (2026-09-18)
+
+Reported: "Go to passage" in Analysis, notably in Retrieval, didn't seem to take you to the
+passage. Every jump (Retrieval, Search, Compare cases, Co-occurrence, and a note's "Promote to
+code") set the selected document and the active span, and the reader highlighted that span, but
+nothing ever scrolled. The reader opened at the top of the document, so a passage in paragraph 120
+was marked off screen. Setting `activeSpan` can't itself mean "scroll there", because a selection
+made in the reader sets it too and must not make the page jump. So a new `goToPassage(span, tab)`
+in `workspaceUiStore` does all four settings plus a `pendingReveal` flag, and the reader, once the
+document is rendered, scrolls its first active-span highlight (tagged `data-active-span`), or the
+passage's paragraph if it's being edited, to the middle of the view, then clears the flag. The
+five call sites now go through it.
+
+Verified in the running app, driven over the Chrome DevTools protocol on the generated 5-interview
+test project. From Retrieval, the first, a middle and the last result each landed visible at
+~300–400 px in a 763 px window. A Search hit did the same. Leaving for the Workspace and coming
+back kept the document filter, the result count (249) and the list's scroll position (4000 px).
+526 tests pass, typecheck and build are clean.

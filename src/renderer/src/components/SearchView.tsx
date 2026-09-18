@@ -12,10 +12,7 @@ function SearchView(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
   const withBatch = useProjectStore((s) => s.withBatch)
-  const setMainView = useWorkspaceUiStore((s) => s.setMainView)
-  const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
-  const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
-  const setActiveSidebarTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
+  const goToPassage = useWorkspaceUiStore((s) => s.goToPassage)
 
   const [query, setQuery] = useState('')
   const [matchCase, setMatchCase] = useState(false)
@@ -48,10 +45,7 @@ function SearchView(): JSX.Element | null {
   }, [hits])
 
   function goToHit(hit: SearchHit): void {
-    setSelectedDocumentId(hit.documentId)
-    setActiveSpan({ documentId: hit.documentId, start: hit.start, end: hit.end, text: hit.match })
-    setActiveSidebarTab('codes')
-    setMainView('workspace')
+    goToPassage({ documentId: hit.documentId, start: hit.start, end: hit.end, text: hit.match })
   }
 
   function codeSentence(hit: SearchHit): void {

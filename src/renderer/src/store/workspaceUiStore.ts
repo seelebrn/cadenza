@@ -190,6 +190,16 @@ interface WorkspaceUiState {
    * the board, since nothing matches a nonexistent board. Deliberately
    * leaves sidebarWidth alone — that's a window-layout preference, not
    * tied to project content. */
+  /** Opens a passage in the Workspace from anywhere (Retrieval, Search,
+   * Compare, Co-occurrence, a note): selects its document, makes it the
+   * active span, and asks the reader to scroll it into view — which setting
+   * activeSpan alone doesn't (a selection made in the reader is already on
+   * screen and mustn't make it jump). */
+  goToPassage: (span: ActiveSpan, sidebarTab?: SidebarTab) => void
+  /** Set by goToPassage, cleared by the reader once it has scrolled there. */
+  pendingReveal: boolean
+  consumeReveal: () => void
+
   resetForProjectSwitch: () => void
 }
 
@@ -267,6 +277,17 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
 
   clear: () => set({ activeSpan: null }),
 
+  goToPassage: (span, sidebarTab = 'codes') =>
+    set({
+      selectedDocumentId: span.documentId,
+      activeSpan: span,
+      activeSidebarTab: sidebarTab,
+      mainView: 'workspace',
+      pendingReveal: true
+    }),
+  pendingReveal: false,
+  consumeReveal: () => set({ pendingReveal: false }),
+
   resetForProjectSwitch: () =>
     set({
       selectedDocumentId: null,
@@ -281,6 +302,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
       suggestedCodeName: null,
       inspectedCodeId: null,
       inspectedNoteId: null,
-      isVersionHistoryOpen: false
+      isVersionHistoryOpen: false,
+      pendingReveal: false
     })
 }))

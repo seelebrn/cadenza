@@ -520,10 +520,8 @@ function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Elem
   const createCategory = useProjectStore((s) => s.createCategory)
   const addNoteToCategory = useProjectStore((s) => s.addNoteToCategoryAndReflowBoard)
   const withBatch = useProjectStore((s) => s.withBatch)
-  const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
-  const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
+  const goToPassage = useWorkspaceUiStore((s) => s.goToPassage)
   const setSuggestedCodeName = useWorkspaceUiStore((s) => s.setSuggestedCodeName)
-  const setActiveSidebarTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
   const setInspectedNoteId = useWorkspaceUiStore((s) => s.setInspectedNoteId)
 
   const [isEditing, setIsEditing] = useState(false)
@@ -551,15 +549,8 @@ function NoteCard({ note, sourceClusterId, depth = 0 }: NoteCardProps): JSX.Elem
     if (attachedTo.kind !== 'segment' || !data) return
     const segment = data.segments.find((s) => s.id === attachedTo.segmentId)
     if (!segment) return
-    setSelectedDocumentId(segment.documentId)
-    setActiveSpan({
-      documentId: segment.documentId,
-      start: segment.start,
-      end: segment.end,
-      text: segment.text
-    })
+    goToPassage({ documentId: segment.documentId, start: segment.start, end: segment.end, text: segment.text })
     setSuggestedCodeName(note.question?.trim() || note.answer.slice(0, 40))
-    setActiveSidebarTab('codes')
   }
 
   // Same idea as "Promote to code", for the other half of AQA: turns this

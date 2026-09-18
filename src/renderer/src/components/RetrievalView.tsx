@@ -81,10 +81,7 @@ function CodeAdder({
 
 function RetrievalView(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
-  const setMainView = useWorkspaceUiStore((s) => s.setMainView)
-  const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
-  const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
-  const setActiveSidebarTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
+  const goToPassage = useWorkspaceUiStore((s) => s.goToPassage)
 
   const mode = useWorkspaceUiStore((s) => s.retrievalMode)
   const setMode = useWorkspaceUiStore((s) => s.setRetrievalMode)
@@ -172,10 +169,7 @@ function RetrievalView(): JSX.Element | null {
   }, [data, noteCategoryFilter, tagFilter, hasQuestionOnly])
 
   function goToSegment(documentId: string, start: number, end: number, text: string, tab: 'codes' | 'notes'): void {
-    setSelectedDocumentId(documentId)
-    setActiveSpan({ documentId, start, end, text })
-    setActiveSidebarTab(tab)
-    setMainView('workspace')
+    goToPassage({ documentId, start, end, text }, tab)
   }
 
   async function exportToExcel(): Promise<void> {

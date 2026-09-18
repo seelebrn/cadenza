@@ -10,10 +10,7 @@ import { getCodeCooccurrenceMatrix, getCooccurringPassages } from '@shared/coocc
  * cell to see the shared passages underneath. */
 function CooccurrenceView(): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
-  const setMainView = useWorkspaceUiStore((s) => s.setMainView)
-  const setSelectedDocumentId = useWorkspaceUiStore((s) => s.setSelectedDocumentId)
-  const setActiveSpan = useWorkspaceUiStore((s) => s.setActiveSpan)
-  const setActiveSidebarTab = useWorkspaceUiStore((s) => s.setActiveSidebarTab)
+  const goToPassage = useWorkspaceUiStore((s) => s.goToPassage)
 
   const [includeDescendants, setIncludeDescendants] = useState(true)
   const [hideUnused, setHideUnused] = useState(true)
@@ -56,10 +53,7 @@ function CooccurrenceView(): JSX.Element | null {
   }, [data, selected, includeDescendants])
 
   function goToSpan(documentId: string, start: number, end: number, text: string): void {
-    setSelectedDocumentId(documentId)
-    setActiveSpan({ documentId, start, end, text })
-    setActiveSidebarTab('codes')
-    setMainView('workspace')
+    goToPassage({ documentId, start, end, text })
   }
 
   if (!data) return null

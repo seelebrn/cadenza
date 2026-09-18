@@ -6,6 +6,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Fixed
+- "Go to passage" (Retrieval, Search, Compare cases, Co-occurrence) opened the right document and
+  marked the passage, but didn't scroll to it: a passage further down an interview stayed off
+  screen. The reader now brings it to the middle of the view. Same for "Promote to code" from a
+  note.
+
 ### Added
 - **Filtered retrieval** (Analysis → Retrieval): combine several codes, either *any* of them or
   *all* of them meeting on a passage (the passage itself or an overlapping one, as in the

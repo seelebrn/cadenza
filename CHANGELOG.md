@@ -14,6 +14,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   note category, so the tab gains no extra line.
 
 ### Changed
+- **The Notes tab is decluttered.** The note form, the new-cluster row and the note categories
+  used to take up to half of the tab; they now sit folded behind one toolbar line (+ Note,
+  + Cluster, Categories), and the notes list gets the room (587 px instead of 311 in a window of
+  the default size). Highlighting a passage in the reader opens the note form with the quote on
+  top, as before; the form folds again once the note is added, or with Cancel. "+ Note" turns
+  amber while a passage is highlighted and the form is folded.
 - **Large projects are much faster** (measured on 5 interviews, 500 codes, 500 notes, 1,300
   passages):
   - Opening the Workspace: 1.5 s → 0.1 s. Every code in the codebook carried a hidden "Merge

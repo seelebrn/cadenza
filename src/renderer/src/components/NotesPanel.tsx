@@ -61,6 +61,16 @@ function NotesPanel(): JSX.Element {
   // making it impossible to create an AQA-style question-cluster from here.
   const [newClusterKind, setNewClusterKind] = useState<CategoryKind>('theme')
   const [isRootDragOver, setIsRootDragOver] = useState(false)
+  // At most one form is open under the toolbar; all folded by default so
+  // the notes list gets the room. The note form opens by itself when a new
+  // passage is highlighted in the reader — noting a passage is the main way
+  // notes are written — and folds again once the note is added.
+  const [openForm, setOpenForm] = useState<'note' | 'cluster' | 'categories' | null>(null)
+  const toggleForm = (form: 'note' | 'cluster' | 'categories'): void => setOpenForm((f) => (f === form ? null : form))
+  const activeSpanKey = activeSpan ? `${activeSpan.documentId}:${activeSpan.start}:${activeSpan.end}` : null
+  useEffect(() => {
+    if (activeSpanKey) setOpenForm('note')
+  }, [activeSpanKey])
 
   const categories = data?.noteCategories ?? []
   const clusters = useMemo(() => data?.categories ?? [], [data])
@@ -97,6 +107,7 @@ function NotesPanel(): JSX.Element {
     setQuestion('')
     setAnswer('')
     setTags('')
+    setOpenForm(null)
     // noteCategoryId deliberately persists — taking several notes of the
     // same category in a row is a common pattern, so don't reset it.
   }
@@ -153,6 +164,7 @@ function NotesPanel(): JSX.Element {
     if (!name) return
     createCategory(name, newClusterKind, nextClusterColor(clusters.length))
     setNewClusterName('')
+    setOpenForm(null)
   }
 
   function handleRootDrop(e: DragEvent): void {
@@ -174,80 +186,151 @@ function NotesPanel(): JSX.Element {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <NoteCategoryManager />
+      <div className="flex items-center gap-1.5 border-b border-slate-200 px-2 py-1.5 text-xs text-slate-600">
+        <button
+          className={`rounded border px-2 py-0.5 ${
+            openForm === 'note' ? 'border-slate-700 bg-slate-700 text-white' : activeSpan
+              ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+              : 'border-slate-300 hover:bg-slate-100'
+          }`}
+          title={activeSpan ? 'Write a note on the highlighted passage' : 'Write a note on this document or the project'}
+          onClick={() => toggleForm('note')}
+        >
+          + Note
+        </button>
+        <button
+          className={`rounded border px-2 py-0.5 ${
+            openForm === 'cluster' ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-300 hover:bg-slate-100'
+          }`}
+          onClick={() => toggleForm('cluster')}
+        >
+          + Cluster
+        </button>
+        <span className="flex-1" />
+        <button
+          className={`rounded border px-2 py-0.5 ${
+            openForm === 'categories' ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-300 hover:bg-slate-100'
+          }`}
+          onClick={() => toggleForm('categories')}
+        >
+          Categories ({categories.length}) {openForm === 'categories' ? '▾' : '▸'}
+        </button>
+      </div>
 
-      {activeSpan && (
-        <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <p className="mb-1 font-medium">New note on the highlighted text:</p>
-          <p className="italic">&ldquo;{activeSpan.text}&rdquo;</p>
-          <button className="mt-1 text-amber-700 underline" onClick={clearUi}>
-            Done — clear selection
+      {openForm === 'categories' && <NoteCategoryManager />}
+
+      {openForm === 'cluster' && (
+        <div className="flex gap-1.5 border-b border-slate-200 p-2">
+          <select
+            className="rounded border border-slate-300 text-xs"
+            value={newClusterKind}
+            title="A theme is an emergent grouping; a question is itself the analytic question (AQA-style) — whatever's filed under it reads as evidence/answers."
+            onChange={(e) => setNewClusterKind(e.target.value as CategoryKind)}
+          >
+            <option value="theme">Theme</option>
+            <option value="question">Question</option>
+          </select>
+          <input
+            className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+            placeholder={newClusterKind === 'question' ? 'New analytic question…' : 'New cluster…'}
+            value={newClusterName}
+            onChange={(e) => setNewClusterName(e.target.value)}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleCreateCluster()
+              if (e.key === 'Escape') setOpenForm(null)
+            }}
+          />
+          <button
+            className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700"
+            onClick={handleCreateCluster}
+          >
+            Add cluster
           </button>
         </div>
       )}
 
-      <div className="space-y-1.5 border-b border-slate-200 p-3">
-        {!activeSpan && (
-          <div className="flex gap-3 text-xs text-slate-500">
-            <label className="flex items-center gap-1">
-              <input
-                type="radio"
-                checked={manualTarget === 'document'}
-                disabled={!selectedDocumentId}
-                onChange={() => setManualTarget('document')}
-              />
-              This document
-            </label>
-            <label className="flex items-center gap-1">
-              <input
-                type="radio"
-                checked={manualTarget === 'project'}
-                onChange={() => setManualTarget('project')}
-              />
-              Project
-            </label>
-          </div>
-        )}
-        <input
-          className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
-          placeholder="Analytic question (optional — AQA-style)"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-        />
-        <textarea
-          className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
-          rows={3}
-          placeholder="Answer / memo…"
-          value={answer}
-          onChange={(e) => setAnswer(e.target.value)}
-        />
-        <div className="flex gap-2">
-          <select
-            className="min-w-0 flex-shrink rounded border border-slate-300 px-1 py-1 text-xs"
-            value={noteCategoryId ?? ''}
-            onChange={(e) => setNoteCategoryId(e.target.value || null)}
-          >
-            <option value="">No category</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.name}
-              </option>
-            ))}
-          </select>
+      {openForm === 'note' && (
+        <div className="space-y-1.5 border-b border-slate-200 p-3">
+          {activeSpan && (
+            <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+              <p className="font-medium">On the highlighted text:</p>
+              <p className="line-clamp-3 italic">&ldquo;{activeSpan.text}&rdquo;</p>
+              <button className="mt-0.5 text-amber-700 underline" onClick={clearUi}>
+                Clear selection
+              </button>
+            </div>
+          )}
+          {!activeSpan && (
+            <div className="flex gap-3 text-xs text-slate-500">
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  checked={manualTarget === 'document'}
+                  disabled={!selectedDocumentId}
+                  onChange={() => setManualTarget('document')}
+                />
+                This document
+              </label>
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  checked={manualTarget === 'project'}
+                  onChange={() => setManualTarget('project')}
+                />
+                Project
+              </label>
+            </div>
+          )}
           <input
-            className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
-            placeholder="tags, comma, separated"
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
+            className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            placeholder="Analytic question (optional — AQA-style)"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
           />
+          <textarea
+            className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            rows={3}
+            placeholder="Answer / memo…"
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <select
+              className="min-w-0 flex-shrink rounded border border-slate-300 px-1 py-1 text-xs"
+              value={noteCategoryId ?? ''}
+              onChange={(e) => setNoteCategoryId(e.target.value || null)}
+            >
+              <option value="">No category</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+            <input
+              className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+              placeholder="tags, comma, separated"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="flex-1 rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
+              onClick={handleAdd}
+            >
+              Add note
+            </button>
+            <button
+              className="rounded border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-100"
+              onClick={() => setOpenForm(null)}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
-        <button
-          className="w-full rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
-          onClick={handleAdd}
-        >
-          Add note
-        </button>
-      </div>
+      )}
 
       {/* Filtering lives on one row: the text filter, which notes (this
           document's or all), and the note category. */}
@@ -293,31 +376,6 @@ function NotesPanel(): JSX.Element {
         )}
       </div>
 
-      <div className="flex gap-1.5 border-b border-slate-200 p-2">
-        <select
-          className="rounded border border-slate-300 text-xs"
-          value={newClusterKind}
-          title="A theme is an emergent grouping; a question is itself the analytic question (AQA-style) — whatever's filed under it reads as evidence/answers."
-          onChange={(e) => setNewClusterKind(e.target.value as CategoryKind)}
-        >
-          <option value="theme">Theme</option>
-          <option value="question">Question</option>
-        </select>
-        <input
-          className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
-          placeholder={newClusterKind === 'question' ? 'New analytic question…' : 'New cluster…'}
-          value={newClusterName}
-          onChange={(e) => setNewClusterName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleCreateCluster()}
-        />
-        <button
-          className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700"
-          onClick={handleCreateCluster}
-        >
-          Add cluster
-        </button>
-      </div>
-
       <div
         className={`flex-1 overflow-auto p-2 ${isRootDragOver ? 'bg-blue-50' : ''}`}
         onDragOver={(e) => {
@@ -360,7 +418,6 @@ function NoteCategoryManager(): JSX.Element {
   const data = useProjectStore((s) => s.data)
   const addNoteCategory = useProjectStore((s) => s.addNoteCategory)
 
-  const [isOpen, setIsOpen] = useState(false)
   const [newName, setNewName] = useState('')
 
   const categories = data?.noteCategories ?? []
@@ -373,34 +430,23 @@ function NoteCategoryManager(): JSX.Element {
   }
 
   return (
-    <div className="border-b border-slate-200 text-xs">
-      <button
-        className="flex w-full items-center justify-between px-3 py-1.5 text-slate-500 hover:bg-slate-50"
-        onClick={() => setIsOpen((v) => !v)}
-      >
-        <span>Note categories ({categories.length})</span>
-        <span>{isOpen ? '▾' : '▸'}</span>
-      </button>
-      {isOpen && (
-        <div className="space-y-1 px-3 pb-2">
-          {categories.length === 0 && <p className="text-slate-400">No categories yet.</p>}
-          {categories.map((cat) => (
-            <NoteCategoryRow key={cat.id} category={cat} />
-          ))}
-          <div className="flex gap-1 pt-1">
-            <input
-              className="flex-1 rounded border border-slate-300 px-1.5 py-1"
-              placeholder="New category (e.g. Note Descriptive)…"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            />
-            <button className="rounded bg-slate-900 px-2 text-white" onClick={handleAdd}>
-              Add
-            </button>
-          </div>
-        </div>
-      )}
+    <div className="space-y-1 border-b border-slate-200 px-3 py-2 text-xs">
+      {categories.length === 0 && <p className="text-slate-400">No categories yet.</p>}
+      {categories.map((cat) => (
+        <NoteCategoryRow key={cat.id} category={cat} />
+      ))}
+      <div className="flex gap-1 pt-1">
+        <input
+          className="flex-1 rounded border border-slate-300 px-1.5 py-1"
+          placeholder="New category (e.g. Note Descriptive)…"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+        />
+        <button className="rounded bg-slate-900 px-2 text-white" onClick={handleAdd}>
+          Add
+        </button>
+      </div>
     </div>
   )
 }

@@ -3863,3 +3863,25 @@ non-shrinking label, so truncation never hides it. The status line shows the fil
 either separator, with the full path in a tooltip: a full Windows path was the widest thing up
 there. Re-measured: header 69 px clean and dirty, no button wrapped or moved, at the default size
 and at the 960 px minimum window width (project name then cut to 135 px). 532 tests pass.
+
+### Notes tab: forms folded behind a toolbar (2026-09-18)
+
+Asked for after the filter box landed: the Notes tab was still too crowded. Measured in the
+default window: of the tab's 656 px, the note form took 225, the new-cluster row 57, the
+categories header 29 and the filter row 34, leaving the notes list 311 px.
+
+The three creation areas now fold behind one 34 px toolbar row: "+ Note", "+ Cluster", and
+"Categories (n) ▸" on the right, with at most one open at a time underneath (`openForm`). The
+note form opens by itself when a new passage is highlighted, keyed on the span's document and
+offsets so re-renders don't reopen it after Cancel. The quote shows as the form's header,
+clamped to three lines, with "Clear selection". Adding a note or a cluster folds its form, and
+Escape closes the cluster form. With a highlight and the form folded, "+ Note" turns amber, with
+the target in its tooltip. The label stays short: "+ Note on selection" wrapped the toolbar to
+50 px at the default sidebar width. `NoteCategoryManager` lost its own disclosure header since
+the toolbar opens it.
+
+Checked in the app on the test project: folded, the list gets 587 px. The cluster and category
+forms open and close, and the cluster name field takes focus. Clicking a coded passage opens the
+note form with its quote, adding folds it and lists the note, a new passage reopens it, Cancel,
+the toolbar button and "Clear selection" behave, and the toolbar stays 34 px throughout.
+532 tests pass.

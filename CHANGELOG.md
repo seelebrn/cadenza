@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-22
+
 ### Added
 - **Find on board** (Ctrl+F on the Board tab): type a code, note or cluster name, press Enter,
   and the board scrolls it to the middle of the view (zooming in no further than 100%) and rings

@@ -6,6 +6,16 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Added
+- **A way to send feedback**: "Report a bug" and "Suggest something" links on the home screen and
+  the Export tab open a prefilled GitHub issue in your browser, with the Cadenza version and
+  platform already filled in. The app still never contacts anything on its own.
+- Screenshots in the README.
+
+### Fixed
+- Running unpackaged (`npm run dev` or `electron out/main/index.js`), the app reported
+  Electron's version instead of its own, in REFI-QDA exports' origin and now in feedback links.
+
 ## [0.7.0] - 2026-09-22
 
 ### Added

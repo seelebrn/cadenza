@@ -3941,3 +3941,18 @@ batched step), "Show on main board" (via showOnBoard) and Dismiss. It clears on 
 Checked in the app: the notice names the card after a drop outside the frame; Undo restores the
 membership and clears it; a move inside the cluster shows nothing; "Show on main board" rings
 the card on the main board, where it is indeed outside its four nested frames until Undo.
+
+### Feedback links, issue templates, screenshots (2026-09-22)
+
+With v0.7.0 out and no users yet, the next step is making feedback possible rather than adding
+features. A `FeedbackLink` component (home screen, Export tab) opens a prefilled GitHub issue
+through the existing external-link handler, with two templates under `.github/ISSUE_TEMPLATE`
+(bug, suggestion) and the build in the body via a new `app:info` IPC. That surfaced a bug: run
+unpackaged, `app.getVersion()` is Electron's version (31.7.7), which the REFI-QDA export's
+`origin` had been writing all along in dev. The package version is now injected at build time
+(`__APP_VERSION__` from electron.vite.config) and used whenever the app isn't packaged.
+
+Four screenshots of the example project, captured over the DevTools protocol at 1400×880
+(`Page.captureScreenshot` after driving the UI): workspace with a coded interview, the board
+fitted to one superordinate cluster through the new find box, retrieval filtered to one
+document, and the home screen. They head the README in a two-by-two table.

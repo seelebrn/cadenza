@@ -17,6 +17,11 @@ import { renderHtmlToPdf } from './export/pdfRenderer'
 import { renderReportToHtml } from '../shared/reportModel'
 import type { Report } from '../shared/reportModel'
 
+declare const __APP_VERSION__: string
+/** The version from package.json, injected at build time — app.getVersion()
+ * reports Electron's own version when running unpackaged. */
+const APP_VERSION = app.isPackaged ? app.getVersion() : __APP_VERSION__
+
 const isDev = !app.isPackaged
 
 const PROJECT_FILE_FILTERS = [{ name: 'Cadenza Project', extensions: ['qdaproj'] }]
@@ -126,7 +131,7 @@ function registerProjectHandlers(): void {
       filters: QDPX_FILE_FILTERS
     })
     if (result.canceled || !result.filePath) return null
-    const bundle = buildQdpx(data, `Cadenza ${app.getVersion()}`)
+    const bundle = buildQdpx(data, `Cadenza ${APP_VERSION}`)
     const zip = new JSZip()
     zip.file('project.qde', bundle.qde)
     for (const [path, text] of Object.entries(bundle.sources)) zip.file(path, text)
@@ -163,6 +168,8 @@ function registerProjectHandlers(): void {
   })
 
   ipcMain.handle('project:get-recent', () => getRecentProjects())
+
+  ipcMain.handle('app:info', () => ({ version: APP_VERSION, platform: process.platform, arch: process.arch }))
 
   ipcMain.handle('project:remove-recent', (_event, filePath: string) =>
     removeRecentProject(filePath)

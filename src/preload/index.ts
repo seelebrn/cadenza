@@ -17,6 +17,9 @@ const api: CadenzaApi = {
     exportQdpx: (data) => ipcRenderer.invoke('project:export-qdpx', data),
     importQdpx: () => ipcRenderer.invoke('project:import-qdpx')
   },
+  app: {
+    info: () => ipcRenderer.invoke('app:info')
+  },
   document: {
     importDialog: () => ipcRenderer.invoke('document:import-dialog')
   },

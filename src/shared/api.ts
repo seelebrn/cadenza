@@ -58,6 +58,10 @@ export interface CadenzaApi {
      * save goes through Save As). Null = user canceled. */
     importQdpx: () => Promise<{ data: ProjectData; report: QdpxImportReport } | null>
   }
+  app: {
+    /** The running build, for feedback reports. */
+    info: () => Promise<{ version: string; platform: string; arch: string }>
+  }
   document: {
     /** Opens a native file picker (.docx/.odt/.txt) and imports the chosen file. Null = user canceled. */
     importDialog: () => Promise<ImportedDocument | null>

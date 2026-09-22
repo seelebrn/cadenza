@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import FeedbackLink from './FeedbackLink'
 import type { QdpxImportReport } from '@shared/refiQda'
 
 function ProjectHome(): JSX.Element {
@@ -117,6 +118,8 @@ function ProjectHome(): JSX.Element {
           </ul>
         )}
       </div>
+
+      <FeedbackLink />
     </div>
   )
 }

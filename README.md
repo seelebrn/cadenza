@@ -3,6 +3,14 @@
 A qualitative data analysis (QDA) desktop app for Windows, macOS and Linux. It runs locally,
 for a single user: no account, no server, your projects stay on your computer.
 
+| Coding an interview | Grouping codes on the board |
+|---|---|
+| ![The Workspace: an interview with coded passages, the codebook on the right](docs/screenshots/workspace.png) | ![The board: clusters of codes and notes, nested and linked](docs/screenshots/board.png) |
+| **Reading the passages behind a question** | **Home** |
+| ![Retrieval: coded passages filtered by code, document and case attribute](docs/screenshots/retrieval.png) | ![The home screen](docs/screenshots/home.png) |
+
+*Screenshots of the bundled example project (a small fictional study, in French).*
+
 ## What it's for
 
 **Coding is one lens among several, not the privileged one.** Codes, lightweight inventory

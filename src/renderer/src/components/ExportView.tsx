@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import type { ReportExportFormat } from '@shared/api'
 import { buildProjectReport, buildResultsDraftReport, hasComparisonData } from '../lib/reportBuilders'
 import type { ResultsDraftAxis } from '../lib/reportBuilders'
+import FeedbackLink from './FeedbackLink'
 import { EMPTY_PASSAGE_QUERY, queryPassages } from '@shared/retrieval'
 import { buildPassageSheet, buildQuerySheet } from '@shared/spreadsheet'
 
@@ -321,6 +322,10 @@ function ExportView(): JSX.Element | null {
           {isExchanging ? 'Exporting…' : 'Export as REFI-QDA project (.qdpx)'}
         </button>
         {exchangeStatus && <p className="mt-2 text-xs text-slate-600">{exchangeStatus}</p>}
+      </div>
+
+      <div className="mt-6">
+        <FeedbackLink />
       </div>
     </div>
   )

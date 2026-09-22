@@ -3927,3 +3927,17 @@ board with its 12 clusters and 82 cards, all in view at 37%; ⧉ on that board r
 2 boards); Undo removes it; "Show on board" from Analysis › Clusters rings the cluster. Tests for
 the subtree op (nesting, members, nothing outside the branch, idempotence, existing shapes kept);
 535 pass, typecheck and build clean.
+
+### Unfiled notice on working boards (2026-09-22)
+
+Reported while trying the working boards: a code dragged out of a sub-cluster there ended up
+outside every cluster, not in the parent. That's the standing rule — membership follows where
+the card lands, and the branch's own frame fills a working board, so a drop "just outside the
+sub-cluster" usually means outside everything. Chosen fix (over a board-specific rule): make it
+visible. In the drop handler's reassignment loop, on a non-default board, every code or note
+whose new cluster is null while it had one is collected, and a notice appears under the toolbar:
+what was unfiled, "in the whole project, not just on this board", with Undo (the drop is one
+batched step), "Show on main board" (via showOnBoard) and Dismiss. It clears on a board switch.
+Checked in the app: the notice names the card after a drop outside the frame; Undo restores the
+membership and clears it; a move inside the cluster shows nothing; "Show on main board" rings
+the card on the main board, where it is indeed outside its four nested frames until Undo.

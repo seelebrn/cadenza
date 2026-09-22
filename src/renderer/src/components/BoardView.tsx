@@ -169,6 +169,8 @@ function BoardView(): JSX.Element {
   const unlinkItemsAction = useProjectStore((s) => s.unlinkItems)
   const resetBoardLayout = useProjectStore((s) => s.resetBoardLayout)
   const withBatch = useProjectStore((s) => s.withBatch)
+  const undo = useProjectStore((s) => s.undo)
+  const showOnBoard = useProjectStore((s) => s.showOnBoard)
   const createClusterLink = useProjectStore((s) => s.createClusterLink)
   const deleteClusterLink = useProjectStore((s) => s.deleteClusterLink)
   const applyTreeLayout = useProjectStore((s) => s.applyTreeLayout)
@@ -254,6 +256,13 @@ function BoardView(): JSX.Element {
   const [highlightBox, setHighlightBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const highlightTimerRef = useRef<number | null>(null)
   const boardFocus = useWorkspaceUiStore((s) => s.boardFocus)
+  // On a board opened for one cluster, a card dropped outside every frame
+  // leaves its cluster project-wide — the same rule as on the main board,
+  // but here the branch's frame fills the view, so that's easy to do
+  // without meaning to and impossible to see from this board. This notice
+  // says so, with Undo and a jump to the card on the main board.
+  const [unfiledNotice, setUnfiledNotice] = useState<Array<{ refType: 'code' | 'note'; refId: string; label: string }> | null>(null)
+  useEffect(() => setUnfiledNotice(null), [selectedBoardId])
   const consumeBoardFocus = useWorkspaceUiStore((s) => s.consumeBoardFocus)
   // Same reasoning as confirmingDeleteBoard/exportMessage above.
   const [confirmingResetLayout, setConfirmingResetLayout] = useState(false)
@@ -731,9 +740,14 @@ function BoardView(): JSX.Element {
             reassignmentGroupIds.push(targetId)
           }
           if (reassignment && reassignment.oldCluster?.id !== reassignment.newCluster?.id && selectedBoardId) {
+            const unfiled: Array<{ refType: 'code' | 'note'; refId: string; label: string }> = []
             for (const memberId of reassignmentGroupIds) {
               const ref = memberId === targetId ? targetRef : refByMemberId.get(memberId)
               if (!ref) continue
+              if (!reassignment.newCluster && reassignment.oldCluster && currentBoard && !currentBoard.isDefault && data && ref.refType !== 'segment') {
+                const label = describeBoardItem(data, { id: '', boardId: '', refType: ref.refType, refId: ref.refId, x: 0, y: 0 })?.label ?? ''
+                unfiled.push({ refType: ref.refType, refId: ref.refId, label })
+              }
               // Reconciled against every category this ref is *actually*
               // a member of right now, not just the reference member's
               // own old cluster: a group can easily contain members that
@@ -756,6 +770,7 @@ function BoardView(): JSX.Element {
                 reassignment.newCluster?.categoryId ?? null
               )
             }
+            if (unfiled.length > 0) setUnfiledNotice(unfiled)
           }
           // The dropped cards stay where they were released; anything
           // they now cover moves over instead (see resolveItemOverlaps) —
@@ -1700,6 +1715,48 @@ function BoardView(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {unfiledNotice && currentBoard && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs">
+          <span className="flex-1 text-amber-900">
+            {unfiledNotice.length === 1 ? (
+              <>
+                “{unfiledNotice[0].label}” was dropped outside every cluster, so it is now <strong>unfiled in the whole project</strong>, not just on this board.
+              </>
+            ) : (
+              <>
+                {unfiledNotice.length} cards were dropped outside every cluster, so they are now <strong>unfiled in the whole project</strong>, not just on this board.
+              </>
+            )}
+          </span>
+          <button
+            className="flex-shrink-0 rounded border border-amber-300 bg-white px-2 py-1 hover:bg-amber-100"
+            onClick={() => {
+              undo()
+              setUnfiledNotice(null)
+            }}
+          >
+            Undo
+          </button>
+          <button
+            className="flex-shrink-0 rounded border border-amber-300 bg-white px-2 py-1 hover:bg-amber-100"
+            title="Jump to it on the main board, which shows everything"
+            onClick={() => {
+              const first = unfiledNotice[0]
+              setUnfiledNotice(null)
+              showOnBoard(first.refType, first.refId)
+            }}
+          >
+            {unfiledNotice.length === 1 ? 'Show on main board' : 'Show the first on main board'}
+          </button>
+          <button
+            className="flex-shrink-0 rounded border border-slate-300 bg-white px-2 py-1 hover:bg-slate-100"
+            onClick={() => setUnfiledNotice(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {exportMessage && (
         <div className="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-xs">

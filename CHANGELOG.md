@@ -17,6 +17,9 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
   to view — a working board for one branch of a large project, in the spirit of MAXQDA's
   Creative Coding. The clusters on it are the project's own, so grouping there regroups
   everywhere; opening the same cluster again reuses its board, and Undo removes it.
+- On such a board, dropping a card outside every cluster frame unfiles it in the whole project
+  (the same rule as on the main board, but easy to do by accident there, and invisible from that
+  board). A notice now says so, with Undo and "Show on main board".
 
 ## [0.6.0] - 2026-09-18
 

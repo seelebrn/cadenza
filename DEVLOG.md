@@ -3885,3 +3885,45 @@ forms open and close, and the cluster name field takes focus. Clicking a coded p
 note form with its quote, adding folds it and lists the note, a new passage reopens it, Cancel,
 the toolbar button and "Clear selection" behave, and the toolbar stays 34 px throughout.
 532 tests pass.
+
+### Find on board, and working boards from a cluster (2026-09-22)
+
+Context: a comparison with MAXQDA's Creative Coding and MAXMaps for projects of 1,000+ codes.
+Cadenza's board stays fast at that size (0.4 s for 148 clusters and 1,000 cards) but stops being
+a place to work: at the zoom needed to see it all, nothing is legible and nothing is findable.
+What makes Creative Coding scale is that it starts from a selection, never from the whole code
+system. Two additions bring that here without giving up the board-is-the-structure model.
+
+**Find on board.** A find box in the board toolbar (Ctrl+F is redirected to it) lists the
+clusters and cards on the current board whose name contains the query, accents and case ignored
+(`normalizeForFilter` from the Notes filter), clusters first, 12 at most. Enter or a click calls
+`revealRef`, which uses the existing `fitViewToBounds` with a new `maxZoom` argument capped at 1
+— fitting a single 180×64 card would otherwise zoom to 250% — and draws an amber ring around the
+box for 1.8 s (`board-export-hide`, so it never lands in a PDF). The same reveal is reachable
+from other views through a `boardFocus` request in `workspaceUiStore` ({kind:'ref'} or
+{kind:'fit'}), set by two new project-store actions: `showOnBoard(refType, refId)` selects the
+default board (which shows everything) and switches to it; the board consumes the request once
+its layout is computed. Entry points: "Board" on a codebook code row, "Show" on both trees'
+cluster rows (ClusterRowShell), "Show on board" on the Analysis › Clusters card.
+
+**Open on a board.** `addClusterSubtreeToBoard(data, boardId, rootCategoryId)` in boardOps
+places a cluster, its descendants and their codes and notes on a board, laid out by
+`computeCategoryLayout` over the subtree alone with the root's parent detached, so the branch
+lands at the origin instead of at its default-board position; the placing loop is shared with
+`addAllClustersToBoard` (`placeLaidOutCategories`). `openCategoryOnBoard(categoryId)` creates a
+board named after the cluster — or reuses a non-default board of that name — populates it in
+the same undo step, selects it and requests a fit. Entry points: "Open" on cluster rows, "Open on
+a board" on the Clusters card, and ⧉ in every cluster frame header.
+
+Not done, noted for later: a banner on a working board when a code dragged out of a cluster there
+becomes unfiled project-wide (Undo covers the mistake; the visibility is what's missing), and
+"refresh from selection". Per-cluster collapse, the minimap and semantic zoom are the next items
+of the navigation list.
+
+Verified in the app on the 5-interview project: find → "Transmissions" (cluster) and "Logement —
+ressenti" (code) each ring in view at 100%, no-match message, Escape, Ctrl+F focus, ring gone
+after 2 s; "Board" from a codebook row lands on the code; "Open" on "Charge de travail" makes a
+board with its 12 clusters and 82 cards, all in view at 37%; ⧉ on that board reuses it (still
+2 boards); Undo removes it; "Show on board" from Analysis › Clusters rings the cluster. Tests for
+the subtree op (nesting, members, nothing outside the branch, idempotence, existing shapes kept);
+535 pass, typecheck and build clean.

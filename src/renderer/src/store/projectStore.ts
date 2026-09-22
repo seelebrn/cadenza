@@ -61,6 +61,7 @@ import {
 } from '@shared/documentOps'
 import {
   addAllClustersToBoard as addAllClustersToBoardOp,
+  addClusterSubtreeToBoard as addClusterSubtreeToBoardOp,
   addAllCodesToBoard as addAllCodesToBoardOp,
   addAllNotesToBoard as addAllNotesToBoardOp,
   addItemToBoard as addItemToBoardOp,
@@ -368,6 +369,13 @@ interface ProjectState {
    * frame down to just its header, ignoring how many codes/notes it
    * holds — see computeCategoryLayout's own compact option. */
   addAllClustersToBoard: (boardId: string, includeMembers?: boolean, compact?: boolean) => void
+  /** "Open on a board": a new board named after the cluster, holding it,
+   * its sub-clusters and their codes and notes, opened and fitted to
+   * view. One undo step. Returns the board's id. */
+  openCategoryOnBoard: (categoryId: string) => string | null
+  /** "Show on board": switches to the default board (which shows every
+   * code, note and cluster) and brings the element into view. */
+  showOnBoard: (refType: 'code' | 'note' | 'cluster', refId: string) => void
   linkItems: (boardId: string, itemAId: string, itemBId: string) => void
   unlinkItems: (linkId: string) => void
   /** The "Reset placement" button. On the default board: drops every
@@ -961,6 +969,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   addAllClustersToBoard: (boardId, includeMembers = true, compact = false) =>
     get().updateProject((data) => addAllClustersToBoardOp(data, boardId, includeMembers, compact)),
+
+  openCategoryOnBoard: (categoryId) => {
+    const { data } = get()
+    const category = data?.categories.find((c) => c.id === categoryId)
+    if (!data || !category) return null
+    // A board of the same name is reused rather than duplicated: opening
+    // the same branch twice lands on the same working board.
+    const existing = data.boards.find((b) => !b.isDefault && b.name === category.name)
+    const created = existing ? null : createBoardOp(data, category.name)
+    const boardId = existing ? existing.id : created!.boardId
+    get().updateProject(() => addClusterSubtreeToBoardOp(created ? created.data : data, boardId, categoryId))
+    const ui = useWorkspaceUiStore.getState()
+    ui.setSelectedBoardId(boardId)
+    ui.setMainView('board')
+    ui.requestBoardFocus({ kind: 'fit' })
+    return boardId
+  },
+
+  showOnBoard: (refType, refId) => {
+    const { data } = get()
+    if (!data) return
+    const boardId = getDefaultBoardId(data.boards)
+    if (!boardId) return
+    const ui = useWorkspaceUiStore.getState()
+    ui.setSelectedBoardId(boardId)
+    ui.setMainView('board')
+    ui.requestBoardFocus({ kind: 'ref', refType, refId })
+  },
 
   linkItems: (boardId, itemAId, itemBId) =>
     get().updateProject((data) => linkItemsOp(data, boardId, itemAId, itemBId)),

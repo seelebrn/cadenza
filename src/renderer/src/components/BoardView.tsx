@@ -8,6 +8,7 @@ import {
   computeAccommodatingSize,
   computeClusterLinkPath,
   computeGridPosition,
+  describeBoardItem,
   findAlignmentSnap,
   findDistributionSnap,
   findNestTarget,
@@ -32,6 +33,7 @@ import BoardItemCard from './BoardItemCard'
 import type { DragState, Position } from './boardDragTypes'
 import { MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH } from './boardLayoutConstants'
 import ClusterFrame from './ClusterFrame'
+import { normalizeForFilter } from '../lib/noteFilter'
 
 // Single source of truth for a card's rendered size lives in boardOps.ts —
 // the cluster auto-layout there needs to know it too, to stack member
@@ -244,6 +246,15 @@ function BoardView(): JSX.Element {
   // though this one doesn't gate anything: an alert() closing can leave
   // every text field unresponsive for a minute or so just the same.
   const [exportMessage, setExportMessage] = useState<string | null>(null)
+  // "Find on board": the toolbar's search box, and the ring drawn for a
+  // moment around whatever was just brought into view (found here, or
+  // asked for from elsewhere via the store's boardFocus).
+  const [findQuery, setFindQuery] = useState('')
+  const findInputRef = useRef<HTMLInputElement>(null)
+  const [highlightBox, setHighlightBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const highlightTimerRef = useRef<number | null>(null)
+  const boardFocus = useWorkspaceUiStore((s) => s.boardFocus)
+  const consumeBoardFocus = useWorkspaceUiStore((s) => s.consumeBoardFocus)
   // Same reasoning as confirmingDeleteBoard/exportMessage above.
   const [confirmingResetLayout, setConfirmingResetLayout] = useState(false)
   const pendingZoomAnchorRef = useRef<{
@@ -315,6 +326,78 @@ function BoardView(): JSX.Element {
     if (!data || !currentBoard) return []
     return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes, data.categories, clusters, links)
   }, [data, currentBoard, explicitItems, clusters, links])
+
+  /** The box of a code, note or cluster on this board, if it's here. */
+  function boxOfRef(refType: 'code' | 'note' | 'cluster', refId: string): { x: number; y: number; width: number; height: number } | null {
+    if (refType === 'cluster') {
+      const cluster = clusters.find((c) => c.categoryId === refId)
+      return cluster ? { x: cluster.x, y: cluster.y, width: cluster.width, height: cluster.height } : null
+    }
+    const item = items.find((i) => i.refType === refType && i.refId === refId)
+    return item ? { x: item.x, y: item.y, width: CARD_WIDTH, height: CARD_HEIGHT } : null
+  }
+
+  /** Brings one element to the middle of the view — zooming in no further
+   * than 100%, so a card doesn't fill the screen — and rings it briefly. */
+  function revealRef(refType: 'code' | 'note' | 'cluster', refId: string): void {
+    const box = boxOfRef(refType, refId)
+    if (!box) return
+    fitViewToBounds(box.x, box.y, box.x + box.width, box.y + box.height, 1)
+    setHighlightBox(box)
+    if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current)
+    highlightTimerRef.current = window.setTimeout(() => setHighlightBox(null), 1800)
+  }
+
+  // A focus asked for from elsewhere ("Show on board", "Open on a board"),
+  // honored once this board is showing with its layout computed.
+  useEffect(() => {
+    if (!boardFocus || !currentBoard || !scrollContainerRef.current) return
+    if (boardFocus.kind === 'fit') handleFitToView()
+    else revealRef(boardFocus.refType, boardFocus.refId)
+    consumeBoardFocus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardFocus, currentBoard, clusters, items])
+
+  // Ctrl/Cmd+F on the board goes to its find box, not the browser's.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        findInputRef.current?.focus()
+        findInputRef.current?.select()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  // What the find box offers: every cluster and card on this board whose
+  // name contains the query (accents and case ignored), clusters first.
+  const findMatches = useMemo(() => {
+    const query = normalizeForFilter(findQuery.trim())
+    if (!query || !data) return []
+    const matches: Array<{ refType: 'code' | 'note' | 'cluster'; refId: string; label: string; color: string | null }> = []
+    for (const cluster of clusters) {
+      const category = data.categories.find((c) => c.id === cluster.categoryId)
+      if (category && normalizeForFilter(category.name).includes(query)) {
+        matches.push({ refType: 'cluster', refId: category.id, label: category.name, color: category.color })
+      }
+    }
+    for (const item of items) {
+      if (item.refType === 'segment') continue
+      const description = describeBoardItem(data, item)
+      if (description && normalizeForFilter(description.label).includes(query)) {
+        matches.push({ refType: item.refType, refId: item.refId, label: description.label, color: description.color })
+      }
+    }
+    return matches.slice(0, 12)
+  }, [findQuery, data, clusters, items])
+
+  function pickFindMatch(match: { refType: 'code' | 'note' | 'cluster'; refId: string }): void {
+    revealRef(match.refType, match.refId)
+    setFindQuery('')
+    findInputRef.current?.blur()
+  }
 
   /** The stored shape for a category on this board, created (at exactly
    * where it's shown, top-level group pinned first — see
@@ -408,7 +491,7 @@ function BoardView(): JSX.Element {
   // (with FIT_VIEW_PADDING around it) — the whole board for "Fit view",
   // one cluster for a double-click on it, so a zoomed-out overview of a
   // large board is something to navigate *from* rather than work *at*.
-  function fitViewToBounds(minX: number, minY: number, maxX: number, maxY: number): void {
+  function fitViewToBounds(minX: number, minY: number, maxX: number, maxY: number, maxZoom: number = MAX_ZOOM): void {
     const container = scrollContainerRef.current
     if (!container) return
     const boxWidth = maxX - minX
@@ -418,7 +501,7 @@ function BoardView(): JSX.Element {
 
     const zoomX = viewportWidth / (boxWidth + FIT_VIEW_PADDING * 2)
     const zoomY = viewportHeight / (boxHeight + FIT_VIEW_PADDING * 2)
-    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(zoomX, zoomY)))
+    const nextZoom = Math.min(maxZoom, Math.max(MIN_ZOOM, Math.min(zoomX, zoomY)))
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
     const offsetX = viewportWidth / 2
@@ -1564,6 +1647,44 @@ function BoardView(): JSX.Element {
               {isExportingPdf ? 'Exporting…' : 'Export as PDF'}
             </button>
           )}
+          <span className="relative">
+            <input
+              ref={findInputRef}
+              className="w-36 rounded border border-slate-300 px-2 py-0.5 text-xs"
+              placeholder="Find on board… (Ctrl+F)"
+              title="Type a code, note or cluster name, then Enter — brings it into view"
+              value={findQuery}
+              onChange={(e) => setFindQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && findMatches.length > 0) pickFindMatch(findMatches[0])
+                if (e.key === 'Escape') {
+                  setFindQuery('')
+                  e.currentTarget.blur()
+                }
+              }}
+            />
+            {findQuery.trim() !== '' && (
+              <ul className="absolute right-0 top-full z-30 mt-1 max-h-72 w-72 overflow-auto rounded border border-slate-300 bg-white py-1 text-xs shadow-lg">
+                {findMatches.length === 0 && <li className="px-2 py-1 text-slate-400">Nothing on this board matches.</li>}
+                {findMatches.map((m) => (
+                  <li key={`${m.refType}:${m.refId}`}>
+                    <button
+                      className="flex w-full items-center gap-1.5 px-2 py-1 text-left hover:bg-slate-100"
+                      // mousedown, so the pick lands before the input's blur closes the list.
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        pickFindMatch(m)
+                      }}
+                    >
+                      <span className="inline-block h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: m.color ?? '#999' }} />
+                      <span className="truncate">{m.label}</span>
+                      <span className="ml-auto flex-shrink-0 text-[10px] uppercase text-slate-400">{m.refType}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </span>
           <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
           <button
             className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
@@ -1981,6 +2102,13 @@ function BoardView(): JSX.Element {
                 />
               )
             })}
+
+            {highlightBox && (
+              <div
+                className="board-export-hide pointer-events-none absolute z-30 animate-pulse rounded-md ring-4 ring-amber-400"
+                style={{ left: highlightBox.x - 6, top: highlightBox.y - 6, width: highlightBox.width + 12, height: highlightBox.height + 12 }}
+              />
+            )}
 
             {/* Thematic-map cluster links render in their own layer *after*
                 every card, not behind them like the plain item links and

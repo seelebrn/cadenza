@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   addAllClustersToBoard,
+  addClusterSubtreeToBoard,
+  GRID_ORIGIN_X,
   addAllCodesToBoard,
   addAllNotesToBoard,
   addItemToBoard,
@@ -3882,5 +3884,58 @@ describe('findPointerSnapTarget', () => {
 
   it('never targets the dragged card itself', () => {
     expect(findPointerSnapTarget(cards, '1', 100, 80, W, H, 16)?.targetId).not.toBe('1')
+  })
+})
+
+describe('addClusterSubtreeToBoard', () => {
+  // top ─┬─ mid ─── leaf (codes c3)   notes n1 on mid
+  //      └─ other (not part of the branch opened)
+  // A code in two clusters, one outside the branch; a note on the root.
+  const codes = ['c1', 'c2', 'c3', 'c4'].map(makeCode)
+  const data = makeData({
+    codes,
+    notes: [{ id: 'n1', question: null, answer: 'memo', tags: [], noteCategoryId: null, attachedTo: { kind: 'project' }, createdAt: '0', updatedAt: '0' }],
+    categories: [
+      makeCategory('top', { codeIds: ['c1'] }),
+      makeCategory('mid', { parentCategoryId: 'top', codeIds: ['c2'], noteIds: ['n1'] }),
+      makeCategory('leaf', { parentCategoryId: 'mid', codeIds: ['c3'] }),
+      makeCategory('other', { parentCategoryId: 'top', codeIds: ['c4'] }),
+      makeCategory('elsewhere', { codeIds: ['c2'] })
+    ],
+    boards: [{ id: 'b', name: 'Main', isDefault: true }, { id: 'w', name: 'Work', isDefault: false }]
+  })
+
+  it('places the branch, nested, with its codes and notes, and nothing outside it', () => {
+    const next = addClusterSubtreeToBoard(data, 'w', 'mid')
+    const placed = next.boardClusters.filter((c) => c.boardId === 'w')
+    expect(placed.map((c) => c.categoryId).sort()).toEqual(['leaf', 'mid'])
+    const mid = placed.find((c) => c.categoryId === 'mid')!
+    const leaf = placed.find((c) => c.categoryId === 'leaf')!
+    // The branch root sits at the board's origin, its child inside it.
+    expect(mid.x).toBe(GRID_ORIGIN_X)
+    expect(leaf.x).toBeGreaterThanOrEqual(mid.x)
+    expect(leaf.y).toBeGreaterThan(mid.y)
+    expect(leaf.x + leaf.width).toBeLessThanOrEqual(mid.x + mid.width)
+    expect(leaf.y + leaf.height).toBeLessThanOrEqual(mid.y + mid.height)
+    const items = next.boardItems.filter((i) => i.boardId === 'w').map((i) => `${i.refType}:${i.refId}`).sort()
+    expect(items).toEqual(['code:c2', 'code:c3', 'note:n1'])
+    // The default board and the project's categories are untouched.
+    expect(next.boardClusters.filter((c) => c.boardId === 'b')).toEqual([])
+    expect(next.categories).toBe(data.categories)
+  })
+
+  it('from the top: the whole tree, and a second call adds nothing', () => {
+    const next = addClusterSubtreeToBoard(data, 'w', 'top')
+    expect(next.boardClusters.filter((c) => c.boardId === 'w').map((c) => c.categoryId).sort()).toEqual(['leaf', 'mid', 'other', 'top'])
+    expect(addClusterSubtreeToBoard(next, 'w', 'top')).toBe(next)
+    expect(addClusterSubtreeToBoard(next, 'w', 'nope')).toBe(next)
+  })
+
+  it('leaves what is already on the board where it is', () => {
+    const first = addClusterSubtreeToBoard(data, 'w', 'other')
+    const before = first.boardClusters.find((c) => c.categoryId === 'other')!
+    const next = addClusterSubtreeToBoard(first, 'w', 'top')
+    expect(next.boardClusters.find((c) => c.categoryId === 'other')).toBe(before)
+    expect(next.boardClusters.filter((c) => c.boardId === 'w')).toHaveLength(4)
   })
 })

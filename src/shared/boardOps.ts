@@ -357,7 +357,7 @@ export function removeItemFromBoard(data: ProjectData, itemId: string): ProjectD
 
 // --- Grid auto-layout (default-board auto-visibility + bulk-add actions) ---
 
-const GRID_ORIGIN_X = 40
+export const GRID_ORIGIN_X = 40
 const GRID_ORIGIN_Y = 40
 const GRID_COLUMNS = 8
 const GRID_COLUMN_WIDTH = 200
@@ -1079,9 +1079,22 @@ export function addAllClustersToBoard(
     ])
   )
 
+  return placeLaidOutCategories(data, boardId, categoriesToPlace, layoutByCategoryId, includeMembers)
+}
+
+/** Places each of `categories` on the board at its computed layout, with
+ * its member cards inside when `includeMembers` — the placing half of
+ * addAllClustersToBoard, shared with addClusterSubtreeToBoard. */
+function placeLaidOutCategories(
+  data: ProjectData,
+  boardId: string,
+  categories: CategoryRecord[],
+  layoutByCategoryId: Map<string, ComputedClusterLayout>,
+  includeMembers: boolean
+): ProjectData {
   let next = data
 
-  for (const category of categoriesToPlace) {
+  for (const category of categories) {
     const layout = layoutByCategoryId.get(category.id)
     if (!layout) continue // every category gets an entry; defensive only
 
@@ -1126,6 +1139,34 @@ export function addAllClustersToBoard(
   }
 
   return next
+}
+
+/**
+ * Puts one cluster, its sub-clusters and all their codes and notes on a
+ * board — a working board for one branch of a large project, the way
+ * MAXQDA's Creative Coding starts from a selection rather than the whole
+ * code system. The branch is laid out as if its root were the board's
+ * only top-level cluster, so it lands at the origin rather than wherever
+ * it sits on the default board. Anything already on the board is left as
+ * it is; the branch's clusters are added if missing. The clusters are the
+ * project's own, so grouping here regroups them everywhere.
+ */
+export function addClusterSubtreeToBoard(data: ProjectData, boardId: string, rootCategoryId: string): ProjectData {
+  const root = data.categories.find((c) => c.id === rootCategoryId)
+  if (!root) return data
+  const subtreeIds = new Set([root.id, ...getDescendantCategoryIds(data.categories, root.id)])
+  const subtree = data.categories
+    .filter((c) => subtreeIds.has(c.id))
+    .map((c) => (c.id === root.id ? { ...c, parentCategoryId: null } : c))
+
+  const existingOnBoard = data.boardClusters.filter((c) => c.boardId === boardId)
+  const existingCategoryIds = new Set(existingOnBoard.map((c) => c.categoryId))
+  const toPlace = subtree.filter((c) => !existingCategoryIds.has(c.id))
+  if (toPlace.length === 0) return data
+
+  const explicitOverrides = new Map(existingOnBoard.map((c) => [c.categoryId, c]))
+  const layoutByCategoryId = new Map(computeCategoryLayout(subtree, explicitOverrides).map((l) => [l.categoryId, l]))
+  return placeLaidOutCategories(data, boardId, toPlace, layoutByCategoryId, true)
 }
 
 // --- Clusters (category shapes) ---

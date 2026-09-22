@@ -59,6 +59,8 @@ function ClusterRowShell({
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const setCategoryDefinition = useProjectStore((s) => s.setCategoryDefinition)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
+  const showOnBoard = useProjectStore((s) => s.showOnBoard)
+  const openCategoryOnBoard = useProjectStore((s) => s.openCategoryOnBoard)
   // Nesting one cluster onto another from either tree has no board-drag
   // position to derive a placement from, so it also reflows the default
   // board's cluster layout — same reasoning as the member add/remove
@@ -177,6 +179,20 @@ function ClusterRowShell({
           )}
 
           <div className="hidden flex-shrink-0 gap-1 group-hover:flex">
+            <button
+              className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
+              title="Show this cluster on the main board"
+              onClick={() => showOnBoard('cluster', node.id)}
+            >
+              Show
+            </button>
+            <button
+              className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
+              title="Open this cluster, its sub-clusters and their codes and notes on a board of their own"
+              onClick={() => openCategoryOnBoard(node.id)}
+            >
+              Open
+            </button>
             <button
               className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
               title="Edit definition"

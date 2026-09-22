@@ -101,6 +101,8 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const setCategoryDefinition = useProjectStore((s) => s.setCategoryDefinition)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
+  const showOnBoard = useProjectStore((s) => s.showOnBoard)
+  const openCategoryOnBoard = useProjectStore((s) => s.openCategoryOnBoard)
   // Same reasoning as the codebook/notes trees: adding/removing a member
   // here has no board-drag position to size the cluster's frame from, so
   // it also reflows the default board's cluster layout.
@@ -179,6 +181,20 @@ function ClusterCard({ category }: { category: CategoryRecord }): JSX.Element | 
             {category.kind === 'question' ? `“${category.name}”` : category.name}
           </button>
         )}
+        <button
+          className="flex-shrink-0 text-xs text-slate-500 hover:underline"
+          title="Show this cluster on the main board"
+          onClick={() => showOnBoard('cluster', category.id)}
+        >
+          Show on board
+        </button>
+        <button
+          className="flex-shrink-0 text-xs text-slate-500 hover:underline"
+          title="Open this cluster, its sub-clusters and their codes and notes on a board of their own"
+          onClick={() => openCategoryOnBoard(category.id)}
+        >
+          Open on a board
+        </button>
         <button
           className="flex-shrink-0 text-xs text-slate-400 hover:text-slate-600"
           onClick={() => setIsExpanded((v) => !v)}

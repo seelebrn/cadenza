@@ -6,6 +6,18 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Added
+- **Find on board** (Ctrl+F on the Board tab): type a code, note or cluster name, press Enter,
+  and the board scrolls it to the middle of the view (zooming in no further than 100%) and rings
+  it for a moment. The same jump from elsewhere: "Board" on a code in the Workspace codebook,
+  "Show" on a cluster row, "Show on board" on a cluster card in Analysis › Clusters.
+- **Open a cluster on a board of its own**: "Open" on a cluster row (Workspace codebook or Notes
+  tab), "Open on a board" in Analysis › Clusters, or ⧉ on a cluster's frame. A new board named
+  after the cluster holds it, its sub-clusters and all their codes and notes, laid out and fitted
+  to view — a working board for one branch of a large project, in the spirit of MAXQDA's
+  Creative Coding. The clusters on it are the project's own, so grouping there regroups
+  everywhere; opening the same cluster again reuses its board, and Undo removes it.
+
 ## [0.6.0] - 2026-09-18
 
 ### Added

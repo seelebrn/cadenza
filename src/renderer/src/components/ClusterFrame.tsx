@@ -123,6 +123,7 @@ function ClusterFrame({
   // over a neighbor (the full name is in the tooltip).
   const labelScale = Math.min(3.5, Math.max(1, 1 / zoom))
   const renameCategory = useProjectStore((s) => s.renameCategory)
+  const openCategoryOnBoard = useProjectStore((s) => s.openCategoryOnBoard)
   const setCategoryColor = useProjectStore((s) => s.setCategoryColor)
   const deleteCluster = useProjectStore((s) => s.deleteCluster)
   const deleteCategory = useProjectStore((s) => s.deleteCategory)
@@ -307,6 +308,14 @@ function ClusterFrame({
             {category.parentCategoryId ? ' ↰' : ''}
           </button>
         )}
+        <button
+          className="board-export-hide flex-shrink-0 text-[10px] text-white/80 hover:text-white"
+          title="Open this cluster, its sub-clusters and their codes and notes on a board of their own"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => openCategoryOnBoard(category.id)}
+        >
+          ⧉
+        </button>
         <button
           className="board-export-hide flex-shrink-0 text-white/80 hover:text-white"
           title={

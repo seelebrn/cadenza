@@ -252,6 +252,7 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
   const setCodeDefinition = useProjectStore((s) => s.setCodeDefinition)
   const reparentCode = useProjectStore((s) => s.reparentCode)
   const deleteCode = useProjectStore((s) => s.deleteCode)
+  const showOnBoard = useProjectStore((s) => s.showOnBoard)
   const mergeCodes = useProjectStore((s) => s.mergeCodes)
   const removeCodeFromCategory = useProjectStore((s) => s.removeCodeFromCategoryAndReflowBoard)
   const applyCodeToSelection = useProjectStore((s) => s.applyCodeToSelection)
@@ -428,6 +429,13 @@ function CodeRow({ node, depth, allCodes, sourceClusterId }: CodeRowProps): JSX.
                   Unfile
                 </button>
               )}
+              <button
+                className="rounded border border-slate-300 px-1 text-[10px] hover:bg-slate-100"
+                title="Show this code on the main board"
+                onClick={() => showOnBoard('code', node.id)}
+              >
+                Board
+              </button>
               <button
                 className="rounded border border-red-200 px-1 text-[10px] text-red-600 hover:bg-red-50"
                 onClick={() => setIsConfirmingDelete(true)}

@@ -10,6 +10,7 @@ export interface ActiveSpan {
 }
 
 export type SidebarTab = 'codes' | 'notes'
+export type BoardFocus = { kind: 'fit' } | { kind: 'ref'; refType: 'code' | 'note' | 'cluster'; refId: string }
 export type MainView = 'workspace' | 'analysis' | 'board' | 'export'
 export type AnalysisTab = 'retrieval' | 'search' | 'categories' | 'compare' | 'cooccurrence'
 
@@ -200,6 +201,15 @@ interface WorkspaceUiState {
   pendingReveal: boolean
   consumeReveal: () => void
 
+  /** What the board should bring into view once it's showing: one element
+   * (a code, note or cluster, from "Show on board" or the board's own
+   * find box) or everything (a board just opened from a selection). Set
+   * with the board selected and mainView 'board'; the board clears it
+   * once it has scrolled there. */
+  boardFocus: BoardFocus | null
+  requestBoardFocus: (focus: BoardFocus) => void
+  consumeBoardFocus: () => void
+
   resetForProjectSwitch: () => void
 }
 
@@ -288,6 +298,10 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
   pendingReveal: false,
   consumeReveal: () => set({ pendingReveal: false }),
 
+  boardFocus: null,
+  requestBoardFocus: (focus) => set({ boardFocus: focus }),
+  consumeBoardFocus: () => set({ boardFocus: null }),
+
   resetForProjectSwitch: () =>
     set({
       selectedDocumentId: null,
@@ -303,6 +317,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set) => ({
       inspectedCodeId: null,
       inspectedNoteId: null,
       isVersionHistoryOpen: false,
-      pendingReveal: false
+      pendingReveal: false,
+      boardFocus: null
     })
 }))

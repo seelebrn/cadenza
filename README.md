@@ -25,6 +25,14 @@ there is never anything to keep in sync.
 The Main board shows every code, note and cluster automatically. It's where you group things
 visually and build a thematic map.
 
+**Finding your way on a large board**
+- "Find on board…" (Ctrl+F) brings a code, note or cluster to the middle of the view and rings
+  it; "Board" on a code and "Show" on a cluster do the same from the Workspace and Analysis.
+- "Open" on a cluster (Workspace, Analysis › Clusters, or ⧉ on its frame) opens it, its
+  sub-clusters and their codes and notes on a board of their own, fitted to view — a working
+  board for one branch of a big project. The clusters are the project's, so regrouping there
+  regroups everywhere; the board is reused the next time that cluster is opened.
+
 **Clusters and nesting**
 - Drag a cluster into another to nest it there, or resize a cluster so it encloses others.
 - To put a cluster straight into a superordinate cluster — even a full one — drop it with the

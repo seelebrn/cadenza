@@ -6,6 +6,8 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-06
+
 ### Added
 - **A way to send feedback**: "Report a bug" and "Suggest something" links on the home screen and
   the Export tab open a prefilled GitHub issue in your browser, with the Cadenza version and

@@ -1,7 +1,206 @@
 # Cadenza
 
-A qualitative data analysis (QDA) desktop app for Windows, macOS and Linux. It runs locally,
+A free qualitative data analysis (QDA) desktop app for Windows, macOS and Linux. It runs locally,
 for a single user: no account, no server, your projects stay on your computer.
+
+*Une application gratuite d'analyse qualitative (QDA) pour Windows, macOS et Linux. Elle
+fonctionne en local, pour une personne : pas de compte, pas de serveur, vos projets restent sur
+votre ordinateur.*
+
+**[⬇ Download Cadenza / Télécharger Cadenza](https://github.com/seelebrn/cadenza/releases/latest)** · [Install guide (English)](#install-cadenza) · [Guide d'installation (français)](#installer-cadenza) · [Guide de démarrage (diaporama, français)](docs/Cadenza-guide-de-demarrage.pptx)
+
+> [!IMPORTANT]
+> **A security warning at first launch is expected.** Windows says *"Windows protected your PC"*:
+> click **More info**, then **Run anyway**. macOS says *"Apple could not verify 'Cadenza'…"*:
+> open **System Settings → Privacy & Security** and click **Open Anyway**. It appears once, and
+> only because Cadenza, a free project, has no paid signing certificate.
+> [Details](#the-security-warning-at-first-launch).
+>
+> **Un avertissement de sécurité au premier lancement est normal.** Windows affiche *« Windows a
+> protégé votre ordinateur »* : cliquez sur **Informations complémentaires**, puis sur
+> **Exécuter quand même**. macOS affiche *« Apple n'a pas pu vérifier que "Cadenza"… »* : ouvrez
+> **Réglages Système → Confidentialité et sécurité** et cliquez sur **Ouvrir quand même**. Il
+> n'apparaît qu'une fois, et seulement parce que Cadenza, projet gratuit, n'a pas de certificat
+> de signature payant. [Détails](#lavertissement-de-sécurité-au-premier-lancement).
+
+## Install Cadenza
+
+You don't need a GitHub account, and there is nothing to build or configure. You download one
+file and open it. It takes about two minutes.
+
+### The security warning at first launch
+
+Read this first, so it doesn't stop you at step 4. The first time you open Cadenza, your
+computer shows a warning and seems to refuse to open it:
+
+| | What you see | What to do |
+|---|---|---|
+| **Windows** | A blue window: *"Windows protected your PC"*, with only a **Don't run** button | Click the small **More info** link in the text, then the **Run anyway** button that appears |
+| **Mac** | *"Apple could not verify 'Cadenza' is free of malware that may harm your Mac"*, with **Done** and **Move to Trash** | Click **Done** (not *Move to Trash*). Open **System Settings → Privacy & Security**, scroll down to the line about Cadenza, click **Open Anyway**, then confirm |
+| **Linux** | Usually nothing | — |
+
+**Why it appears.** Windows and macOS warn about any app whose author has not paid Apple or
+Microsoft for a signing certificate, which Cadenza, as a free project, has not. It does not
+mean something was detected in the file. The warning appears only the first time, and other
+free research tools (QualCoder, for instance) show the same one. Cadenza's source code is
+public in this repository. If you downloaded the file from this page, it is safe to continue.
+
+### Step by step
+
+**1. Open the download page.** Go to the **[latest release](https://github.com/seelebrn/cadenza/releases/latest)**. GitHub is the website
+where Cadenza is published; a "release" is simply a version of the app.
+
+**2. Find the list of files.** Scroll down past the list of changes to the section called
+**Assets** (click the word *Assets* if the list is folded). You will see about ten files. You
+need only one of them, and you can ignore everything else (`.blockmap`, `.yml`,
+*Source code*).
+
+**3. Download the file for your computer** by clicking its name:
+
+| Your computer | File to click | Size |
+|---|---|---|
+| **Windows** 10 or 11 | `Cadenza-Setup-0.7.1.exe` | about 90 MB |
+| **Mac** with an Apple chip (M1, M2, M3, M4) | `Cadenza-0.7.1-arm64.dmg` | about 110 MB |
+| **Linux** | `Cadenza-0.7.1.AppImage` | about 130 MB |
+
+The number in the name (0.7.1 here) is the version; yours may be higher. Your browser saves the
+file in your **Downloads** folder.
+
+- *Not sure which Mac you have?* Apple menu → **About This Mac**. If the line says **Chip:
+  Apple M…**, the file above is the right one. If it says **Processor: Intel**, Cadenza has no
+  build for that Mac yet.
+- *On Windows, can't or don't want to install?* Take `Cadenza-0.7.1.exe` (without "Setup")
+  instead. It is the same app in portable form: it runs when you double-click it, with nothing
+  installed, and can live on a USB stick.
+
+**4. Install it.**
+
+- **Windows** — double-click the downloaded file. At the blue *"Windows protected your PC"*
+  window, click **More info**, then **Run anyway** ([see above](#the-security-warning-at-first-launch)).
+  The installer then does its work, and Cadenza appears in the Start menu and on the desktop.
+- **Mac** — double-click the `.dmg` file, then drag the Cadenza icon onto the *Applications*
+  folder shown next to it. Open Cadenza from Applications. At the *"Apple could not verify…"*
+  message, click **Done**, then **System Settings → Privacy & Security → Open Anyway**
+  ([see above](#the-security-warning-at-first-launch)). On older versions of macOS, right-click
+  the app → **Open** → **Open** instead.
+- **Linux** — right-click the file → **Properties** → **Permissions** → allow it to run as a
+  program (or `chmod +x Cadenza-*.AppImage` in a terminal), then double-click it.
+
+**5. First steps.** On the home screen, click **Explore an example project**: Cadenza asks
+where to save a copy, then opens a small fictional study, already coded, that you can change
+freely. To start your own work, type a name and click **New project**, then **Import
+document…**.
+
+**Good to know**
+
+- **Your work is a single file** ending in `.qdaproj`, saved wherever you choose (Documents,
+  for example). Back it up or copy it like any other file. Cadenza also keeps automatic earlier
+  versions, under **History**.
+- **Nothing is sent anywhere.** Cadenza works without an internet connection.
+- **Updating** — Cadenza does not update by itself. To get a newer version, download it from
+  the same page and install it over the old one. Your projects are not touched.
+- **Uninstalling** — Windows: *Settings → Apps → Installed apps → Cadenza → Uninstall*. Mac:
+  drag Cadenza from Applications to the Trash. Linux: delete the AppImage file. Your
+  `.qdaproj` files stay where you saved them.
+- **Something doesn't work?** Use **Report a bug** at the bottom of Cadenza's home screen, or
+  [open an issue](https://github.com/seelebrn/cadenza/issues/new/choose) (that one does need a
+  free GitHub account).
+
+## Installer Cadenza
+
+Pas besoin de compte GitHub, rien à compiler ni à configurer : vous téléchargez un fichier et
+vous l'ouvrez. Comptez deux minutes.
+
+### L'avertissement de sécurité au premier lancement
+
+À lire d'abord, pour ne pas rester bloqué à l'étape 4. La première fois que vous ouvrez
+Cadenza, votre ordinateur affiche un avertissement et semble refuser de l'ouvrir :
+
+| | Ce que vous voyez | Ce qu'il faut faire |
+|---|---|---|
+| **Windows** | Une fenêtre bleue : *« Windows a protégé votre ordinateur »*, avec un seul bouton **Ne pas exécuter** | Cliquez sur le petit lien **Informations complémentaires** dans le texte, puis sur le bouton **Exécuter quand même** qui apparaît |
+| **Mac** | *« Apple n'a pas pu vérifier que "Cadenza" ne contenait pas de logiciel malveillant »*, avec **Terminé** et **Placer dans la corbeille** | Cliquez sur **Terminé** (pas sur *Placer dans la corbeille*). Ouvrez **Réglages Système → Confidentialité et sécurité**, descendez jusqu'à la ligne qui concerne Cadenza, cliquez sur **Ouvrir quand même**, puis confirmez |
+| **Linux** | En général, rien | — |
+
+**Pourquoi il apparaît.** Windows et macOS avertissent pour toute application dont l'auteur
+n'a pas payé de certificat de signature à Apple ou à Microsoft, ce qui est le cas de Cadenza,
+projet gratuit. Cela ne signifie pas que quelque chose a été détecté dans le fichier.
+L'avertissement n'apparaît que la première fois, et d'autres outils de recherche gratuits
+(QualCoder, par exemple) affichent le même. Le code source de Cadenza est public, dans ce
+dépôt. Si vous avez téléchargé le fichier depuis cette page, vous pouvez continuer sans crainte.
+
+### Pas à pas
+
+**1. Ouvrez la page de téléchargement.** Allez sur la **[dernière version](https://github.com/seelebrn/cadenza/releases/latest)**. GitHub
+est le site où Cadenza est publié ; une « release » est simplement une version de
+l'application. La page est en anglais, mais vous n'avez qu'un clic à y faire.
+
+**2. Trouvez la liste des fichiers.** Faites défiler la page, après la liste des nouveautés,
+jusqu'à la rubrique **Assets** (cliquez sur le mot *Assets* si la liste est repliée). Une
+dizaine de fichiers apparaissent. Un seul vous concerne ; ignorez tous les autres
+(`.blockmap`, `.yml`, *Source code*).
+
+**3. Téléchargez le fichier qui correspond à votre ordinateur** en cliquant sur son nom :
+
+| Votre ordinateur | Fichier à cliquer | Taille |
+|---|---|---|
+| **Windows** 10 ou 11 | `Cadenza-Setup-0.7.1.exe` | environ 90 Mo |
+| **Mac** à puce Apple (M1, M2, M3, M4) | `Cadenza-0.7.1-arm64.dmg` | environ 110 Mo |
+| **Linux** | `Cadenza-0.7.1.AppImage` | environ 130 Mo |
+
+Le nombre dans le nom (ici 0.7.1) est le numéro de version ; le vôtre peut être plus élevé. Le
+navigateur enregistre le fichier dans votre dossier **Téléchargements**.
+
+- *Vous ne savez pas quel Mac vous avez ?* Menu Pomme → **À propos de ce Mac**. Si la ligne
+  indique **Puce : Apple M…**, le fichier ci-dessus est le bon. Si elle indique **Processeur :
+  Intel**, Cadenza n'existe pas encore pour ce Mac.
+- *Sous Windows, vous ne pouvez pas ou ne voulez pas installer ?* Prenez plutôt
+  `Cadenza-0.7.1.exe` (sans « Setup »). C'est la même application en version portable : elle
+  se lance d'un double-clic, sans rien installer, et peut rester sur une clé USB.
+
+**4. Installez.**
+
+- **Windows** — double-cliquez sur le fichier téléchargé. À la fenêtre bleue *« Windows a
+  protégé votre ordinateur »*, cliquez sur **Informations complémentaires**, puis sur
+  **Exécuter quand même** ([voir plus haut](#lavertissement-de-sécurité-au-premier-lancement)).
+  L'installation se fait ensuite toute seule, et Cadenza apparaît dans le menu Démarrer et sur
+  le bureau.
+- **Mac** — double-cliquez sur le fichier `.dmg`, puis faites glisser l'icône Cadenza sur le
+  dossier *Applications* affiché à côté. Ouvrez Cadenza depuis Applications. Au message
+  *« Apple n'a pas pu vérifier… »*, cliquez sur **Terminé**, puis **Réglages Système →
+  Confidentialité et sécurité → Ouvrir quand même**
+  ([voir plus haut](#lavertissement-de-sécurité-au-premier-lancement)). Sur les versions plus
+  anciennes de macOS : clic droit sur l'application → **Ouvrir** → **Ouvrir**.
+- **Linux** — clic droit sur le fichier → **Propriétés** → **Permissions** → autorisez
+  l'exécution comme programme (ou `chmod +x Cadenza-*.AppImage` dans un terminal), puis
+  double-cliquez dessus.
+
+**5. Premiers pas.** Sur l'écran d'accueil, cliquez sur **Explore an example project** : Cadenza
+demande où enregistrer une copie, puis ouvre une petite étude fictive déjà codée, que vous
+pouvez modifier librement. Pour commencer votre propre travail, tapez un nom, cliquez sur **New
+project**, puis sur **Import document…**. L'interface de Cadenza est en anglais pour le
+moment ; le **[guide de démarrage](docs/Cadenza-guide-de-demarrage.pptx)** (diaporama en
+français) explique chaque écran et montre comment mener une analyse thématique, une IPA ou une
+analyse par questionnement analytique.
+
+**Bon à savoir**
+
+- **Votre travail est un seul fichier** se terminant par `.qdaproj`, enregistré là où vous le
+  décidez (Documents, par exemple). Il se sauvegarde et se copie comme n'importe quel fichier.
+  Cadenza conserve aussi des versions antérieures automatiques, dans **History**.
+- **Rien n'est envoyé nulle part.** Cadenza fonctionne sans connexion internet.
+- **Mettre à jour** — Cadenza ne se met pas à jour tout seul. Pour obtenir une version plus
+  récente, téléchargez-la sur la même page et installez-la par-dessus l'ancienne. Vos projets
+  ne sont pas touchés.
+- **Désinstaller** — Windows : *Paramètres → Applications → Applications installées → Cadenza →
+  Désinstaller*. Mac : glissez Cadenza du dossier Applications vers la Corbeille. Linux :
+  supprimez le fichier AppImage. Vos fichiers `.qdaproj` restent là où vous les avez
+  enregistrés.
+- **Un problème ?** Utilisez **Report a bug** en bas de l'écran d'accueil de Cadenza, ou
+  [ouvrez un ticket](https://github.com/seelebrn/cadenza/issues/new/choose) (il faut alors un
+  compte GitHub, gratuit). Vous pouvez écrire en français.
+
+## What it looks like
 
 | Coding an interview | Grouping codes on the board |
 |---|---|
@@ -97,32 +296,6 @@ between clusters and one-click tree or radial layouts — useful for building a 
   made elsewhere as a new project. Documents, codes, coded passages, notes, case attributes and
   clusters (as categories, with their nesting) travel; boards and cluster links are Cadenza-only
   and stay behind.
-
-## Download and install
-
-Grab the latest build from the **[Releases page](https://github.com/seelebrn/cadenza/releases/latest)**.
-There's nothing to build: download the file for your system and run it.
-
-| System | File to download | How to run it |
-|---|---|---|
-| **Windows** | `Cadenza-Setup-<version>.exe` | Run it and follow the installer. `Cadenza-<version>.exe` is the same app as a portable version, no install needed. |
-| **macOS** (Apple Silicon) | `Cadenza-<version>-arm64.dmg` | Open the `.dmg` and drag Cadenza into Applications. |
-| **Linux** | `Cadenza-<version>.AppImage` | Make it executable (`chmod +x Cadenza-*.AppImage`), then double-click it or run it. |
-
-### The first-launch security warning
-
-Cadenza isn't signed by Apple or Microsoft (signing is paid, and isn't set up for this project),
-so Windows and macOS show a security warning the first time you open it. This is expected, and
-is the same warning any small unsigned app gets — comparable open-source QDA tools such as
-QualCoder show it too.
-
-- **Windows** — at "Windows protected your PC", click **More info**, then **Run anyway**.
-- **macOS** — at "Apple could not verify 'Cadenza' is free of malware…", open **System Settings
-  → Privacy & Security**, scroll to the message about Cadenza, and click **Open Anyway**. On
-  older macOS versions, right-click the app → **Open** → **Open** instead.
-- **Linux** — AppImages usually run without a warning.
-
-You only need to do this once per computer.
 
 ## Development
 

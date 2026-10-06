@@ -3956,3 +3956,32 @@ Four screenshots of the example project, captured over the DevTools protocol at 
 (`Page.captureScreenshot` after driving the UI): workspace with a coded interview, the board
 fitted to one superordinate cluster through the new find box, retrieval filtered to one
 document, and the home screen. They head the README in a two-by-two table.
+
+### Install guide for newcomers, and a French getting-started deck (2026-10-06)
+
+Asked for: make installation clearer in the README, in French and English, at the very top, for
+people who have never used GitHub; put the security warnings up front too; and a slide deck for
+new users covering installation, thematic analysis, IPA, AQA, and whatever else helps beginners.
+
+README: the old "Download and install" section (far down, a table and a short note) is replaced
+by two guides right under the description, English then French, each with the security warning
+as its own subsection before the steps (what the window says, which link to click, why it
+appears), then five numbered steps (the releases page, the Assets list and which single file to
+take, install per system, first steps), and a "good to know" list (one .qdaproj file, nothing
+sent anywhere, no auto-update, uninstalling, where to report a problem). A bilingual
+`[!IMPORTANT]` callout repeats the warning above both guides. Facts checked against the build
+config and the v0.7.1 release: Mac builds are Apple-silicon only, there is no auto-updater, and
+the portable Windows exe exists.
+
+Deck: `docs/Cadenza-guide-de-demarrage.pptx`, 31 slides in French, built with pptxgenjs as a
+themed, sectioned deck (layouts, placeholders, speaker notes). Six parts: install (download
+schematic, the security warning with a schematic of each dialog, install/update/uninstall table,
+first project), basics (tabs, vocabulary, coding, notes, clusters and board, Analysis), thematic
+analysis (Braun & Clarke's six phases mapped to screens), IPA (Smith, Flowers & Larkin's steps,
+with PETs as clusters under a per-case cluster and GETs above them), AQA (question clusters,
+question/answer notes, results draft by question), and getting started (exports, protecting
+work, ten shortcuts, six beginner traps, other approaches and limits). Thirteen fresh
+screenshots of the example project were captured over the DevTools protocol at 1.5× scale.
+Every button label quoted was checked against the source; the deck says the interface is in
+English and quotes labels as they appear. Rendered through LibreOffice and checked slide by
+slide; the file passes the OOXML validator.

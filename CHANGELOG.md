@@ -6,7 +6,14 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-08
+
 ### Added
+- **A getting-started guide in French** (docs/Cadenza-guide-de-demarrage.pptx, 32 slides):
+  installing on Windows, Mac and Linux, the basics, and how to run a thematic analysis, an IPA and
+  an analyse par questionnement analytique in Cadenza, with beginner tips.
+- **A step-by-step install guide** at the top of the README, in English and French, for people who
+  have never used GitHub, starting with the first-launch security warning.
 - **A readable overview when zoomed far out.** The board now zooms out to 5%, so **Fit view**
   shows even a board of a thousand cards whole. Below 50%, cards are drawn as blocks in their
   code's color instead of unreadable text; below 35%, the names of the top two levels of clusters

@@ -59,17 +59,17 @@ need only one of them, and you can ignore everything else (`.blockmap`, `.yml`,
 
 | Your computer | File to click | Size |
 |---|---|---|
-| **Windows** 10 or 11 | `Cadenza-Setup-0.7.1.exe` | about 90 MB |
-| **Mac** with an Apple chip (M1, M2, M3, M4) | `Cadenza-0.7.1-arm64.dmg` | about 110 MB |
-| **Linux** | `Cadenza-0.7.1.AppImage` | about 130 MB |
+| **Windows** 10 or 11 | `Cadenza-Setup-0.8.0.exe` | about 90 MB |
+| **Mac** with an Apple chip (M1, M2, M3, M4) | `Cadenza-0.8.0-arm64.dmg` | about 110 MB |
+| **Linux** | `Cadenza-0.8.0.AppImage` | about 130 MB |
 
-The number in the name (0.7.1 here) is the version; yours may be higher. Your browser saves the
+The number in the name (0.8.0 here) is the version; yours may be higher. Your browser saves the
 file in your **Downloads** folder.
 
 - *Not sure which Mac you have?* Apple menu → **About This Mac**. If the line says **Chip:
   Apple M…**, the file above is the right one. If it says **Processor: Intel**, Cadenza has no
   build for that Mac yet.
-- *On Windows, can't or don't want to install?* Take `Cadenza-0.7.1.exe` (without "Setup")
+- *On Windows, can't or don't want to install?* Take `Cadenza-0.8.0.exe` (without "Setup")
   instead. It is the same app in portable form: it runs when you double-click it, with nothing
   installed, and can live on a USB stick.
 
@@ -144,18 +144,18 @@ dizaine de fichiers apparaissent. Un seul vous concerne ; ignorez tous les autre
 
 | Votre ordinateur | Fichier à cliquer | Taille |
 |---|---|---|
-| **Windows** 10 ou 11 | `Cadenza-Setup-0.7.1.exe` | environ 90 Mo |
-| **Mac** à puce Apple (M1, M2, M3, M4) | `Cadenza-0.7.1-arm64.dmg` | environ 110 Mo |
-| **Linux** | `Cadenza-0.7.1.AppImage` | environ 130 Mo |
+| **Windows** 10 ou 11 | `Cadenza-Setup-0.8.0.exe` | environ 90 Mo |
+| **Mac** à puce Apple (M1, M2, M3, M4) | `Cadenza-0.8.0-arm64.dmg` | environ 110 Mo |
+| **Linux** | `Cadenza-0.8.0.AppImage` | environ 130 Mo |
 
-Le nombre dans le nom (ici 0.7.1) est le numéro de version ; le vôtre peut être plus élevé. Le
+Le nombre dans le nom (ici 0.8.0) est le numéro de version ; le vôtre peut être plus élevé. Le
 navigateur enregistre le fichier dans votre dossier **Téléchargements**.
 
 - *Vous ne savez pas quel Mac vous avez ?* Menu Pomme → **À propos de ce Mac**. Si la ligne
   indique **Puce : Apple M…**, le fichier ci-dessus est le bon. Si elle indique **Processeur :
   Intel**, Cadenza n'existe pas encore pour ce Mac.
 - *Sous Windows, vous ne pouvez pas ou ne voulez pas installer ?* Prenez plutôt
-  `Cadenza-0.7.1.exe` (sans « Setup »). C'est la même application en version portable : elle
+  `Cadenza-0.8.0.exe` (sans « Setup »). C'est la même application en version portable : elle
   se lance d'un double-clic, sans rien installer, et peut rester sur une clé USB.
 
 **4. Installez.**

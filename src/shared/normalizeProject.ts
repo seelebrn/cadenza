@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { getDefaultBoardId, materializeChildClusters } from './boardOps'
+import { getDefaultBoardId, materializeChildClusters, resetDefaultBoardClusterLayout } from './boardOps'
 import type { BoardCluster, BoardItem, BoardRecord, CategoryRecord, ProjectData } from './types'
 
 /**
@@ -158,7 +158,26 @@ export function normalizeProjectData(raw: ProjectData): ProjectData {
   // and makes any later change local: only a cluster something actually
   // runs into moves.
   const defaultBoardId = getDefaultBoardId(boards)
-  return defaultBoardId ? materializeChildClusters(normalized, defaultBoardId, null) : normalized
+  if (!defaultBoardId) return normalized
+  return materializeChildClusters(repairCompactDefaultBoard(normalized, defaultBoardId), defaultBoardId, null)
+}
+
+/** "Compact" used to be offered on the default board too. That board draws
+ * every cluster full size, so the header-sized shapes it stored put the
+ * whole top level on top of itself. A file saved that way gets its default
+ * board's layout recomputed, and the setting dropped. */
+function repairCompactDefaultBoard(data: ProjectData, defaultBoardId: string): ProjectData {
+  const board = data.boards.find((b) => b.id === defaultBoardId)
+  if (board?.clusterFrameSize !== 'compact') return data
+  const reset = resetDefaultBoardClusterLayout(data, defaultBoardId)
+  return {
+    ...reset,
+    boards: reset.boards.map((b) => {
+      if (b.id !== defaultBoardId) return b
+      const { clusterFrameSize: _dropped, ...rest } = b
+      return rest
+    })
+  }
 }
 
 /** A category that is its own ancestor (a cycle, possibly of length one)

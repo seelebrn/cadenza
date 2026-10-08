@@ -6,6 +6,24 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Changed
+- **The board's automatic layout fits a screen instead of running off to one side.** Clusters
+  inside a superordinate, and the top-level clusters themselves, used to be set out in a
+  near-square grid whose every column was as wide as the widest cluster; since clusters full of
+  cards are wider than tall, each nesting level roughly doubled the width. A 500-code project
+  came out as a strip of 39,000 × 3,200 px. Each level is now arranged in whichever number of
+  columns brings it closest to a screen's shape, with each column only as wide as what it holds:
+  the same project now lays out as a block of about 9,600 × 8,100 px, with no change to what is
+  nested where or in what order. A board whose layout was saved before this keeps its positions;
+  **Reset placement** applies the new layout.
+
+### Fixed
+- **Compact on the Main board stacked the clusters on top of each other.** Compact sizes frames
+  down to their header, but the Main board always shows every cluster with its codes and notes,
+  so the clusters were drawn full size at header-sized positions. The Compact/Full switch is now
+  offered only on other boards, and a project saved with Compact on its Main board has that
+  board's layout recomputed when opened.
+
 ## [0.7.1] - 2026-10-06
 
 ### Added

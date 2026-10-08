@@ -1607,27 +1607,33 @@ function BoardView(): JSX.Element {
             >
               + Add all clusters
             </button>
-            <div
-              className="flex overflow-hidden rounded border border-slate-300"
-              title="Compact sizes every cluster frame down to just its header, ignoring how many codes/notes it holds — for a board that only ever shows frames, never the items themselves. Switching this resizes whatever's already on the board too, not just future additions from “+ Add all clusters” (not “…and items”, which needs the room)."
-            >
-              <button
-                className={`px-2 py-1 text-xs ${
-                  clusterFrameSize === 'compact' ? 'bg-slate-700 text-white' : 'hover:bg-slate-100'
-                }`}
-                onClick={() => setClusterFrameSize(currentBoard.id, 'compact')}
+            {/* Not on the default board: it shows every code and note inside its
+                clusters, so header-only frames would only be drawn over by
+                full-size ones — compact positions, full-size boxes, the top
+                level stacked on itself. */}
+            {!currentBoard.isDefault && (
+              <div
+                className="flex overflow-hidden rounded border border-slate-300"
+                title="Compact sizes every cluster frame down to just its header, ignoring how many codes/notes it holds — for a board that only ever shows frames, never the items themselves. Switching this resizes whatever's already on the board too, not just future additions from “+ Add all clusters” (not “…and items”, which needs the room)."
               >
-                Compact
-              </button>
-              <button
-                className={`border-l border-slate-300 px-2 py-1 text-xs ${
-                  clusterFrameSize === 'full' ? 'bg-slate-700 text-white' : 'hover:bg-slate-100'
-                }`}
-                onClick={() => setClusterFrameSize(currentBoard.id, 'full')}
-              >
-                Full
-              </button>
-            </div>
+                <button
+                  className={`px-2 py-1 text-xs ${
+                    clusterFrameSize === 'compact' ? 'bg-slate-700 text-white' : 'hover:bg-slate-100'
+                  }`}
+                  onClick={() => setClusterFrameSize(currentBoard.id, 'compact')}
+                >
+                  Compact
+                </button>
+                <button
+                  className={`border-l border-slate-300 px-2 py-1 text-xs ${
+                    clusterFrameSize === 'full' ? 'bg-slate-700 text-white' : 'hover:bg-slate-100'
+                  }`}
+                  onClick={() => setClusterFrameSize(currentBoard.id, 'full')}
+                >
+                  Full
+                </button>
+              </div>
+            )}
             <button
               className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100"
               title="Places every cluster along with its codes/notes, same as this board's normal working view"

@@ -271,3 +271,38 @@ describe('normalizeProjectData — board robustness on load', () => {
     }
   })
 })
+
+describe('a default board saved in Compact mode', () => {
+  it('is repaired on load: the stored header-sized shapes go, the setting is dropped, nothing overlaps', () => {
+    const cat = (id: string, codeIds: string[]) => ({ id, kind: 'theme' as const, name: id, color: '#000', definition: '', codeIds, noteIds: [], segmentIds: [], parentCategoryId: null, createdAt: '0' })
+    const codes = Array.from({ length: 24 }, (_, i) => ({ id: `c${i}`, kind: 'code' as const, name: `c${i}`, color: '#000', definition: '', parentId: null, createdAt: '0' }))
+    const raw = {
+      schemaVersion: 2, id: 'p', name: 'P', createdAt: '0', updatedAt: '0',
+      documents: [], segments: [], codes, codings: [], notes: [], noteCategories: [],
+      categories: [cat('A', codes.slice(0, 12).map((c) => c.id)), cat('B', codes.slice(12).map((c) => c.id))],
+      boards: [{ id: 'b', name: 'Main', isDefault: true, clusterFrameSize: 'compact' }],
+      // Where Compact had put them: header-sized, side by side.
+      boardClusters: [
+        { id: 'sa', boardId: 'b', categoryId: 'A', x: 40, y: 40, width: 220, height: 48, createdAt: '0' },
+        { id: 'sb', boardId: 'b', categoryId: 'B', x: 300, y: 40, width: 220, height: 48, createdAt: '0' }
+      ],
+      boardItems: [], boardLinks: [], clusterLinks: []
+    } as unknown as ProjectData
+    const data = normalizeProjectData(raw)
+    expect(data.boards[0].clusterFrameSize).toBeUndefined()
+    const [a, b] = getVisibleBoardClusters(data.boards[0], data.boardClusters, data.categories)
+    const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    expect(overlap).toBe(false)
+    expect(a.width).toBeGreaterThan(220)
+  })
+
+  it('leaves Compact alone on any other board', () => {
+    const raw = {
+      schemaVersion: 2, id: 'p', name: 'P', createdAt: '0', updatedAt: '0',
+      documents: [], segments: [], codes: [], codings: [], notes: [], noteCategories: [], categories: [],
+      boards: [{ id: 'b', name: 'Main', isDefault: true }, { id: 'w', name: 'Figure', isDefault: false, clusterFrameSize: 'compact' }],
+      boardClusters: [], boardItems: [], boardLinks: [], clusterLinks: []
+    } as unknown as ProjectData
+    expect(normalizeProjectData(raw).boards[1].clusterFrameSize).toBe('compact')
+  })
+})

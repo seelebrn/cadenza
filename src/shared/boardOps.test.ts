@@ -617,11 +617,13 @@ describe('getVisibleBoardClusters', () => {
     }
   })
 
-  it('root column count is capped, never producing an unreasonably wide grid', () => {
+  it('many top-level clusters form a roughly screen-shaped block, not a strip', () => {
     const roots = Array.from({ length: 100 }, (_, i) => makeCategory(`r${i}`))
     const clusters = getVisibleBoardClusters(DEFAULT_BOARD, [], roots)
-    const distinctX = new Set(clusters.map((c) => c.x))
-    expect(distinctX.size).toBeLessThanOrEqual(6)
+    const width = Math.max(...clusters.map((c) => c.x + c.width))
+    const height = Math.max(...clusters.map((c) => c.y + c.height))
+    expect(width / height).toBeGreaterThan(1)
+    expect(width / height).toBeLessThan(2.5)
   })
 
   it('a single root cluster still gets one column (no pointless empty columns)', () => {
@@ -3664,15 +3666,14 @@ describe('adding a top-level cluster after a reset', () => {
     return resetDefaultBoardClusterLayout(makeData({ boards: [board], categories, codes }), 'b1')
   }
 
-  // 9 top-level clusters pack into 3 columns, 10 into 4: the new one
-  // changes the column count and repacks every unplaced one.
-  it('without pinning, a 10th top-level cluster repacks the other nine', () => {
+  // Unplaced top-level clusters are packed as a group, which a new one may
+  // rearrange — the reason the store pins the top level before changes.
+  it('without pinning, a 10th top-level cluster is packed in with the other nine, overlapping none', () => {
     const data = resetBoardWith(9)
-    const before = shown(data)
     const next = createCategory(data, { name: 'New', kind: 'theme', color: '#000' }).data
-    const after = shown(next)
-    const moved = [...before.keys()].some((id) => after.get(id)!.x !== before.get(id)!.x || after.get(id)!.y !== before.get(id)!.y)
-    expect(moved).toBe(true)
+    const after = [...shown(next).values()]
+    expect(after).toHaveLength(10)
+    for (let i = 0; i < after.length; i++) for (let j = i + 1; j < after.length; j++) expect(rectsOverlap(after[i], after[j])).toBe(false)
   })
 
   it('pinning the top level first keeps all nine in place and puts the new one in free space', () => {
@@ -3937,5 +3938,84 @@ describe('addClusterSubtreeToBoard', () => {
     const next = addClusterSubtreeToBoard(first, 'w', 'top')
     expect(next.boardClusters.find((c) => c.categoryId === 'other')).toBe(before)
     expect(next.boardClusters.filter((c) => c.boardId === 'w')).toHaveLength(4)
+  })
+})
+
+describe('computeCategoryLayout packs each level toward a screen shape', () => {
+  // Three levels of wide, card-filled clusters: the shape that used to
+  // double in width at every level (a near-square column count, every
+  // column as wide as the widest sibling).
+  function deepProject(): CategoryRecord[] {
+    const categories: CategoryRecord[] = []
+    let k = 0
+    for (let a = 0; a < 4; a++) {
+      categories.push(makeCategory(`A${a}`))
+      for (let b = 0; b < 3; b++) {
+        categories.push(makeCategory(`A${a}B${b}`, { parentCategoryId: `A${a}` }))
+        for (let c = 0; c < 5; c++) {
+          categories.push(
+            makeCategory(`A${a}B${b}C${c}`, { parentCategoryId: `A${a}B${b}`, codeIds: Array.from({ length: 7 }, () => `k${k++}`) })
+          )
+        }
+      }
+    }
+    return categories
+  }
+  const layout = computeCategoryLayout(deepProject())
+  const byId = new Map(layout.map((l) => [l.categoryId, l]))
+
+  it('the whole board fits a screen shape (neither a strip nor a tower)', () => {
+    const width = Math.max(...layout.map((l) => l.x + l.width))
+    const height = Math.max(...layout.map((l) => l.y + l.height))
+    expect(width / height).toBeGreaterThan(0.8)
+    expect(width / height).toBeLessThan(2.6)
+  })
+
+  it('every superordinate is screen-shaped too', () => {
+    for (const id of ['A0', 'A0B0']) {
+      const box = byId.get(id)!
+      expect(box.width / box.height, id).toBeLessThan(2.6)
+      expect(box.width / box.height, id).toBeGreaterThan(0.6)
+    }
+  })
+
+  it('still nests every child inside its parent, with no two siblings overlapping', () => {
+    const categories = deepProject()
+    for (const c of categories) {
+      const box = byId.get(c.id)!
+      if (c.parentCategoryId) {
+        const parent = byId.get(c.parentCategoryId)!
+        expect(box.x).toBeGreaterThanOrEqual(parent.x)
+        expect(box.y).toBeGreaterThan(parent.y)
+        expect(box.x + box.width).toBeLessThanOrEqual(parent.x + parent.width)
+        expect(box.y + box.height).toBeLessThanOrEqual(parent.y + parent.height)
+      }
+    }
+    const byParent = new Map<string | null, CategoryRecord[]>()
+    for (const c of categories) byParent.set(c.parentCategoryId, [...(byParent.get(c.parentCategoryId) ?? []), c])
+    for (const siblings of byParent.values()) {
+      for (let i = 0; i < siblings.length; i++) {
+        for (let j = i + 1; j < siblings.length; j++) {
+          expect(rectsOverlap(byId.get(siblings[i].id)! as BoardCluster, byId.get(siblings[j].id)! as BoardCluster)).toBe(false)
+        }
+      }
+    }
+  })
+
+  it('keeps siblings in codebook order, reading down each column then across', () => {
+    const kids = deepProject().filter((c) => c.parentCategoryId === 'A0B0').map((c) => byId.get(c.id)!)
+    // The first sibling sits at the top-left of the group.
+    expect(kids[0].x).toBe(Math.min(...kids.map((k) => k.x)))
+    expect(kids[0].y).toBe(Math.min(...kids.map((k) => k.y)))
+  })
+
+  it('a new top-level cluster beside pinned ones lands clear of all of them', () => {
+    const categories = [makeCategory('P', { codeIds: Array.from({ length: 12 }, (_, i) => `p${i}`) }), makeCategory('Q')]
+    const pinned = new Map([['P', { x: 40, y: 40, width: 600, height: 400 }]])
+    const placed = computeCategoryLayout(categories, pinned)
+    const p = placed.find((l) => l.categoryId === 'P')!
+    const q = placed.find((l) => l.categoryId === 'Q')!
+    expect(p.x).toBe(40)
+    expect(rectsOverlap(p as BoardCluster, q as BoardCluster)).toBe(false)
   })
 })

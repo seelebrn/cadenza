@@ -475,6 +475,103 @@ export function computeOwnClusterSize(category: CategoryRecord): { width: number
   }
 }
 
+/** The shape a packed group of clusters should come close to: roughly a
+ * screen (16:10), so that a superordinate cluster, and the board as a
+ * whole, can be seen in one view rather than scrolled along. */
+const TARGET_PACK_ASPECT = 1.6
+/** Above this many columns, packing is no longer tried (a group that wide
+ * is beyond any screen anyway). */
+const MAX_PACK_COLUMNS = 40
+
+interface PackedBoxes {
+  width: number
+  height: number
+  /** Each box's top-left, relative to the group's, in input order. */
+  offsets: Array<{ x: number; y: number }>
+}
+
+/**
+ * Arranges sibling clusters (in their given order) into columns, each
+ * next box going into whichever column is currently shortest, every
+ * column as wide as its own widest box (never narrower than
+ * `minColumnWidth`). Every column count is tried and the one kept is the
+ * arrangement that fits a 16:10 screen at the largest zoom — the smallest
+ * max(width, height × 1.6) — with less area as the tiebreak.
+ *
+ * Replaces a fixed near-square column count (ceil √n) with every column
+ * as wide as the widest sibling: clusters full of cards are wider than
+ * tall, so each nesting level roughly doubled the width without adding
+ * height — a 500-code project laid out as a 39,000 × 3,200 px strip that
+ * no zoom level could show whole.
+ */
+function packBoxes(sizes: Array<{ width: number; height: number }>, minColumnWidth: number): PackedBoxes {
+  if (sizes.length === 0) return { width: 0, height: 0, offsets: [] }
+  let best: (PackedBoxes & { cost: number; area: number }) | null = null
+  for (let columns = 1; columns <= Math.min(sizes.length, MAX_PACK_COLUMNS); columns++) {
+    const bottoms = new Array<number>(columns).fill(0)
+    const widths = new Array<number>(columns).fill(minColumnWidth)
+    const placed = sizes.map((size) => {
+      let column = 0
+      for (let i = 1; i < columns; i++) if (bottoms[i] < bottoms[column]) column = i
+      const y = bottoms[column]
+      bottoms[column] += size.height + CLUSTER_GAP
+      widths[column] = Math.max(widths[column], size.width)
+      return { column, y }
+    })
+    const columnX: number[] = []
+    let x = 0
+    for (const w of widths) {
+      columnX.push(x)
+      x += w + CLUSTER_GAP
+    }
+    const width = x - CLUSTER_GAP
+    const height = Math.max(...bottoms) - CLUSTER_GAP
+    const cost = Math.max(width, height * TARGET_PACK_ASPECT)
+    const area = width * height
+    if (!best || cost < best.cost - 0.5 || (Math.abs(cost - best.cost) <= 0.5 && area < best.area)) {
+      best = { width, height, cost, area, offsets: placed.map((p) => ({ x: columnX[p.column], y: p.y })) }
+    }
+  }
+  return { width: best!.width, height: best!.height, offsets: best!.offsets }
+}
+
+/** Where to put one more box among already-placed ones: the candidate
+ * spots are the board's origin and, for every placed box, just right of
+ * it and just below it; of those that overlap nothing (keeping a
+ * CLUSTER_GAP margin), the one whose resulting overall bounding box fits a
+ * 16:10 screen at the largest zoom wins, then the topmost, then the
+ * leftmost. */
+function findFreeSpot(placed: Rect[], size: { width: number; height: number }): { x: number; y: number } {
+  const candidates = [{ x: GRID_ORIGIN_X, y: GRID_ORIGIN_Y }]
+  for (const b of placed) {
+    candidates.push({ x: b.x + b.width + CLUSTER_GAP, y: b.y }, { x: b.x, y: b.y + b.height + CLUSTER_GAP })
+  }
+  const clashes = (x: number, y: number): boolean =>
+    placed.some(
+      (b) =>
+        x < b.x + b.width + CLUSTER_GAP &&
+        b.x < x + size.width + CLUSTER_GAP &&
+        y < b.y + b.height + CLUSTER_GAP &&
+        b.y < y + size.height + CLUSTER_GAP
+    )
+  const minX = Math.min(GRID_ORIGIN_X, ...placed.map((b) => b.x))
+  const minY = Math.min(GRID_ORIGIN_Y, ...placed.map((b) => b.y))
+  const maxX = Math.max(0, ...placed.map((b) => b.x + b.width))
+  const maxY = Math.max(0, ...placed.map((b) => b.y + b.height))
+  let best: { x: number; y: number; cost: number } | null = null
+  for (const c of candidates) {
+    if (c.x < 0 || c.y < 0 || clashes(c.x, c.y)) continue
+    const width = Math.max(maxX, c.x + size.width) - Math.min(minX, c.x)
+    const height = Math.max(maxY, c.y + size.height) - Math.min(minY, c.y)
+    const cost = Math.max(width, height * TARGET_PACK_ASPECT)
+    if (!best || cost < best.cost - 0.5 || (Math.abs(cost - best.cost) <= 0.5 && (c.y < best.y || (c.y === best.y && c.x < best.x)))) {
+      best = { ...c, cost }
+    }
+  }
+  // Never empty: the spot below the lowest box always clashes with nothing.
+  return best ?? { x: GRID_ORIGIN_X, y: maxY + CLUSTER_GAP }
+}
+
 export interface ComputedClusterLayout {
   categoryId: string
   x: number
@@ -540,38 +637,50 @@ export function computeCategoryLayout(
     list.push(category)
     childrenByParentId.set(category.parentCategoryId, list)
   }
-
-  // Every column in a children-grid shares one width, wide enough for the
-  // widest child — simpler than letting each column take its narrowest
-  // occupant's width (which would risk two adjacent columns' children
-  // overlapping once a wider one lands in either), at the cost of some
-  // unused space next to a narrower sibling in the same column. A single
-  // child by itself still just gets its own natural width, no grid needed.
-  function gridColumnWidth(childSizes: Array<{ width: number }>): number {
-    return Math.max(compact ? COMPACT_LEAF_WIDTH : DEFAULT_CLUSTER_WIDTH, ...childSizes.map((s) => s.width))
-  }
+  const minColumnWidth = compact ? COMPACT_LEAF_WIDTH : DEFAULT_CLUSTER_WIDTH
 
   // Bottom-up: the size a category's box needs to fit its own member cards
-  // plus a grid of its nested children packed inside it. An explicit
-  // (stored) size is a *floor* on that, never a ceiling: the box is shown
-  // at whichever is bigger, so a stored shape shrunk by hand, or sized
-  // before more cards/sub-clusters landed in it, still holds everything
-  // — a cluster's picture is its contents, and its contents always fit.
-  // No cycle guard needed here: every category has exactly one
-  // parentCategoryId, so a cycle can only exist among categories that are
-  // *not* reachable from any real root in the first place
-  // (reparentCategory prevents ever creating one) — this only ever
-  // recurses along real parent->child edges starting from an actual root.
+  // plus its nested children packed inside it. An explicit (stored) size is
+  // a *floor* on that, never a ceiling: the box is shown at whichever is
+  // bigger, so a stored shape shrunk by hand, or sized before more cards/
+  // sub-clusters landed in it, still holds everything — a cluster's picture
+  // is its contents, and its contents always fit. No cycle guard needed
+  // here: every category has exactly one parentCategoryId, so a cycle can
+  // only exist among categories that are *not* reachable from any real
+  // root in the first place (reparentCategory prevents ever creating one) —
+  // this only ever recurses along real parent->child edges starting from an
+  // actual root. Memoized, together with each category's packing, so the
+  // sizing and placing passes read the very same arrangement and can never
+  // disagree about how much room was needed vs. how it's laid out.
+  const sizeCache = new Map<string, { width: number; height: number }>()
+  const packingCache = new Map<string, PackedBoxes>()
+
   function computeSize(category: CategoryRecord): { width: number; height: number } {
+    const cached = sizeCache.get(category.id)
+    if (cached) return cached
     const natural = computeNaturalSize(category)
     const existing = explicitOverrides.get(category.id)
-    if (!existing) return natural
-    // An empty cluster (no cards, no sub-clusters) has nothing to hold —
-    // its box stays exactly as drawn, even below the default size.
-    const hasContent =
-      category.codeIds.length + category.noteIds.length > 0 || (childrenByParentId.get(category.id)?.length ?? 0) > 0
-    if (!hasContent) return { width: existing.width, height: existing.height }
-    return { width: Math.max(existing.width, natural.width), height: Math.max(existing.height, natural.height) }
+    let size = natural
+    if (existing) {
+      // An empty cluster (no cards, no sub-clusters) has nothing to hold —
+      // its box stays exactly as drawn, even below the default size.
+      const hasContent =
+        category.codeIds.length + category.noteIds.length > 0 || (childrenByParentId.get(category.id)?.length ?? 0) > 0
+      size = hasContent
+        ? { width: Math.max(existing.width, natural.width), height: Math.max(existing.height, natural.height) }
+        : { width: existing.width, height: existing.height }
+    }
+    sizeCache.set(category.id, size)
+    return size
+  }
+
+  function childPacking(category: CategoryRecord): PackedBoxes {
+    const cached = packingCache.get(category.id)
+    if (cached) return cached
+    const children = childrenByParentId.get(category.id) ?? []
+    const packing = packBoxes(children.map(computeSize), minColumnWidth)
+    packingCache.set(category.id, packing)
+    return packing
   }
 
   function computeNaturalSize(category: CategoryRecord): { width: number; height: number } {
@@ -579,43 +688,28 @@ export function computeCategoryLayout(
     const ownGrid = compact ? { width: 0, height: 0 } : ownMemberGridSize(category)
     const ownContentHeight = CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING * 2 + ownGrid.height
     // + CLUSTER_PADDING once: the same one-sided inset used everywhere else
-    // in this function (see childX/innerX below), not a margin on both sides.
+    // in this function (see innerX below), not a margin on both sides.
     const ownContentWidth = ownGrid.width > 0 ? ownGrid.width + CLUSTER_PADDING : 0
 
     if (children.length === 0) {
       return compact ? { width: COMPACT_LEAF_WIDTH, height: COMPACT_LEAF_HEIGHT } : computeOwnClusterSize(category)
     }
 
-    const childSizes = children.map((child) => computeSize(child))
-    const columnCount = packGridColumnCount(children.length)
-    const columnWidth = gridColumnWidth(childSizes)
-    const columnHeights = new Array<number>(columnCount).fill(0)
-    for (const size of childSizes) {
-      let column = 0
-      for (let i = 1; i < columnCount; i++) {
-        if (columnHeights[i] < columnHeights[column]) column = i
-      }
-      columnHeights[column] += size.height + CLUSTER_GAP
-    }
-    const childGridWidth = columnCount * columnWidth + (columnCount - 1) * CLUSTER_GAP + CLUSTER_PADDING
-    const childGridHeight = Math.max(...columnHeights) - CLUSTER_GAP // no trailing gap after the last child in the tallest column
-
+    const packing = childPacking(category)
     return {
-      width: Math.max(compact ? COMPACT_LEAF_WIDTH : DEFAULT_CLUSTER_WIDTH, ownContentWidth, childGridWidth),
-      height: Math.max(compact ? COMPACT_LEAF_HEIGHT : DEFAULT_CLUSTER_HEIGHT, ownContentHeight + childGridHeight)
+      width: Math.max(minColumnWidth, ownContentWidth, packing.width + CLUSTER_PADDING),
+      height: Math.max(compact ? COMPACT_LEAF_HEIGHT : DEFAULT_CLUSTER_HEIGHT, ownContentHeight + packing.height)
     }
   }
 
   const result: ComputedClusterLayout[] = []
 
   // Top-down: place this category's box at (x, y) using the size already
-  // determined by computeSize, then recursively place its nested children
-  // in the same grid arrangement computeSize assumed — same children, same
-  // sizes, same greedy packing order, so the two can never disagree about
-  // how much room was actually needed vs. how it's actually laid out.
+  // determined by computeSize, then its nested children at the offsets the
+  // same packing chose.
   //
   // Only a *root* category's stored position is honored. A nested one
-  // always sits at its slot in its parent's children grid, whatever its
+  // always sits at its slot in its parent's arrangement, whatever its
   // stored x/y says (stored size still counts, as a floor) — so nothing
   // can be pushed out of a superordinate, and a stored position can never
   // disagree with the nesting it's actually in. Free placement is for the
@@ -631,63 +725,44 @@ export function computeCategoryLayout(
 
     const children = childrenByParentId.get(category.id) ?? []
     if (children.length > 0) {
-      const childSizes = children.map((child) => computeSize(child))
-      const columnCount = packGridColumnCount(children.length)
-      const columnWidth = gridColumnWidth(childSizes)
+      const packing = childPacking(category)
       const innerX = actualX + CLUSTER_PADDING
       const innerY =
         actualY + CLUSTER_HEADER_HEIGHT + CLUSTER_PADDING + (compact ? 0 : ownMemberGridSize(category).height)
-      const columnBottoms = new Array<number>(columnCount).fill(innerY)
-
-      for (const child of children) {
-        let column = 0
-        for (let i = 1; i < columnCount; i++) {
-          if (columnBottoms[i] < columnBottoms[column]) column = i
-        }
-        const childX = innerX + column * (columnWidth + CLUSTER_GAP)
-        const placed = placeCategory(child, childX, columnBottoms[column])
-        columnBottoms[column] = placed.y + placed.height + CLUSTER_GAP
-      }
+      children.forEach((child, i) => placeCategory(child, innerX + packing.offsets[i].x, innerY + packing.offsets[i].y))
     }
 
     return { y: actualY, height: size.height }
   }
 
+  // The top level. With nothing placed yet (a fresh board, or right after
+  // a reset), the roots are packed like any cluster's children. Once some
+  // have a stored position, those keep it, and each of the others is put in
+  // the free spot — beside or below something already there — that keeps
+  // the whole board closest to a screen's shape, so a new top-level
+  // cluster neither lands on a placed one nor sends the board off to one
+  // side.
   const roots = categories.filter((c) => !c.parentCategoryId)
-  const rootSizes = roots.map((r) => computeSize(r))
-  const rootColumnCount = packGridColumnCount(roots.length)
-  const rootColumnWidth = gridColumnWidth(rootSizes)
-  const columnBottoms = new Array<number>(rootColumnCount).fill(GRID_ORIGIN_Y)
-
-  // Same reservation pass as a children-grid above, and for the same
-  // reason: an explicit root keeps its own real position regardless of
-  // packing, so a still-virtual root must not get shortest-column-
-  // assigned the exact slot it already occupies.
-  const overriddenRoots = roots.filter((r) => explicitOverrides.has(r.id))
-  for (const category of overriddenRoots) {
-    const box = explicitOverrides.get(category.id)!
-    const size = computeSize(category)
-    for (let i = 0; i < rootColumnCount; i++) {
-      const colX = GRID_ORIGIN_X + i * (rootColumnWidth + CLUSTER_GAP)
-      const overlapsColumn = box.x < colX + rootColumnWidth && box.x + size.width > colX
-      if (overlapsColumn) columnBottoms[i] = Math.max(columnBottoms[i], box.y + size.height + CLUSTER_GAP)
+  const pinnedRoots = roots.filter((r) => explicitOverrides.has(r.id))
+  const freeRoots = roots.filter((r) => !explicitOverrides.has(r.id))
+  if (pinnedRoots.length === 0) {
+    const rootPacking = packBoxes(freeRoots.map(computeSize), minColumnWidth)
+    freeRoots.forEach((category, i) =>
+      placeCategory(category, GRID_ORIGIN_X + rootPacking.offsets[i].x, GRID_ORIGIN_Y + rootPacking.offsets[i].y)
+    )
+  } else {
+    const placed: Rect[] = []
+    for (const category of pinnedRoots) {
+      const box = explicitOverrides.get(category.id)!
+      placed.push({ x: box.x, y: box.y, ...computeSize(category) })
+      placeCategory(category, box.x, box.y)
     }
-    placeCategory(category, box.x, box.y)
-  }
-
-  for (const category of roots) {
-    if (explicitOverrides.has(category.id)) continue
-    // Shortest-column-first: a simple masonry pack, not a fixed row/column
-    // assignment, so a handful of very tall roots don't lock in a lopsided
-    // grid — the next one always goes wherever there's actually the least
-    // height used so far.
-    let column = 0
-    for (let i = 1; i < rootColumnCount; i++) {
-      if (columnBottoms[i] < columnBottoms[column]) column = i
+    for (const category of freeRoots) {
+      const size = computeSize(category)
+      const spot = findFreeSpot(placed, size)
+      placed.push({ ...spot, ...size })
+      placeCategory(category, spot.x, spot.y)
     }
-    const x = GRID_ORIGIN_X + column * (rootColumnWidth + CLUSTER_GAP)
-    const placed = placeCategory(category, x, columnBottoms[column])
-    columnBottoms[column] = placed.y + placed.height + CLUSTER_GAP
   }
 
   return result

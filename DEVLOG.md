@@ -3985,3 +3985,46 @@ screenshots of the example project were captured over the DevTools protocol at 1
 Every button label quoted was checked against the source; the deck says the interface is in
 English and quotes labels as they appear. Rendered through LibreOffice and checked slide by
 slide; the file passes the OOXML validator.
+
+### The board fits a screen; Compact no longer stacks the Main board (2026-10-08)
+
+Asked: the board of the 5-interview test project (148 clusters, 1,000 cards) was very hard to
+read. Measured before proposing anything, on the project as saved:
+
+- **Compact on the default board.** The file had `clusterFrameSize: 'compact'` on the Main board.
+  `setClusterFrameSize` re-lays out the board at header size (220 × 48) and stores those shapes;
+  but the default board's renderer always lays clusters out at full size, with stored root
+  positions honored and stored sizes as floors. The 14 top-level clusters were drawn 9,748 px
+  wide at positions 280 px apart, covering about three times the board's area. The switch is now
+  rendered only on non-default boards, the store action refuses the default board, and
+  `normalizeProjectData` repairs a saved default board in compact mode (layout reset, setting
+  dropped) before pinning its top level.
+- **The layout itself.** After a reset, the board was 39,152 × 3,184 px: fitting it would take
+  3.6% zoom, against a 30% minimum. `computeCategoryLayout` packed siblings into ceil(√n)
+  columns, every column as wide as the widest sibling. Leaf clusters are wider than tall (rows
+  of 180 px cards), so widths compounded with depth: 764 → 2,392 → 4,844 → 9,748 px, four of
+  those side by side.
+
+The children of every cluster, and the top level when nothing is pinned, now go through
+`packBoxes`. It tries every column count (up to 40), assigns siblings in codebook order to the
+shortest column, gives each column its own widest member's width, and keeps the arrangement
+minimizing max(width, 1.6 × height): the box that fits a 16:10 screen at the largest zoom, with
+less area as the tiebreak. Sizes and packings are memoized per category, so the sizing pass and
+the placing pass read the same arrangement. When some roots are pinned (the normal state of the
+default board after a reset or a load), each unpinned root goes to the free candidate spot
+(origin, right of or below each placed box, clear by CLUSTER_GAP) that keeps the overall bounding
+box closest to the same shape. A first attempt stacked all unpinned roots below the pinned ones,
+which broke "un-nesting moves nothing else": the un-nested cluster, pushed clear below its old
+superordinate, landed where the free roots were.
+
+On the test project: 39,152 × 3,184 (12:1) became 9,584 × 8,052 (1.2:1), 77 M px² instead of
+125 M, fit zoom 3.6% → 8.1%. Target ratios from 1.0 to 2.4 were compared: 1.3–2.0 are within a
+point of each other, 1.6 kept. Verified in the app after a Reset placement: 14 top-level clusters,
+no overlaps, a superordinate nearly whole on screen at 30%. Two tests asserted the old rule (at
+most 6 root columns; a 10th root repacking the others) and now assert the intent (a
+screen-shaped block; no overlaps); new tests cover the aspect at every level, containment and
+sibling separation in a 3-level project, order, placement beside pinned roots, and the repair.
+542 tests pass.
+
+Not done, and needed to see a board this size whole: Fit view stops at 30%, and below about 50%
+cards are unreadable. Those are the semantic-zoom and overview items on the list.

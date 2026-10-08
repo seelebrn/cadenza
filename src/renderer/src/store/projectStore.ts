@@ -872,7 +872,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setClusterFrameSize: (boardId, size) => {
     const { data } = get()
     const board = data?.boards.find((b) => b.id === boardId)
-    if (!data || !board) return
+    // The default board always shows its clusters full size (see the
+    // toolbar, which offers this only on other boards).
+    if (!data || !board || board.isDefault) return
     // Re-lays out (and resizes) whatever's already on the board, not just
     // the preference for future additions — same computeNestedLayout pass
     // "Reset placement" uses on a curated board, just at the new size, so

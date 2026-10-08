@@ -6,6 +6,16 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Added
+- **A readable overview when zoomed far out.** The board now zooms out to 5%, so **Fit view**
+  shows even a board of a thousand cards whole. Below 50%, cards are drawn as blocks in their
+  code's color instead of unreadable text; below 35%, the names of the top two levels of clusters
+  are shown in large type in place of the regular headers. Dragging works as usual, and an
+  **Export as PDF** taken while zoomed out still shows every card in full.
+- **Plan** (board toolbar): the clusters alone, nested, each with its full name and how many codes
+  and notes it holds — the structure of the whole project at a glance, with no cards. Click a
+  cluster to go back to the board, framed on it. Ctrl+wheel zooms.
+
 ### Changed
 - **The board's automatic layout fits a screen instead of running off to one side.** Clusters
   inside a superordinate, and the top-level clusters themselves, used to be set out in a

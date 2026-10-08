@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import type { BoardCluster, CategoryRecord } from '@shared/types'
 import type { DragState } from './boardDragTypes'
-import { MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH } from './boardLayoutConstants'
+import { MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH, OVERVIEW_LABEL_ZOOM } from './boardLayoutConstants'
 
 // A root cluster's fill stays subtle (this is also what a lone,
 // un-nested cluster has always looked like). Each nesting level below
@@ -271,7 +271,10 @@ function ClusterFrame({
           style={{
             width: width / labelScale,
             transform: `translateY(-50%) scale(${labelScale})`,
-            transformOrigin: 'left center'
+            transformOrigin: 'left center',
+            // Below OVERVIEW_LABEL_ZOOM the board draws its own large names for
+            // the top two levels; these would be unreadable and pile up.
+            visibility: zoom < OVERVIEW_LABEL_ZOOM ? 'hidden' : undefined
           }}
         >
         <input

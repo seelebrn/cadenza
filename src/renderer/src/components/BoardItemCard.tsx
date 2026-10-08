@@ -17,6 +17,11 @@ interface BoardItemCardProps {
   y: number
   isDragging: boolean
   isSnapping: boolean
+  /** Zoomed out far enough that a card's text can't be read anyway: draw
+   * it as a plain block in its code's (or note category's) color — the
+   * clusters' shape and color then read at a glance instead of a field of
+   * grey smudges, and the board renders far less. Dragging still works. */
+  simplified?: boolean
   /** realId is passed when a virtual item just materialized, since item.id
    * (a "virtual:..." marker) won't exist in boardItems yet. */
   onStartDrag: (e: React.MouseEvent, realId?: string) => void
@@ -29,6 +34,7 @@ function BoardItemCard({
   y,
   isDragging,
   isSnapping,
+  simplified = false,
   onStartDrag
 }: BoardItemCardProps): JSX.Element | null {
   const data = useProjectStore((s) => s.data)
@@ -57,6 +63,28 @@ function BoardItemCard({
   // (see getVisibleBoardItems).
   const isDefaultBoard = data.boards.find((b) => b.id === boardId)?.isDefault ?? false
   const isDeleteFromProject = isDefaultBoard && item.refType !== 'segment'
+
+  if (simplified) {
+    const tint = description.color ?? '#94a3b8'
+    return (
+      <div
+        className="absolute cursor-move select-none rounded"
+        style={{ left: x, top: y, width: CARD_WIDTH, height: CARD_HEIGHT, backgroundColor: `${tint}66`, border: `2px solid ${tint}` }}
+        title={description.label}
+        onMouseDown={(e) => {
+          if (e.button !== 0) return
+          if (isVirtual) onStartDrag(e, addItemToBoard(boardId, item.refType, item.refId, item.x, item.y) ?? undefined)
+          else onStartDrag(e)
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          if (item.refType === 'code') setInspectedCodeId(item.refId)
+          else if (item.refType === 'note') setInspectedNoteId(item.refId)
+        }}
+        onDragStart={(e) => e.preventDefault()}
+      />
+    )
+  }
 
   return (
     <div

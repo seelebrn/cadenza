@@ -7,3 +7,11 @@
  * needs to know about. */
 export const MIN_CLUSTER_WIDTH = 140
 export const MIN_CLUSTER_HEIGHT = 100
+
+/** Below this zoom, board cards are drawn as plain colored blocks (their
+ * text is unreadable anyway) — see BoardItemCard's `simplified`. */
+export const SIMPLIFIED_CARD_ZOOM = 0.5
+/** Below this zoom, the board shows large on-screen names for its top two
+ * levels of clusters instead of the regular headers, which would be too
+ * small to read and would pile on each other. */
+export const OVERVIEW_LABEL_ZOOM = 0.35

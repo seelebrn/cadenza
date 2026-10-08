@@ -4028,3 +4028,31 @@ sibling separation in a 3-level project, order, placement beside pinned roots, a
 
 Not done, and needed to see a board this size whole: Fit view stops at 30%, and below about 50%
 cards are unreadable. Those are the semantic-zoom and overview items on the list.
+
+### Overview zoom and the board's Plan (2026-10-08)
+
+Follow-up to the screen-shaped layout: the 500-code test board now lays out as about 9,600 ×
+8,100 px, which still needs ~8% zoom to see whole, while the minimum was 30% and cards are
+unreadable below about 50%.
+
+**Semantic zoom.** MIN_ZOOM goes from 0.3 to 0.05, so Fit view reaches the whole board (8% on
+the test project). Two thresholds in boardLayoutConstants: below SIMPLIFIED_CARD_ZOOM (0.5)
+BoardItemCard renders `simplified`, a plain block tinted with the code's or note category's
+color (the same drag and right-click handlers, the label as tooltip; a card being snapped keeps
+its full rendering); below OVERVIEW_LABEL_ZOOM (0.35) the board draws large on-screen names for
+depth-0 clusters (top-left, 18 px on screen, allowed up to 280 px on screen even past a narrow
+frame) and depth-1 clusters (centered, 13 px, only when the frame is at least 90 px wide on
+screen), and ClusterFrame hides its regular header text, which at that scale piled up
+unreadably. Measured: Fit view on the test project in ~190 ms with 1,000 simplified cards and 17
+large names. Board PDF export clones the live DOM, so it now first switches to full detail
+(`detailZoom` = 1 while exporting, two animation frames before cloning): checked in the app, an
+export started at 8% renders 1,000 full cards.
+
+**Plan.** A first version reused computeCategoryLayout in compact mode, but a leaf there is 220
+px wide, 57 px on screen once the whole plan fits, and every name truncated. BoardPlanView now
+lets the page lay the clusters out: nested flex-wrap boxes, each as wide as its name plus its
+counts ("5 codes · 2 notes"), top levels in larger type, Ctrl+wheel zoom re-wrapping to the
+width. It trades the board's spatial arrangement for complete, readable names. Clicking a
+cluster leaves the plan and asks the board to reveal it (the existing boardFocus request).
+Checked in the app: 148 clusters rendered in ~110 ms, every name whole, a click lands on the
+board at 100% with the cluster ringed. 542 tests pass.

@@ -31,7 +31,8 @@ import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
 import type { BoardCluster, BoardItem, CategoryKind } from '@shared/types'
 import BoardItemCard from './BoardItemCard'
 import type { DragState, Position } from './boardDragTypes'
-import { MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH } from './boardLayoutConstants'
+import { MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH, OVERVIEW_LABEL_ZOOM, SIMPLIFIED_CARD_ZOOM } from './boardLayoutConstants'
+import BoardPlanView from './BoardPlanView'
 import ClusterFrame from './ClusterFrame'
 import { normalizeForFilter } from '../lib/noteFilter'
 
@@ -46,7 +47,10 @@ const CANVAS_WIDTH = 2400
 const CANVAS_HEIGHT = 1600
 const PALETTE = ['#8b5cf6', '#3b82f6', '#22c55e', '#f97316', '#ef4444', '#14b8a6', '#eab308', '#ec4899']
 
-const MIN_ZOOM = 0.3
+// Low enough for Fit view to show a board of a thousand cards whole; below
+// SIMPLIFIED_CARD_ZOOM and OVERVIEW_LABEL_ZOOM the board switches to a
+// readable overview (colored blocks, large cluster names).
+const MIN_ZOOM = 0.05
 const MAX_ZOOM = 2.5
 const ZOOM_WHEEL_SENSITIVITY = 0.0015
 // Empty margin left around everything when "Fit view" zooms to show it all.
@@ -243,6 +247,10 @@ function BoardView(): JSX.Element {
   // actually on screen.
   const canvasRef = useRef<HTMLDivElement>(null)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+  /** The zoom the overview decisions (simplified cards, large cluster names)
+   * are made at: the real one, except while a PDF export renders the board
+   * at full detail. */
+  const detailZoom = isExportingPdf ? 1 : zoom
   // A dismissible inline banner rather than window.alert() — same native-
   // dialog focus-restoration quirk as confirmingDeleteBoard above, even
   // though this one doesn't gate anything: an alert() closing can leave
@@ -251,6 +259,9 @@ function BoardView(): JSX.Element {
   // "Find on board": the toolbar's search box, and the ring drawn for a
   // moment around whatever was just brought into view (found here, or
   // asked for from elsewhere via the store's boardFocus).
+  // "Plan": the board's clusters alone, as a map (BoardPlanView).
+  const [isPlanView, setIsPlanView] = useState(false)
+  const requestBoardFocus = useWorkspaceUiStore((s) => s.requestBoardFocus)
   const [findQuery, setFindQuery] = useState('')
   const findInputRef = useRef<HTMLInputElement>(null)
   const [highlightBox, setHighlightBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
@@ -305,6 +316,7 @@ function BoardView(): JSX.Element {
   }, [selectedBoardId])
 
   const currentBoard = boards.find((b) => b.id === selectedBoardId) ?? null
+  useEffect(() => setIsPlanView(false), [selectedBoardId])
   const explicitClusters = data?.boardClusters.filter((c) => c.boardId === selectedBoardId) ?? []
   const links = data?.boardLinks.filter((l) => l.boardId === selectedBoardId) ?? []
   const explicitItems = data?.boardItems.filter((i) => i.boardId === selectedBoardId) ?? []
@@ -546,6 +558,10 @@ function BoardView(): JSX.Element {
     const pageHeight = Math.max(...boxes.map((b) => b.y + b.height)) + FIT_VIEW_PADDING
 
     setIsExportingPdf(true)
+    // Render at full detail first (cards with their text, regular cluster
+    // headers): the overview drawing used when zoomed out must not end up
+    // in the PDF. detailZoom below switches as soon as isExportingPdf is set.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     try {
       // The app's own compiled styles (Tailwind utility classes and
       // everything else) — read straight from the live page's already-
@@ -1706,6 +1722,13 @@ function BoardView(): JSX.Element {
               </ul>
             )}
           </span>
+          <button
+            className={`rounded border px-1.5 py-0.5 ${isPlanView ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-300 hover:bg-slate-100'}`}
+            title="Plan: the clusters alone, nested, with what each holds — a map of the whole board that fits on screen. Click a cluster there to come back to it here."
+            onClick={() => setIsPlanView((v) => !v)}
+          >
+            Plan
+          </button>
           <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
           <button
             className="rounded border border-slate-300 px-1.5 py-0.5 hover:bg-slate-100"
@@ -1878,6 +1901,15 @@ function BoardView(): JSX.Element {
           Create a board to start grouping codes, notes, and quotes spatially.
         </div>
       ) : (
+        isPlanView ? (
+        <BoardPlanView
+          categories={currentBoard?.isDefault ? data.categories : data.categories.filter((c) => clusters.some((cl) => cl.categoryId === c.id))}
+          onPick={(categoryId) => {
+            setIsPlanView(false)
+            requestBoardFocus({ kind: 'ref', refType: 'cluster', refId: categoryId })
+          }}
+        />
+        ) : (
         <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-slate-50">
           <div
             ref={canvasRef}
@@ -2021,7 +2053,7 @@ function BoardView(): JSX.Element {
                   isNestTarget={dragNestTarget?.targetClusterId === cluster.id}
                   isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}
                   isExcludedByResize={resizeExcludedCategoryIds.has(cluster.categoryId)}
-                  zoom={zoom}
+                  zoom={detailZoom}
                   onZoomTo={() =>
                     fitViewToBounds(cluster.x, cluster.y, cluster.x + cluster.width, cluster.y + cluster.height)
                   }
@@ -2111,6 +2143,7 @@ function BoardView(): JSX.Element {
                     (dragState?.kind === 'cluster-move' && dragState.memberItemIds.includes(item.id))
                   }
                   isSnapping={pos.isSnapping}
+                  simplified={detailZoom < SIMPLIFIED_CARD_ZOOM && !pos.isSnapping}
                   onStartDrag={(e, realId) => {
                     // A virtual (not-yet-persisted) item materializes into a
                     // real BoardItem right before the drag starts — realId is
@@ -2165,6 +2198,38 @@ function BoardView(): JSX.Element {
                 />
               )
             })}
+
+            {detailZoom < OVERVIEW_LABEL_ZOOM &&
+              data &&
+              clusters.map((cluster) => {
+                const category = data.categories.find((c) => c.id === cluster.categoryId)
+                if (!category) return null
+                const depth = getCategoryDepth(data.categories, category.id)
+                if (depth > 1) return null
+                // Sizes in screen pixels, converted to canvas units.
+                const fontPx = depth === 0 ? 18 : 13
+                if (cluster.width * zoom < (depth === 0 ? 60 : 90)) return null
+                const style =
+                  depth === 0
+                    ? { left: cluster.x, top: cluster.y, maxWidth: Math.max(cluster.width, 280 / zoom) }
+                    : { left: cluster.x + cluster.width / 2, top: cluster.y + cluster.height / 2, maxWidth: cluster.width, transform: 'translate(-50%, -50%)' }
+                return (
+                  <div
+                    key={`overview:${cluster.id}`}
+                    className="pointer-events-none absolute z-20 truncate rounded font-semibold text-white shadow"
+                    style={{
+                      ...style,
+                      backgroundColor: category.color,
+                      fontSize: fontPx / zoom,
+                      lineHeight: 1.25,
+                      padding: `${3 / zoom}px ${8 / zoom}px`
+                    }}
+                  >
+                    {category.kind === 'question' ? '❓ ' : ''}
+                    {category.name}
+                  </div>
+                )
+              })}
 
             {highlightBox && (
               <div
@@ -2312,6 +2377,7 @@ function BoardView(): JSX.Element {
             </div>
           </div>
         </div>
+        )
       )}
     </div>
   )

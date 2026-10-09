@@ -31,10 +31,34 @@ import { getCategoryDepth, getDescendantCategoryIds } from '@shared/categoryOps'
 import type { BoardCluster, BoardItem, CategoryKind } from '@shared/types'
 import BoardItemCard from './BoardItemCard'
 import type { DragState, Position } from './boardDragTypes'
-import { MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH, OVERVIEW_LABEL_ZOOM, SIMPLIFIED_CARD_ZOOM } from './boardLayoutConstants'
+import { MAP_ZOOM, MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH, OVERVIEW_LABEL_ZOOM, SIMPLIFIED_CARD_ZOOM } from './boardLayoutConstants'
 import BoardPlanView from './BoardPlanView'
 import ClusterFrame from './ClusterFrame'
 import { normalizeForFilter } from '../lib/noteFilter'
+import { layoutOverviewLabels, OVERVIEW_LINE_HEIGHT, OVERVIEW_PAD_X, OVERVIEW_PAD_Y } from '../lib/overviewLabels'
+
+/** On-screen width of a string in the board's overview-name font, cached:
+ * the names are re-laid out on every zoom step. */
+const measureCache = new Map<string, number>()
+let measureContext: CanvasRenderingContext2D | null = null
+function measureOverviewText(text: string, fontPx: number): number {
+  const key = `${fontPx}|${text}`
+  const cached = measureCache.get(key)
+  if (cached !== undefined) return cached
+  if (!measureContext) measureContext = document.createElement('canvas').getContext('2d')
+  let width = text.length * fontPx * 0.6
+  if (measureContext) {
+    measureContext.font = `600 ${fontPx}px ${getComputedStyle(document.body).fontFamily}`
+    width = measureContext.measureText(text).width
+  }
+  if (measureCache.size > 20000) measureCache.clear()
+  measureCache.set(key, width)
+  return width
+}
+
+function countLabel(count: number, noun: string): string {
+  return count ? `${count} ${noun}${count === 1 ? '' : 's'}` : ''
+}
 
 // Single source of truth for a card's rendered size lives in boardOps.ts —
 // the cluster auto-layout there needs to know it too, to stack member
@@ -251,6 +275,10 @@ function BoardView(): JSX.Element {
    * are made at: the real one, except while a PDF export renders the board
    * at full detail. */
   const detailZoom = isExportingPdf ? 1 : zoom
+  const isMapMode = detailZoom < MAP_ZOOM
+  // The board's how-to paragraph, folded away behind a "?" by default —
+  // it took a few lines of every board view, zoomed in or out.
+  const [isHelpOpen, setIsHelpOpen] = useState(false)
   // A dismissible inline banner rather than window.alert() — same native-
   // dialog focus-restoration quirk as confirmingDeleteBoard above, even
   // though this one doesn't gate anything: an alert() closing can leave
@@ -347,6 +375,50 @@ function BoardView(): JSX.Element {
     if (!data || !currentBoard) return []
     return getVisibleBoardItems(currentBoard, explicitItems, data.codes, data.notes, data.categories, clusters, links)
   }, [data, currentBoard, explicitItems, clusters, links])
+
+  // Map mode (below MAP_ZOOM): the cards filed in a cluster on this board
+  // are not drawn — the cluster's fill and its name's counts stand for them.
+  const clusteredItemIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (!isMapMode) return ids
+    for (const cluster of clusters) {
+      const category = categoriesById.get(cluster.categoryId)
+      if (category) for (const item of getClusterMemberItems(items, category)) ids.add(item.id)
+    }
+    return ids
+  }, [isMapMode, clusters, items, categoriesById])
+
+  // The large cluster names drawn when zoomed far out (see overviewLabels).
+  const overviewLabels = useMemo(() => {
+    if (!data || detailZoom >= OVERVIEW_LABEL_ZOOM) return []
+    const categoryIdsOnBoard = new Set(clusters.map((c) => c.categoryId))
+    const parentIds = new Set(
+      data.categories.filter((c) => categoryIdsOnBoard.has(c.id) && c.parentCategoryId).map((c) => c.parentCategoryId!)
+    )
+    const inputs = []
+    for (const cluster of clusters) {
+      const category = categoriesById.get(cluster.categoryId)
+      if (!category) continue
+      // In map mode a cluster's cards are hidden: its name says what it
+      // holds instead (the innermost clusters only — for an outer one, its
+      // own few loose cards would read as its total).
+      const detail =
+        isMapMode && !parentIds.has(category.id)
+          ? [countLabel(category.codeIds.length, 'code'), countLabel(category.noteIds.length, 'note')].filter(Boolean).join(' · ')
+          : ''
+      inputs.push({
+        id: cluster.id,
+        x: cluster.x,
+        y: cluster.y,
+        width: cluster.width,
+        height: cluster.height,
+        depth: getCategoryDepth(data.categories, category.id),
+        text: `${category.kind === 'question' ? '❓ ' : ''}${category.name}`,
+        detail: detail || undefined
+      })
+    }
+    return layoutOverviewLabels(inputs, detailZoom, measureOverviewText)
+  }, [data, detailZoom, isMapMode, clusters, categoriesById])
 
   /** The box of a code, note or cluster on this board, if it's here. */
   function boxOfRef(refType: 'code' | 'note' | 'cluster', refId: string): { x: number; y: number; width: number; height: number } | null {
@@ -1742,6 +1814,14 @@ function BoardView(): JSX.Element {
           >
             Reset zoom
           </button>
+          <button
+            className={`rounded border px-1.5 py-0.5 ${isHelpOpen ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-300 hover:bg-slate-100'}`}
+            title={isHelpOpen ? 'Hide how the board works' : 'How the board works: zooming, filing cards, nesting and linking'}
+            aria-expanded={isHelpOpen}
+            onClick={() => setIsHelpOpen((v) => !v)}
+          >
+            ?
+          </button>
         </div>
       </div>
 
@@ -1878,7 +1958,7 @@ function BoardView(): JSX.Element {
         </div>
       )}
 
-      {currentBoard && (
+      {currentBoard && isHelpOpen && (
         <p className="border-b border-slate-100 bg-white px-4 py-1 text-[11px] text-slate-400">
           {currentBoard.isDefault &&
             'Every code, note, and cluster is shown automatically on this default board. '}
@@ -1940,7 +2020,7 @@ function BoardView(): JSX.Element {
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
                 </marker>
               </defs>
-              {linkGeometries.map(({ link, ax, ay, bx, by }) => (
+              {!isMapMode && linkGeometries.map(({ link, ax, ay, bx, by }) => (
                 <line key={link.id} x1={ax} y1={ay} x2={bx} y2={by} stroke="#94a3b8" strokeWidth={2} />
               ))}
               {/* Structural parent/child edges — drawn only where the layout
@@ -2054,6 +2134,7 @@ function BoardView(): JSX.Element {
                   isEnclosedByResize={resizeEnclosedCategoryIds.has(cluster.categoryId)}
                   isExcludedByResize={resizeExcludedCategoryIds.has(cluster.categoryId)}
                   zoom={detailZoom}
+                  isMapMode={isMapMode}
                   onZoomTo={() =>
                     fitViewToBounds(cluster.x, cluster.y, cluster.x + cluster.width, cluster.y + cluster.height)
                   }
@@ -2131,6 +2212,7 @@ function BoardView(): JSX.Element {
             })}
             {items.map((item) => {
               const pos = displayPositions.get(item.id) ?? { x: item.x, y: item.y, isSnapping: false }
+              if (clusteredItemIds.has(item.id) && !pos.isSnapping) return null
               return (
                 <BoardItemCard
                   key={item.id}
@@ -2199,37 +2281,38 @@ function BoardView(): JSX.Element {
               )
             })}
 
-            {detailZoom < OVERVIEW_LABEL_ZOOM &&
-              data &&
-              clusters.map((cluster) => {
-                const category = data.categories.find((c) => c.id === cluster.categoryId)
-                if (!category) return null
-                const depth = getCategoryDepth(data.categories, category.id)
-                if (depth > 1) return null
-                // Sizes in screen pixels, converted to canvas units.
-                const fontPx = depth === 0 ? 18 : 13
-                if (cluster.width * zoom < (depth === 0 ? 60 : 90)) return null
-                const style =
-                  depth === 0
-                    ? { left: cluster.x, top: cluster.y, maxWidth: Math.max(cluster.width, 280 / zoom) }
-                    : { left: cluster.x + cluster.width / 2, top: cluster.y + cluster.height / 2, maxWidth: cluster.width, transform: 'translate(-50%, -50%)' }
-                return (
-                  <div
-                    key={`overview:${cluster.id}`}
-                    className="pointer-events-none absolute z-20 truncate rounded font-semibold text-white shadow"
-                    style={{
-                      ...style,
-                      backgroundColor: category.color,
-                      fontSize: fontPx / zoom,
-                      lineHeight: 1.25,
-                      padding: `${3 / zoom}px ${8 / zoom}px`
-                    }}
-                  >
-                    {category.kind === 'question' ? '❓ ' : ''}
-                    {category.name}
-                  </div>
-                )
-              })}
+            {overviewLabels.map((label) => {
+              const cluster = clusters.find((c) => c.id === label.id)
+              const category = cluster && categoriesById.get(cluster.categoryId)
+              if (!category) return null
+              // Sizes in screen pixels, converted to canvas units.
+              return (
+                <div
+                  key={`overview:${label.id}`}
+                  className="pointer-events-none absolute z-20 overflow-hidden rounded font-semibold text-white shadow"
+                  style={{
+                    left: label.x,
+                    top: label.y,
+                    width: label.widthPx / detailZoom,
+                    backgroundColor: category.color,
+                    fontSize: label.fontPx / detailZoom,
+                    lineHeight: OVERVIEW_LINE_HEIGHT,
+                    padding: `${OVERVIEW_PAD_Y / detailZoom}px ${OVERVIEW_PAD_X / detailZoom}px`
+                  }}
+                >
+                  {label.lines.map((line, i) => (
+                    <div key={i} className="whitespace-nowrap">
+                      {line}
+                    </div>
+                  ))}
+                  {label.detail && (
+                    <div className="whitespace-nowrap font-normal opacity-90" style={{ fontSize: label.detailFontPx / detailZoom }}>
+                      {label.detail}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
 
             {highlightBox && (
               <div
@@ -2348,7 +2431,7 @@ function BoardView(): JSX.Element {
               className="pointer-events-none absolute left-0 top-0"
               style={{ width: canvasSize.width, height: canvasSize.height }}
             >
-              {linkGeometries.map(({ link, midX, midY }) => (
+              {!isMapMode && linkGeometries.map(({ link, midX, midY }) => (
                 <button
                   key={link.id}
                   className="board-export-hide pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-slate-400 bg-white text-[10px] leading-none text-slate-500 shadow hover:border-red-400 hover:text-red-500"

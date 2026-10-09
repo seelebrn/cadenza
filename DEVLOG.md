@@ -4056,3 +4056,31 @@ width. It trades the board's spatial arrangement for complete, readable names. C
 cluster leaves the plan and asks the board to reveal it (the existing boardFocus request).
 Checked in the app: 148 clusters rendered in ~110 ms, every name whole, a click lands on the
 board at 100% with the cluster ringed. 542 tests pass.
+
+### Board readability between 10% and 3% (2026-10-08)
+
+After 0.8.0 the user found the zoomed-out board much better and asked whether the 10%-3% range could
+read better still. Screenshots of the 500-code test project at 10%, 6% and 5% showed four problems:
+a thousand colored card blocks plus the outlines of every sub-cluster made a dense confetti that
+hid the clusters' shape; the overview names (depth 0 and 1 only) were truncated at the frame width
+("Organisation de l'h…") and, at 5-6%, piled on top of each other (a child's name on its parent's,
+the small top-level clusters' names on one another), while depth-2 names never showed; card links
+crossed the overview; and the help paragraph took ~70px of every view.
+
+Changes, approved by the user (#1-#3 of four proposals; packing to the real viewport aspect was
+left out, since it would move existing boards again):
+
+- **Map mode** below `MAP_ZOOM` (0.15): cards filed in a cluster are not rendered at all, cluster
+  frames get a stronger, solid fill (`MAP_FILL_OPACITY_BY_DEPTH`), and the innermost clusters' names
+  carry a "N codes · M notes" line. Unfiled cards still show as blocks. Item links and their unlink
+  buttons are hidden; thematic cluster links stay (they are analytic content).
+- **Overview names by screen space** (`src/renderer/src/lib/overviewLabels.ts`, pure and tested):
+  every cluster is a candidate, outer and bigger first; names are measured with a canvas context,
+  greedily wrapped to two lines, and a nested one is shown whole or not at all. A name that would
+  overlap one already placed slides down inside its cluster, or is dropped if there is no room; a
+  top-level name is tried at 18/14/12px before being dropped.
+- **Help text** behind a "?" toggle in the board toolbar (closed by default).
+
+Verified in the app: at 6% the test project shows 21 names, none overlapping, no truncation except
+on two-line wraps; no card is rendered in map mode (148 frames, 0 cards); Fit view goes from 8% to 9%
+with the help folded. 551 tests pass.

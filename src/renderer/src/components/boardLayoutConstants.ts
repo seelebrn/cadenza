@@ -15,3 +15,9 @@ export const SIMPLIFIED_CARD_ZOOM = 0.5
  * levels of clusters instead of the regular headers, which would be too
  * small to read and would pile on each other. */
 export const OVERVIEW_LABEL_ZOOM = 0.35
+/** Below this zoom the board becomes a map: cards inside clusters are not
+ * drawn at all (even as blocks they are only noise this far out), clusters
+ * are filled with their color, card-to-card links are hidden, and the
+ * cluster names say what each one holds. Cards outside any cluster still
+ * show, as blocks. */
+export const MAP_ZOOM = 0.15

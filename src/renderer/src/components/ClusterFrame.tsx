@@ -12,8 +12,14 @@ import { MIN_CLUSTER_HEIGHT, MIN_CLUSTER_WIDTH, OVERVIEW_LABEL_ZOOM } from './bo
 // enough to actually see the containment at a glance.
 const CLUSTER_FILL_OPACITY_BY_DEPTH = ['0f', '26', '3d', '54']
 
-function fillOpacityForDepth(depth: number): string {
-  return CLUSTER_FILL_OPACITY_BY_DEPTH[Math.min(depth, CLUSTER_FILL_OPACITY_BY_DEPTH.length - 1)]
+// In map mode (BoardView's MAP_ZOOM) the cards are not drawn, so the fills
+// carry the picture on their own: strong enough that each cluster reads as
+// a solid patch of its color, still stepping up with depth.
+const MAP_FILL_OPACITY_BY_DEPTH = ['24', '59', '8c', 'b3']
+
+function fillOpacityForDepth(depth: number, isMapMode = false): string {
+  const table = isMapMode ? MAP_FILL_OPACITY_BY_DEPTH : CLUSTER_FILL_OPACITY_BY_DEPTH
+  return table[Math.min(depth, table.length - 1)]
 }
 
 // Fixed accent for "you're about to become a child of the cluster being
@@ -81,6 +87,8 @@ interface ClusterFrameProps {
    * scaled by it so it stays readable and clickable when zoomed far out,
    * where a 200-item board is actually worked on. */
   zoom: number
+  /** Zoomed out into map mode: cards hidden, the frame filled solid. */
+  isMapMode?: boolean
   /** Double-clicking the frame's own empty area: zoom the board to fit
    * this cluster. */
   onZoomTo: () => void
@@ -107,6 +115,7 @@ function ClusterFrame({
   isDefaultBoard,
   isDimmed,
   zoom,
+  isMapMode = false,
   onZoomTo,
   onStartMove,
   onStartResize,
@@ -167,7 +176,7 @@ function ClusterFrame({
       )}
       <div
         className={`absolute select-none rounded-lg border-2 transition-opacity duration-150 ${
-          isNestTarget || isEnclosedByResize || isExcludedByResize ? 'border-solid' : 'border-dashed'
+          isNestTarget || isEnclosedByResize || isExcludedByResize || isMapMode ? 'border-solid' : 'border-dashed'
         }`}
         style={{
           left: x,
@@ -179,7 +188,7 @@ function ClusterFrame({
             : isExcludedByResize
               ? EXCLUDED_BY_RESIZE_COLOR
               : category.color,
-          backgroundColor: `${category.color}${fillOpacityForDepth(depth)}`,
+          backgroundColor: `${category.color}${fillOpacityForDepth(depth, isMapMode)}`,
           boxShadow: isNestTarget
             ? `0 0 0 3px ${category.color}`
             : isEnclosedByResize

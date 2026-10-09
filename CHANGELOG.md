@@ -6,6 +6,19 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-09
+
+### Changed
+- **The board zoomed far out is a readable map.** Below 15%, the cards inside clusters are no longer
+  drawn (they were only colored confetti at that scale): each cluster is filled with its color, and
+  the innermost ones say how many codes and notes they hold. Card-to-card links are hidden there;
+  the labeled links between clusters stay.
+- **Cluster names when zoomed out** are now shown for any cluster whose name fits on screen, at any
+  depth, not just the top two levels. They wrap onto two lines instead of being cut short, and no
+  longer cover each other: a nested cluster's name moves below its parent's, and a small cluster's
+  name gives way to a bigger one's.
+- **The board's help text** is folded behind a **?** button, giving its lines back to the board.
+
 ## [0.8.0] - 2026-10-08
 
 ### Added

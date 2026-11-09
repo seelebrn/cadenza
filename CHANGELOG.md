@@ -6,6 +6,12 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+### Added
+- **A website for people who don't know GitHub** (https://seelebrn.github.io/cadenza/), in French and
+  English: one download button for the visitor's system that always offers the latest version,
+  install steps per system with the first-launch security warning at the step where it appears, and
+  an overview of what Cadenza does.
+
 ## [0.8.2] - 2026-11-09
 
 ### Fixed

@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="fr" class="l-fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cadenza — analyse qualitative gratuite</title>
+<meta name="description" content="Cadenza est une application gratuite d'analyse qualitative pour Windows, macOS et Linux. Sans compte, sans serveur : vos projets restent sur votre ordinateur.">
+<meta property="og:title" content="Cadenza — analyse qualitative gratuite">
+<meta property="og:description" content="Une application gratuite d'analyse qualitative pour Windows, macOS et Linux. Vos projets restent sur votre ordinateur.">
+<meta property="og:image" content="https://seelebrn.github.io/cadenza/docs/screenshots/workspace.png">
+<link rel="icon" type="image/png" href="build/icon.png">
+<script>
+  // Before first paint, so the page never flashes in the wrong language.
+  (function () {
+    var lang = null
+    try { lang = localStorage.getItem('cadenza-lang') } catch (e) {}
+    if (lang !== 'fr' && lang !== 'en') lang = /^fr\b/i.test(navigator.language || '') ? 'fr' : 'en'
+    var root = document.documentElement
+    root.lang = lang
+    root.className = 'js l-' + lang
+  })()
+</script>
+<style>
+  :root {
+    --paper: #fbfaf6;
+    --surface: #ffffff;
+    --ink: #0f172a;
+    --muted: #55607a;
+    --rule: #e4e1d8;
+    --accent: #1d4ed8;
+    --accent-ink: #ffffff;
+    --warn-bg: #fff6df;
+    --warn-rule: #e9b949;
+    --warn-ink: #5c3d00;
+    --chip: #ffffff;
+    --hl-blue: #bfdbfe;
+    --hl-green: #bbf7d0;
+    --hl-amber: #fde68a;
+    --hl-violet: #ddd6fe;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0f172a;
+      --surface: #182238;
+      --ink: #eef1f7;
+      --muted: #a6b1c6;
+      --rule: #2b3750;
+      --accent: #7aa7ff;
+      --accent-ink: #0f172a;
+      --warn-bg: #33290f;
+      --warn-rule: #b78a22;
+      --warn-ink: #fbe6b0;
+      --chip: #0f172a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 var(--sans); }
+  img { max-width: 100%; height: auto; display: block; }
+  a { color: var(--accent); }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.15; margin: 0; text-wrap: balance; }
+  h2 { font-size: clamp(1.75rem, 3.6vw, 2.4rem); }
+  h3 { font-size: 1.25rem; }
+  p { margin: 0; }
+  code { font: .88em var(--mono); overflow-wrap: anywhere; }
+
+  html.l-fr .en, html.l-en .fr { display: none !important; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 72px 0; border-top: 1px solid var(--rule); }
+  section > .wrap > h2 + p { color: var(--muted); margin-top: 10px; max-width: 62ch; }
+
+  /* Header */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 600 1.3rem var(--serif); color: inherit; text-decoration: none; }
+  .brand img { width: 36px; height: 36px; border-radius: 8px; }
+  .lang { display: flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+  .lang button { border: 0; background: transparent; color: var(--muted); font: 600 .85rem var(--sans); padding: 8px 14px; min-height: 40px; cursor: pointer; }
+  .lang button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+  /* Hero */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; padding: 40px 0 80px; }
+  h1 { font-size: clamp(2.3rem, 4.4vw, 3.3rem); line-height: 1.3; letter-spacing: -.01em; }
+  .hl { color: #0f172a; padding: 0 .12em; background: linear-gradient(transparent 10%, var(--hl) 10%, var(--hl) 94%, transparent 94%); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .hl-a { --hl: var(--hl-blue); }
+  .hl-b { --hl: var(--hl-green); }
+  .lede { font-size: 1.15rem; color: var(--muted); margin-top: 20px; max-width: 34em; }
+  .cta { margin-top: 32px; }
+  .btn { display: inline-flex; flex-direction: column; gap: 2px; background: var(--accent); color: var(--accent-ink); text-decoration: none; padding: 16px 28px; border-radius: 10px; max-width: 100%; }
+  .btn:hover { filter: brightness(1.1); }
+  .btn strong { font-size: 1.2rem; font-weight: 650; }
+  .btn small { font-size: .88rem; opacity: .88; }
+  .others { margin-top: 14px; font-size: .95rem; color: var(--muted); }
+  .others a { margin-left: 4px; margin-right: 8px; white-space: nowrap; }
+  .notice { margin-top: 16px; padding: 12px 16px; background: var(--surface); border-left: 3px solid var(--accent); font-size: .98rem; }
+  .notice[hidden] { display: none; }
+  .facts { list-style: none; margin: 32px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 28px; font-size: .95rem; }
+  .facts li::before { content: "✓"; color: var(--accent); font-weight: 700; margin-right: 7px; }
+  .shot { border-radius: 10px; border: 1px solid var(--rule); background: #fff; box-shadow: 0 24px 60px -24px rgba(15, 23, 42, .4); }
+
+  /* Install */
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 32px 0 28px; }
+  .tabs button { font: 600 1rem var(--sans); color: var(--ink); background: transparent; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 22px; min-height: 44px; cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  html:not(.js) .tabs { display: none; }
+  html.js .panel[hidden] { display: none; }
+  html:not(.js) .panel { margin-bottom: 48px; }
+  .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; max-width: 760px; }
+  .steps > li { counter-increment: step; position: relative; padding: 0 0 32px 60px; }
+  .steps > li::before { content: counter(step); position: absolute; left: 0; top: -6px; font: 600 2.1rem/1 var(--serif); color: var(--accent); width: 40px; text-align: center; }
+  .steps > li:not(:last-child)::after { content: ""; position: absolute; left: 20px; top: 38px; bottom: 6px; width: 1px; background: var(--rule); }
+  .steps h3 { margin-bottom: 6px; }
+  .side { color: var(--muted); font-size: .95rem; margin-top: 8px; }
+  .ui { font-weight: 600; background: var(--chip); border: 1px solid var(--rule); border-radius: 5px; padding: 1px 7px; white-space: nowrap; }
+  .warn { margin-top: 14px; background: var(--warn-bg); border-left: 4px solid var(--warn-rule); color: var(--warn-ink); padding: 14px 18px; border-radius: 0 8px 8px 0; }
+  .warn .ui { color: var(--ink); white-space: normal; }
+  .warn strong { display: block; margin-bottom: 4px; }
+  .why { max-width: 760px; margin-top: 8px; padding-top: 24px; border-top: 1px solid var(--rule); }
+  .why h3 { margin-bottom: 8px; }
+
+  /* Features */
+  .feats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin-top: 36px; }
+  .feats h3 { margin-bottom: 8px; }
+  .feats h3 span.hl { padding: 0 .15em; }
+  .feats p { color: var(--muted); }
+  .hl-c { --hl: var(--hl-amber); }
+  .hl-d { --hl: var(--hl-violet); }
+  .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 48px; }
+  figure { margin: 0; }
+  figcaption { margin-top: 10px; font-size: .95rem; color: var(--muted); }
+
+  /* Start + know */
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; }
+  .two h2 { margin-bottom: 16px; }
+  .two p + p { margin-top: 12px; }
+  .guide { display: inline-block; margin-top: 18px; font-weight: 600; }
+  dl { margin: 0; }
+  dt { font-weight: 650; }
+  dd { margin: 2px 0 16px; color: var(--muted); }
+
+  footer { border-top: 1px solid var(--rule); padding: 32px 0 48px; font-size: .95rem; color: var(--muted); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: space-between; }
+  footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 860px) {
+    .hero, .two { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+    .feats { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+    section { padding: 52px 0; }
+  }
+  @media (max-width: 560px) {
+    .wrap { padding: 0 16px; }
+    .gallery { grid-template-columns: minmax(0, 1fr); }
+    .btn { display: flex; }
+    .steps > li { padding-left: 48px; }
+    .steps > li::before { width: 32px; font-size: 1.8rem; }
+    .steps > li:not(:last-child)::after { left: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#"><img src="build/icon.png" alt="">Cadenza</a>
+    <div class="lang" role="group" aria-label="Langue / Language">
+      <button type="button" data-lang="fr" aria-pressed="false">FR</button>
+      <button type="button" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </header>
+
+  <main class="hero">
+    <div>
+      <h1 class="fr">Vos <span class="hl hl-a">entretiens</span>, analysés <span class="hl hl-b">sur votre ordinateur</span>.</h1>
+      <h1 class="en">Your <span class="hl hl-a">interviews</span>, analysed <span class="hl hl-b">on your own computer</span>.</h1>
+      <p class="lede fr">Cadenza est une application gratuite d'analyse qualitative. Codez, annotez et regroupez vos données pour une analyse thématique, une IPA ou une analyse par questionnement analytique.</p>
+      <p class="lede en">Cadenza is a free qualitative data analysis app. Code, annotate and group your material for a thematic analysis, an IPA or an analysis through analytic questioning.</p>
+
+      <div class="cta">
+        <a class="btn" id="dl" href="https://github.com/seelebrn/cadenza/releases/latest">
+          <strong id="dl-label"><span class="fr">Télécharger Cadenza</span><span class="en">Download Cadenza</span></strong>
+          <small id="dl-meta"><span class="fr">Windows, Mac et Linux</span><span class="en">Windows, Mac and Linux</span></small>
+        </a>
+        <p class="others" id="others" hidden>
+          <span class="fr">Autre système :</span><span class="en">Another system:</span>
+          <a data-asset="windows" data-os="windows" href="https://github.com/seelebrn/cadenza/releases/latest">Windows</a>
+          <a data-asset="mac" data-os="mac" href="https://github.com/seelebrn/cadenza/releases/latest">Mac</a>
+          <a data-asset="linux" data-os="linux" href="https://github.com/seelebrn/cadenza/releases/latest">Linux</a>
+        </p>
+        <p class="notice" id="notice" role="status" hidden>
+          <span class="fr"><strong>Le téléchargement démarre.</strong> Quand il est terminé, suivez les étapes <a href="#install">ci-dessous</a> : un avertissement de sécurité va s'afficher, c'est normal.</span>
+          <span class="en"><strong>Your download is starting.</strong> When it finishes, follow the steps <a href="#install">below</a>: a security warning will appear, which is expected.</span>
+        </p>
+        <p class="notice" id="mobile-note" hidden>
+          <span class="fr">Cadenza s'installe sur un ordinateur, pas sur un téléphone ou une tablette. Ouvrez cette page depuis votre ordinateur pour le télécharger.</span>
+          <span class="en">Cadenza runs on a computer, not on a phone or tablet. Open this page on your computer to download it.</span>
+        </p>
+      </div>
+
+      <ul class="facts">
+        <li><span class="fr">Gratuit</span><span class="en">Free</span></li>
+        <li><span class="fr">Sans compte</span><span class="en">No account</span></li>
+        <li><span class="fr">Fonctionne hors ligne</span><span class="en">Works offline</span></li>
+        <li><span class="fr">Rien n'est envoyé nulle part</span><span class="en">Nothing is sent anywhere</span></li>
+      </ul>
+    </div>
+    <img class="shot" width="1400" height="880" src="docs/screenshots/workspace.png" data-alt-fr="Cadenza : un entretien dont les passages sont surlignés par code, avec la liste des codes à droite" data-alt-en="Cadenza: an interview with passages highlighted by code, the codebook on the right" alt="">
+  </main>
+</div>
+
+<section id="install">
+  <div class="wrap">
+    <h2><span class="fr">Installer Cadenza en deux minutes</span><span class="en">Install Cadenza in two minutes</span></h2>
+    <p><span class="fr">Vous téléchargez un fichier et vous l'ouvrez. Pas de compte à créer, rien à configurer.</span><span class="en">You download one file and open it. No account to create, nothing to configure.</span></p>
+
+    <div class="tabs" role="tablist" aria-label="Système / System">
+      <button type="button" role="tab" id="tab-windows" aria-controls="panel-windows" data-tab="windows">Windows</button>
+      <button type="button" role="tab" id="tab-mac" aria-controls="panel-mac" data-tab="mac">Mac</button>
+      <button type="button" role="tab" id="tab-linux" aria-controls="panel-linux" data-tab="linux">Linux</button>
+    </div>
+
+    <div class="panel" id="panel-windows" role="tabpanel" aria-labelledby="tab-windows">
+      <ol class="steps">
+        <li>
+          <h3><span class="fr">Téléchargez l'installeur</span><span class="en">Download the installer</span></h3>
+          <p><a data-asset="windows" href="https://github.com/seelebrn/cadenza/releases/latest"><span data-file="windows">Cadenza-Setup.exe</span></a> <span class="fr">pour Windows 10 ou 11. Il arrive dans votre dossier <b>Téléchargements</b>.</span><span class="en">for Windows 10 or 11. It lands in your <b>Downloads</b> folder.</span></p>
+          <p class="side"><span class="fr">Vous ne pouvez pas installer de logiciel sur cet ordinateur ? Prenez la </span><span class="en">Can't install software on this computer? Take the </span><a data-asset="portable" href="https://github.com/seelebrn/cadenza/releases/latest"><span class="fr">version portable</span><span class="en">portable version</span></a><span class="fr"> : elle se lance d'un double-clic, sans rien installer, et peut rester sur une clé USB.</span><span class="en">: it runs on a double-click with nothing installed, and can live on a USB stick.</span></p>
+        </li>
+        <li>
+          <h3><span class="fr">Ouvrez le fichier et passez l'avertissement</span><span class="en">Open the file and get past the warning</span></h3>
+          <p><span class="fr">Double-cliquez sur le fichier téléchargé.</span><span class="en">Double-click the downloaded file.</span></p>
+          <div class="warn">
+            <div class="fr"><strong>Une fenêtre bleue dit « Windows a protégé votre ordinateur » ? C'est normal.</strong>Cliquez sur le petit lien <span class="ui">Informations complémentaires</span> dans le texte, puis sur le bouton <span class="ui">Exécuter quand même</span> qui apparaît.</div>
+            <div class="en"><strong>A blue window says "Windows protected your PC"? That's expected.</strong>Click the small <span class="ui">More info</span> link in the text, then the <span class="ui">Run anyway</span> button that appears.</div>
+          </div>
+        </li>
+        <li>
+          <h3><span class="fr">Lancez Cadenza</span><span class="en">Start Cadenza</span></h3>
+          <p><span class="fr">L'installation se fait toute seule. Cadenza apparaît ensuite dans le menu Démarrer et sur le bureau.</span><span class="en">The installer does the rest. Cadenza then appears in the Start menu and on the desktop.</span></p>
+        </li>
+      </ol>
+    </div>
+
+    <div class="panel" id="panel-mac" role="tabpanel" aria-labelledby="tab-mac">
+      <ol class="steps">
+        <li>
+          <h3><span class="fr">Téléchargez le fichier</span><span class="en">Download the file</span></h3>
+          <p><a data-asset="mac" href="https://github.com/seelebrn/cadenza/releases/latest"><span data-file="mac">Cadenza-arm64.dmg</span></a> <span class="fr">pour les Mac à puce Apple (M1, M2, M3, M4).</span><span class="en">for Macs with an Apple chip (M1, M2, M3, M4).</span></p>
+          <p class="side"><span class="fr">Vous ne savez pas quel Mac vous avez ? Menu Pomme → <b>À propos de ce Mac</b>. Si la ligne indique <b>Processeur : Intel</b>, Cadenza n'existe pas encore pour ce Mac.</span><span class="en">Not sure which Mac you have? Apple menu → <b>About This Mac</b>. If the line says <b>Processor: Intel</b>, Cadenza has no build for that Mac yet.</span></p>
+        </li>
+        <li>
+          <h3><span class="fr">Installez</span><span class="en">Install it</span></h3>
+          <p><span class="fr">Double-cliquez sur le fichier <code>.dmg</code>, puis faites glisser l'icône Cadenza sur le dossier <b>Applications</b> affiché à côté.</span><span class="en">Double-click the <code>.dmg</code> file, then drag the Cadenza icon onto the <b>Applications</b> folder shown next to it.</span></p>
+        </li>
+        <li>
+          <h3><span class="fr">Ouvrez Cadenza et passez l'avertissement</span><span class="en">Open Cadenza and get past the warning</span></h3>
+          <p><span class="fr">Ouvrez Cadenza depuis le dossier Applications.</span><span class="en">Open Cadenza from the Applications folder.</span></p>
+          <div class="warn">
+            <div class="fr"><strong>« Apple n'a pas pu vérifier que "Cadenza" ne contenait pas de logiciel malveillant » ? C'est normal.</strong>Cliquez sur <span class="ui">Terminé</span> (pas sur <em>Placer dans la corbeille</em>). Ouvrez <span class="ui">Réglages Système → Confidentialité et sécurité</span>, descendez jusqu'à la ligne qui concerne Cadenza, cliquez sur <span class="ui">Ouvrir quand même</span>, puis confirmez.</div>
+            <div class="en"><strong>"Apple could not verify 'Cadenza' is free of malware that may harm your Mac"? That's expected.</strong>Click <span class="ui">Done</span> (not <em>Move to Trash</em>). Open <span class="ui">System Settings → Privacy &amp; Security</span>, scroll down to the line about Cadenza, click <span class="ui">Open Anyway</span>, then confirm.</div>
+          </div>
+          <p class="side"><span class="fr">Sur les versions plus anciennes de macOS : clic droit sur l'application → <b>Ouvrir</b> → <b>Ouvrir</b>.</span><span class="en">On older versions of macOS: right-click the app → <b>Open</b> → <b>Open</b>.</span></p>
+        </li>
+      </ol>
+    </div>
+
+    <div class="panel" id="panel-linux" role="tabpanel" aria-labelledby="tab-linux">
+      <ol class="steps">
+        <li>
+          <h3><span class="fr">Téléchargez le fichier</span><span class="en">Download the file</span></h3>
+          <p><a data-asset="linux" href="https://github.com/seelebrn/cadenza/releases/latest"><span data-file="linux">Cadenza.AppImage</span></a></p>
+        </li>
+        <li>
+          <h3><span class="fr">Autorisez-le à s'exécuter</span><span class="en">Allow it to run</span></h3>
+          <p><span class="fr">Clic droit sur le fichier → <b>Propriétés</b> → <b>Permissions</b> → autorisez l'exécution comme programme. Ou, dans un terminal : <code>chmod +x Cadenza-*.AppImage</code></span><span class="en">Right-click the file → <b>Properties</b> → <b>Permissions</b> → allow it to run as a program. Or, in a terminal: <code>chmod +x Cadenza-*.AppImage</code></span></p>
+        </li>
+        <li>
+          <h3><span class="fr">Lancez Cadenza</span><span class="en">Start Cadenza</span></h3>
+          <p><span class="fr">Double-cliquez sur le fichier. Il n'y a rien d'autre à installer.</span><span class="en">Double-click the file. There is nothing else to install.</span></p>
+        </li>
+      </ol>
+    </div>
+
+    <div class="why" id="why">
+      <h3><span class="fr">Pourquoi cet avertissement ?</span><span class="en">Why the warning?</span></h3>
+      <p class="fr">Windows et macOS avertissent pour toute application dont l'auteur n'a pas payé de certificat de signature à Microsoft ou à Apple, ce qui est le cas de Cadenza, projet gratuit. Cela ne signifie pas que quelque chose a été détecté dans le fichier. L'avertissement n'apparaît que la première fois, et d'autres outils de recherche gratuits, comme QualCoder, affichent le même. Le <a href="https://github.com/seelebrn/cadenza">code source de Cadenza</a> est public.</p>
+      <p class="en">Windows and macOS warn about any app whose author has not paid Microsoft or Apple for a signing certificate, which Cadenza, as a free project, has not. It does not mean something was detected in the file. The warning appears only the first time, and other free research tools, such as QualCoder, show the same one. <a href="https://github.com/seelebrn/cadenza">Cadenza's source code</a> is public.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="fr">Ce que vous pouvez faire</span><span class="en">What you can do</span></h2>
+    <div class="feats">
+      <div>
+        <h3><span class="hl hl-c fr">Coder, mais pas seulement</span><span class="hl hl-c en">Coding, and more</span></h3>
+        <p class="fr">Les codes, les items d'inventaire et les notes sont des façons de travailler à égalité. Une note peut prendre la forme d'une question et de sa réponse, pour une analyse par questionnement analytique.</p>
+        <p class="en">Codes, inventory items and free-form notes all count as equal ways to work with a passage. A note can be a question and its answer, for an analysis through analytic questioning.</p>
+      </div>
+      <div>
+        <h3><span class="hl hl-a fr">Des citations qui tiennent</span><span class="hl hl-a en">Quotes that hold</span></h3>
+        <p class="fr">Corrigez une erreur de transcription ou anonymisez un nom après l'import : vos codes et vos notes se replacent automatiquement sur le bon passage.</p>
+        <p class="en">Fix a transcription error or redact a name after import: your codes and notes re-anchor themselves to the right passage automatically.</p>
+      </div>
+      <div>
+        <h3><span class="hl hl-d fr">Un tableau pour penser</span><span class="hl hl-d en">A board to think on</span></h3>
+        <p class="fr">Regroupez codes, notes et citations en clusters imbriqués, reliez-les et construisez votre carte thématique, même sur un projet de plusieurs centaines de codes.</p>
+        <p class="en">Group codes, notes and quotes into nested clusters, link them and build your thematic map, even on a project with hundreds of codes.</p>
+      </div>
+    </div>
+    <div class="gallery">
+      <figure>
+        <img class="shot" width="1400" height="880" src="docs/screenshots/retrieval.png" data-alt-fr="Les passages codés, filtrés par code, document et attribut de cas" data-alt-en="Coded passages filtered by code, document and case attribute" alt="">
+        <figcaption><span class="fr">Relire tous les passages derrière un code ou une question.</span><span class="en">Read every passage behind a code or a question.</span></figcaption>
+      </figure>
+      <figure>
+        <img class="shot" width="1400" height="880" src="docs/screenshots/board.png" data-alt-fr="Le tableau : des clusters de codes et de notes, imbriqués et reliés" data-alt-en="The board: clusters of codes and notes, nested and linked" alt="">
+        <figcaption><span class="fr">Regrouper les codes sur le tableau. Captures tirées du projet d'exemple, une étude fictive.</span><span class="en">Grouping codes on the board. Screenshots from the example project, a fictional study.</span></figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap two">
+    <div>
+      <h2><span class="fr">Vos premiers pas</span><span class="en">Your first steps</span></h2>
+      <p class="fr">Sur l'écran d'accueil, cliquez sur <span class="ui">Explore an example project</span> : Cadenza ouvre une petite étude fictive déjà codée, que vous pouvez modifier librement.</p>
+      <p class="en">On the home screen, click <span class="ui">Explore an example project</span>: Cadenza opens a small fictional study, already coded, that you can change freely.</p>
+      <p class="fr">Pour commencer votre propre travail, tapez un nom, cliquez sur <span class="ui">New project</span>, puis sur <span class="ui">Import document…</span>. L'interface de Cadenza est en anglais pour le moment.</p>
+      <p class="en">To start your own work, type a name and click <span class="ui">New project</span>, then <span class="ui">Import document…</span>.</p>
+      <a class="guide" href="docs/Cadenza-guide-de-demarrage.pptx"><span class="fr">Télécharger le guide de démarrage (diaporama)</span><span class="en">Download the getting-started guide (slides, in French)</span></a>
+      <p class="side"><span class="fr">Chaque écran expliqué, et comment mener une analyse thématique, une IPA ou une analyse par questionnement analytique.</span><span class="en">Every screen explained, and how to run a thematic analysis, an IPA or an analysis through analytic questioning.</span></p>
+    </div>
+    <div>
+      <h2><span class="fr">Bon à savoir</span><span class="en">Good to know</span></h2>
+      <dl class="fr">
+        <dt>Votre travail tient dans un seul fichier</dt>
+        <dd>Il se termine par <code>.qdaproj</code>, se sauvegarde et se copie comme n'importe quel fichier. Cadenza garde aussi des versions antérieures automatiques.</dd>
+        <dt>Mettre à jour</dt>
+        <dd>Cadenza ne se met pas à jour tout seul. Revenez sur cette page, téléchargez la nouvelle version et installez-la par-dessus l'ancienne. Vos projets ne sont pas touchés.</dd>
+        <dt>Désinstaller</dt>
+        <dd>Vos fichiers <code>.qdaproj</code> restent là où vous les avez enregistrés. Windows : Paramètres → Applications → Applications installées. Mac : glissez Cadenza vers la Corbeille. Linux : supprimez le fichier AppImage.</dd>
+        <dt>Un problème ?</dt>
+        <dd>Utilisez <b>Report a bug</b> en bas de l'écran d'accueil de Cadenza. Vous pouvez écrire en français.</dd>
+      </dl>
+      <dl class="en">
+        <dt>Your work is a single file</dt>
+        <dd>It ends in <code>.qdaproj</code>, and you back it up or copy it like any other file. Cadenza also keeps automatic earlier versions.</dd>
+        <dt>Updating</dt>
+        <dd>Cadenza does not update by itself. Come back to this page, download the new version and install it over the old one. Your projects are not touched.</dd>
+        <dt>Uninstalling</dt>
+        <dd>Your <code>.qdaproj</code> files stay where you saved them. Windows: Settings → Apps → Installed apps. Mac: drag Cadenza to the Trash. Linux: delete the AppImage file.</dd>
+        <dt>Something doesn't work?</dt>
+        <dd>Use <b>Report a bug</b> at the bottom of Cadenza's home screen.</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Cadenza<span id="footer-version"></span></span>
+    <nav>
+      <a href="https://github.com/seelebrn/cadenza"><span class="fr">Code source</span><span class="en">Source code</span></a>
+      <a href="https://github.com/seelebrn/cadenza/blob/main/CHANGELOG.md"><span class="fr">Nouveautés</span><span class="en">What's new</span></a>
+      <a href="https://github.com/seelebrn/cadenza/releases"><span class="fr">Toutes les versions</span><span class="en">All versions</span></a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var RELEASES_PAGE = 'https://github.com/seelebrn/cadenza/releases/latest'
+  var API = 'https://api.github.com/repos/seelebrn/cadenza/releases/latest'
+  var CACHE_KEY = 'cadenza-release'
+  var CACHE_MS = 3600000 // GitHub allows 60 anonymous API calls an hour per address.
+
+  var PATTERNS = {
+    windows: /^Cadenza-Setup-.*\.exe$/,
+    portable: /^Cadenza-[\d.]+\.exe$/,
+    mac: /-arm64\.dmg$/,
+    linux: /\.AppImage$/
+  }
+  var TEXT = {
+    fr: {
+      title: 'Cadenza — analyse qualitative gratuite',
+      download: { windows: 'Télécharger pour Windows', mac: 'Télécharger pour Mac', linux: 'Télécharger pour Linux' },
+      systems: { windows: 'Windows 10 ou 11', mac: 'Mac à puce Apple', linux: 'Linux (AppImage)' },
+      version: 'Version ',
+      unit: ' Mo',
+      fallback: 'Sur la page qui s\'ouvre, choisissez le bon fichier dans « Assets »'
+    },
+    en: {
+      title: 'Cadenza — free qualitative data analysis',
+      download: { windows: 'Download for Windows', mac: 'Download for Mac', linux: 'Download for Linux' },
+      systems: { windows: 'Windows 10 or 11', mac: 'Mac with Apple chip', linux: 'Linux (AppImage)' },
+      version: 'Version ',
+      unit: ' MB',
+      fallback: 'On the page that opens, pick the right file under "Assets"'
+    }
+  }
+
+  var root = document.documentElement
+  var lang = root.classList.contains('l-en') ? 'en' : 'fr'
+  var release = null // { version, assets: { windows: {url, name, size}, ... } }
+  var releaseFailed = false
+
+  function detectSystem() {
+    var ua = navigator.userAgent || ''
+    var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ''
+    if (/Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(platform) && navigator.maxTouchPoints > 1)) return 'mobile'
+    if (/Win/i.test(platform) || /Windows/i.test(ua)) return 'windows'
+    if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) return 'mac'
+    if (/Linux|X11/i.test(platform) || /Linux|X11/i.test(ua)) return 'linux'
+    return 'unknown'
+  }
+  var system = detectSystem()
+  var isComputer = system === 'windows' || system === 'mac' || system === 'linux'
+
+  function all(selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)) }
+
+  function renderHero() {
+    var t = TEXT[lang]
+    var dl = document.getElementById('dl')
+    if (!isComputer) {
+      dl.hidden = true
+      dl.style.display = 'none'
+      return
+    }
+    var asset = release && release.assets[system]
+    dl.href = asset ? asset.url : RELEASES_PAGE
+    document.getElementById('dl-label').textContent = t.download[system]
+    var meta = document.getElementById('dl-meta')
+    if (asset) meta.textContent = t.version + release.version + ' · ' + t.systems[system] + ' · ' + Math.round(asset.size / 1e6) + t.unit
+    else if (releaseFailed) meta.textContent = t.fallback
+    else meta.textContent = t.systems[system]
+  }
+
+  function renderAssets() {
+    if (!release) return
+    all('[data-asset]').forEach(function (a) {
+      var asset = release.assets[a.getAttribute('data-asset')]
+      if (asset) a.href = asset.url
+    })
+    all('[data-file]').forEach(function (el) {
+      var asset = release.assets[el.getAttribute('data-file')]
+      if (asset) el.textContent = asset.name
+    })
+    document.getElementById('footer-version').textContent = ' ' + release.version
+  }
+
+  function setLang(next) {
+    lang = next
+    root.lang = next
+    root.classList.remove('l-fr', 'l-en')
+    root.classList.add('l-' + next)
+    document.title = TEXT[next].title
+    all('.lang button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-lang') === next)) })
+    all('[data-alt-fr]').forEach(function (img) { img.alt = img.getAttribute('data-alt-' + next) })
+    renderHero()
+  }
+
+  function selectTab(os) {
+    all('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === os)) })
+    all('.panel').forEach(function (p) { p.hidden = p.id !== 'panel-' + os })
+  }
+
+  function readCache() {
+    try {
+      var cached = JSON.parse(sessionStorage.getItem(CACHE_KEY))
+      return cached && Date.now() - cached.at < CACHE_MS ? cached.release : null
+    } catch (e) { return null }
+  }
+  function writeCache(value) {
+    try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), release: value })) } catch (e) {}
+  }
+
+  function parseRelease(json) {
+    var assets = {}
+    ;(json.assets || []).forEach(function (a) {
+      Object.keys(PATTERNS).forEach(function (key) {
+        if (PATTERNS[key].test(a.name)) assets[key] = { url: a.browser_download_url, name: a.name, size: a.size }
+      })
+    })
+    return { version: String(json.tag_name || '').replace(/^v/, ''), assets: assets }
+  }
+
+  function applyRelease(value) {
+    release = value
+    renderHero()
+    renderAssets()
+  }
+
+  function loadRelease() {
+    var cached = readCache()
+    if (cached) { applyRelease(cached); return }
+    fetch(API, { headers: { Accept: 'application/vnd.github+json' } })
+      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json() })
+      .then(function (json) { var value = parseRelease(json); writeCache(value); applyRelease(value) })
+      .catch(function () { releaseFailed = true; renderHero() })
+  }
+
+  all('.lang button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var next = b.getAttribute('data-lang')
+      try { localStorage.setItem('cadenza-lang', next) } catch (e) {}
+      setLang(next)
+    })
+  })
+  all('[data-tab]').forEach(function (b) {
+    b.addEventListener('click', function () { selectTab(b.getAttribute('data-tab')) })
+  })
+
+  // After a download starts, say what comes next: the warning is where a
+  // first-time user is most likely to give up.
+  function onDownload(os) {
+    if (!release || !release.assets[os]) return // went to the releases page instead
+    document.getElementById('notice').hidden = false
+    selectTab(os)
+  }
+  document.getElementById('dl').addEventListener('click', function () { onDownload(system) })
+  all('#others [data-asset]').forEach(function (a) {
+    a.addEventListener('click', function () { onDownload(a.getAttribute('data-os')) })
+  })
+
+  document.getElementById('others').hidden = false
+  all('#others [data-os="' + system + '"]').forEach(function (a) { a.style.display = 'none' })
+  if (system === 'mobile') document.getElementById('mobile-note').hidden = false
+  selectTab(isComputer ? system : 'windows')
+  setLang(lang)
+  loadRelease()
+})()
+</script>
+</body>
+</html>

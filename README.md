@@ -7,7 +7,7 @@ for a single user: no account, no server, your projects stay on your computer.
 fonctionne en local, pour une personne : pas de compte, pas de serveur, vos projets restent sur
 votre ordinateur.*
 
-**[⬇ Download Cadenza / Télécharger Cadenza](https://github.com/seelebrn/cadenza/releases/latest)** · [Install guide (English)](#install-cadenza) · [Guide d'installation (français)](#installer-cadenza) · [Guide de démarrage (diaporama, français)](docs/Cadenza-guide-de-demarrage.pptx)
+**[⬇ Download Cadenza / Télécharger Cadenza](https://seelebrn.github.io/cadenza/)** (website / site web) · [All files / Tous les fichiers](https://github.com/seelebrn/cadenza/releases/latest) · [Install guide (English)](#install-cadenza) · [Guide d'installation (français)](#installer-cadenza) · [Guide de démarrage (diaporama, français)](docs/Cadenza-guide-de-demarrage.pptx)
 
 > [!IMPORTANT]
 > **A security warning at first launch is expected.** Windows says *"Windows protected your PC"*:

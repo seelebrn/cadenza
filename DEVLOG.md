@@ -4096,3 +4096,15 @@ through a chain of attempts (`labelAttempts`): two lines, three lines, one size 
 smaller (min 10px), then two lines cut with an ellipsis if at least six characters survive. Named
 clusters: 136 -> 146 of 148 at 21%, 88 -> 105 at 16%, 44 -> 54 at 12%, still with no overlaps.
 
+### A website for first-time users (2026-11-09)
+
+The user worried that someone new to GitHub would get lost on the repository page. GitHub Pages was
+already serving the repo root, which rendered the README, so a root `index.html` replaces it there
+with no settings change. One static page, no external fonts or scripts, French/English by browser
+language with a toggle. The download button detects the system and reads the latest release from the
+GitHub API (cached for the session: anonymous calls are limited to 60 an hour per address, which a
+campus network could reach); if the call fails, links fall back to the Releases page with a line
+saying what to pick there. Asset names carry the version, so `releases/latest/download/<name>` could
+not be used without renaming the build outputs. Checked in headless Chrome with emulated Windows,
+Mac, Linux and phone, dark mode, the language toggle and a blocked API.
+

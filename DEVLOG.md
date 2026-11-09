@@ -4084,3 +4084,15 @@ left out, since it would move existing boards again):
 Verified in the app: at 6% the test project shows 21 names, none overlapping, no truncation except
 on two-line wraps; no card is rendered in map mode (148 frames, 0 cards); Fit view goes from 8% to 9%
 with the help folded. 551 tests pass.
+
+### Missing names at mid zoom (2026-10-09)
+
+The user noticed that at 19%, some cluster names showed and others did not. Between `MAP_ZOOM` and
+`OVERVIEW_LABEL_ZOOM` the clusters' own headers are hidden, and `overviewLabels` dropped a nested
+name that did not fit whole on two lines — so those clusters were anonymous. Listing the unnamed
+frames in the app at 21%/16%/12% showed mostly the six analytic questions (long names in 160px-wide
+frames) and small sub-clusters whose name was pushed below their parent's. A nested name now goes
+through a chain of attempts (`labelAttempts`): two lines, three lines, one size smaller, two sizes
+smaller (min 10px), then two lines cut with an ellipsis if at least six characters survive. Named
+clusters: 136 -> 146 of 148 at 21%, 88 -> 105 at 16%, 44 -> 54 at 12%, still with no overlaps.
+

@@ -52,6 +52,18 @@ describe('layoutOverviewLabels', () => {
     expect(labels.map((l) => l.id)).toEqual(['root'])
   })
 
+  it('tries three lines and a smaller size before cutting a nested name', () => {
+    const name = 'Comment le collectif compense-t-il les manques de l’organisation ?'
+    // 160x60 on screen: too narrow for the whole name even on three lines.
+    const [label] = layoutOverviewLabels([box('q', 0, 0, 1600, 600, 1, name)], 0.1, measure)
+    expect(label).toBeDefined()
+    expect(label.fontPx).toBeLessThan(14)
+    expect(label.lines.join(' ').endsWith('…')).toBe(true)
+    // Roomier: shown whole, on up to three lines.
+    const [whole] = layoutOverviewLabels([box('q', 0, 0, 2000, 1000, 1, name)], 0.1, measure)
+    expect(whole.lines.join(' ')).toBe(name)
+  })
+
   it('always names a top-level cluster, even a small one', () => {
     const labels = layoutOverviewLabels([box('root', 0, 0, 200, 200, 0, 'Notes de terrain')], 0.05, measure)
     expect(labels.map((l) => l.id)).toEqual(['root'])

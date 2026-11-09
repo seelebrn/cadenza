@@ -3,10 +3,11 @@
  * (below OVERVIEW_LABEL_ZOOM), where the clusters' own headers are too
  * small to read. Every cluster whose name fits inside it on screen gets
  * one, whatever its depth: the more the board is zoomed in, the deeper the
- * names that show. A name wraps onto at most two lines rather than being
- * cut at the frame's width, and a name that would land on one already
- * placed (a child's on its parent's, at the same top-left corner) slides
- * down below it, or is left out if its cluster has no room for it there.
+ * names that show. A name wraps (two or three lines, then a smaller size)
+ * rather than being cut at the frame's width, and is cut with an ellipsis
+ * only as a last resort. A name that would land on one already placed (a
+ * child's on its parent's, at the same top-left corner) slides down below
+ * it, or is left out if its cluster has no room for it there.
  *
  * Pure — sizes are worked out in screen pixels from `measure`, which gives
  * a string's on-screen width at a font size; positions come back in canvas
@@ -143,8 +144,34 @@ export function layoutOverviewLabels(
   return labels
 }
 
-/** A top-level name is tried at smaller sizes before being left out. */
-const ROOT_FONT_STEPS = [0, 4, 6]
+interface LabelAttempt {
+  fontPx: number
+  maxLines: number
+  /** Whether the name may be cut with an ellipsis. */
+  allowCut: boolean
+}
+
+/** What to try, in order, before leaving a name out. A top-level name: two
+ * lines at shrinking sizes, cut if it must be. A nested one: whole first —
+ * on two lines, then three, then smaller — and only then cut, which still
+ * says more than no name at all (the clusters' own headers are hidden at
+ * these zooms, so a left-out name means an anonymous cluster). */
+function labelAttempts(depth: number): LabelAttempt[] {
+  const base = fontPxForDepth(depth)
+  if (depth === 0) return [18, 14, 12].map((fontPx) => ({ fontPx, maxLines: MAX_LINES, allowCut: true }))
+  const small = Math.max(MIN_FONT_PX, base - 2)
+  return [
+    { fontPx: base, maxLines: 2, allowCut: false },
+    { fontPx: base, maxLines: 3, allowCut: false },
+    { fontPx: Math.max(MIN_FONT_PX, base - 1), maxLines: 3, allowCut: false },
+    { fontPx: small, maxLines: 3, allowCut: false },
+    { fontPx: small, maxLines: 2, allowCut: true }
+  ]
+}
+
+const MIN_FONT_PX = 10
+/** A cut name must keep at least this many characters to be worth showing. */
+const MIN_CUT_CHARS = 6
 
 function placeLabel(input: OverviewLabelInput, zoom: number, measure: MeasureText, placed: Rect[]): OverviewLabel | null {
   const isRoot = input.depth === 0
@@ -156,17 +183,15 @@ function placeLabel(input: OverviewLabelInput, zoom: number, measure: MeasureTex
   const bottomLimit = sy + sh - inset
   const left = sx + inset
 
-  for (const step of isRoot ? ROOT_FONT_STEPS : [0]) {
-    const fontPx = fontPxForDepth(input.depth) - step
+  for (const { fontPx, maxLines, allowCut } of labelAttempts(input.depth)) {
     const boxMaxWidth = isRoot ? Math.max(sw, ROOT_MIN_WIDTH_PX) : sw - 2 * inset
     const textMaxWidth = boxMaxWidth - 2 * OVERVIEW_PAD_X
     if (textMaxWidth < fontPx * 2.5) continue
 
-    const { lines, complete } = wrapText(input.text, textMaxWidth, fontPx, measure)
-    // A nested name is shown whole or not at all (zooming in shows it); a
-    // top-level one may be cut.
-    if (!isRoot && !complete) continue
+    const { lines, complete } = wrapText(input.text, textMaxWidth, fontPx, measure, maxLines)
+    if (!complete && !allowCut) continue
     if (lines.length === 0 || lines[0] === '') continue
+    if (!complete && !isRoot && lines.join(' ').replace('…', '').trim().length < MIN_CUT_CHARS) continue
 
     const detailFontPx = Math.max(10, fontPx - 4)
     let detail = input.detail

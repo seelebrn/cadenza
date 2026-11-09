@@ -6,6 +6,15 @@ short, user-facing version — see `DEVLOG.md` for the full narrated development
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-09
+
+### Fixed
+- **Cluster names missing between 15% and 35% zoom.** A nested cluster's name that did not fit whole
+  on two lines was left out, and the cluster's own header is hidden at those zooms, so some clusters
+  (long question names especially) had no name at all. The name now tries three lines, then a smaller
+  size, and is cut with "…" only as a last resort. On the 500-code test project, 146 of 148 clusters
+  are named at 21% (was 136), 105 at 16% (was 88).
+
 ## [0.8.1] - 2026-10-09
 
 ### Changed
